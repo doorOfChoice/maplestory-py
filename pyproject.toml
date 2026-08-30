@@ -1,0 +1,16 @@
+[project]
+name = "maplestory-tools"
+version = "0.1.0"
+description = "Tools for MapleStory character export and WZ debugging"
+requires-python = ">=3.12"
+dependencies = [
+    "PySide6",
+    "numpy",
+    "pillow",
+    "pycryptodome>=3.23.0",
+    "pygame>=2.6.1",
+]
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple"
+default = true
