@@ -25,6 +25,7 @@ from .npc import NPC
 from .combat import Combat
 from .combat import DamageNumber
 from . import dialogues
+from . import travel
 from .effects import Effect
 from .jobs import JOBS, can_advance
 from .ui import UI
@@ -173,10 +174,14 @@ class Game:
         self._quest_flow = None
         self._portal_cooldown = 0.0
         self._portal_pulse = 0.0
+        self._banner: Optional[Tuple[str, str]] = None
+        self._banner_timer = 0.0
         self.spawn_grace = settings.SPAWN_GRACE
         self.fade = 1.0        # 开屏进入游戏时黑场淡入
 
         self.audio.play_bgm()
+        self._show_banner()
+        self._preload_neighbors()
         if self.save_data:
             self.ui.show_dialog("读取存档", [
                 f"欢迎回来，Lv.{self.player.level} 冒险者！",
@@ -201,6 +206,7 @@ class Game:
     def _spawn_life(self) -> None:
         self.monsters = [Monster(self.assets, d, i, self.physics)
                          for i, d in enumerate(self._life_mobs)]
+        self._respawn_queue = []      # [(剩余秒, life_data)]：切图/重生时清空
         self.npcs = [NPC(self.assets, d, i)
                      for i, d in enumerate(self._life_npcs)]
         # 导师注入：原版赫麗娜在 100000201（不可达），在出生图额外生成一个实例
@@ -209,6 +215,20 @@ class Game:
                 "id": settings.BOWMAN_TRAINER_NPC,
                 "x": settings.TRAINER_SPAWN[0],
                 "cy": settings.TRAINER_SPAWN[1]}, len(self.npcs)))
+
+    def _tick_respawns(self, dt: float) -> None:
+        """mobTime>0 的怪死亡后按计时原地重生；-1 仅切图重生，0 永不重生。"""
+        if not self._respawn_queue:
+            return
+        still: List[Tuple[float, dict]] = []
+        for remaining, data in self._respawn_queue:
+            remaining -= dt
+            if remaining <= 0:
+                self.monsters.append(
+                    Monster(self.assets, data, len(self.monsters), self.physics))
+            else:
+                still.append((remaining, data))
+        self._respawn_queue = still
 
     # ── 输入 ───────────────────────────────────────────────────────
     def _handle_input(self) -> None:
@@ -540,33 +560,33 @@ class Game:
         self.combat.arrows.clear()
 
     # ── 传送门 / 地图切换 ──────────────────────────────────────────
+    def _usable_portals(self) -> List[dict]:
+        """当前地图可通行的传送门（WZ 数据驱动，含 trigger / target_id）。"""
+        return travel.usable_portals(self.assets.portals,
+                                     self.assets.map_renderer.has_map)
+
     def _portal_at_feet(self) -> Optional[dict]:
-        """回传玩家脚底重叠的白名单 type-2 传送门（供绘制提示 / 触发判断）。"""
+        """回传玩家脚底重叠、且此刻可触发的传送门（按↑门需 up 键，碰撞门即时）。"""
         feet = self.player.y + settings.FEET_OFFSET
         pr = pygame.Rect(int(self.player.x - 12), int(feet - 12), 24, 24)
-        for p in self.assets.portals:
-            if p.get("type") != 2:
-                continue
-            tm = str(p.get("targetMap") or "")
-            if tm not in settings.TRAVEL_MAPS:
-                continue
+        for p in self._usable_portals():
             prt = pygame.Rect(int(p["x"]) - 14, int(p["y"]) - 14, 28, 28)
             if pr.colliderect(prt):
                 return p
         return None
 
     def _check_portal(self, dt: float) -> bool:
-        """玩家站在 type-2 传送门上按住 ↑ 键才切图（与原版一致）。返回是否切图。"""
+        """站在可通行传送门上触发切图：按↑门需 up 键，碰撞门碰到即走。返回是否切图。"""
         if self._portal_cooldown > 0:
             self._portal_cooldown -= dt
             return False
-        if not self.keys.up:
-            return False
         p = self._portal_at_feet()
-        if p is not None:
-            self._enter_map(str(p["targetMap"]), p.get("targetName"))
-            return True
-        return False
+        if p is None:
+            return False
+        if p["trigger"] == "up" and not self.keys.up:
+            return False
+        self._enter_map(p["target_id"], p.get("targetName"))
+        return True
 
     def _enter_map(self, map_id: str, portal_name: Optional[str]) -> None:
         """切换到目标地图：后台渲染地图，主线程显示加载画面。"""
@@ -613,10 +633,24 @@ class Game:
         self._portal_cooldown = 0.8
 
         self.audio.play_bgm()
-        self.panels.flash(self.assets.map_name())
+        self._show_banner()
+        self._preload_neighbors()
         self._loading = False
         self._pending_map = None
         self.fade = 1.0        # 黑场淡入新地图
+
+    def _show_banner(self) -> None:
+        """切图横幅：主标题地图名 + 副标题街道名，随 fade 淡入淡出。"""
+        name, street = self.assets.map_banner()
+        self._banner = (name, street)
+        self._banner_timer = settings.BANNER_TIME
+
+    def _preload_neighbors(self) -> None:
+        """把当前图所有可通行传送门的目标图后台预热进 LRU 缓存，下次切图秒开。"""
+        targets = {p["target_id"] for p in self._usable_portals()}
+        targets.discard(self.assets.map_id)
+        if targets:
+            self.assets.preload_neighbors(targets)
 
     def _portal_position(self, portal_name: Optional[str]):
         """目标地图出生点：优先指定 portal，其次 sp 入口。"""
@@ -640,6 +674,8 @@ class Game:
     # ── 更新 ───────────────────────────────────────────────────────
     def _update(self, dt: float) -> None:
         self._portal_pulse += dt
+        if self._banner_timer > 0:
+            self._banner_timer -= dt
         # 黑场淡入计时（切图 / 重生后用真实 dt 递减）
         if self.fade > 0.0:
             self.fade = max(0.0, self.fade - dt / settings.FADE_TIME)
@@ -714,9 +750,16 @@ class Game:
         for mob in self.monsters:
             mob.update(dt, self.player.x, self.player.y, self.hits, self.audio,
                        no_aggro=no_aggro)
-        # 移除已消失的怪物
-        self.monsters = [m for m in self.monsters
-                         if not (m.dead and m.remove_after <= 0)]
+        # 移除已消失的怪物；mobTime>0 者排入原地重生队列
+        alive: List[Monster] = []
+        for m in self.monsters:
+            if m.dead and m.remove_after <= 0:
+                if m.mob_time > 0:
+                    self._respawn_queue.append((m.mob_time / 1000.0, m.life_data))
+            else:
+                alive.append(m)
+        self.monsters = alive
+        self._tick_respawns(dt)
         self.combat.apply_mob_hits(self.player, self.hits)
 
         # 飞行中的箭（在怪物移动之后结算，命中数受 mobCount 限制）
@@ -787,7 +830,38 @@ class Game:
             veil.fill((0, 0, 0, alpha))
             self.canvas.blit(veil, (0, 0))
 
+        # 切图横幅（画在黑场之上，淡入淡出）
+        self._draw_banner(self.canvas)
+
         self._present()
+
+    def _draw_banner(self, surface) -> None:
+        """切图横幅：地图名（大）+ 街道名（小），首尾各 0.5s 淡入淡出。"""
+        if self._banner_timer <= 0 or self._banner is None:
+            return
+        name, street = self._banner
+        total = settings.BANNER_TIME
+        elapsed = total - self._banner_timer
+        edge = 0.5
+        if elapsed < edge:
+            a = elapsed / edge
+        elif self._banner_timer < edge:
+            a = self._banner_timer / edge
+        else:
+            a = 1.0
+        alpha = max(0, min(255, int(255 * a)))
+        cx = settings.VIEW_W // 2
+        cy = settings.VIEW_H // 3
+        big = load_cjk_font(52)
+        small = load_cjk_font(26)
+        title = render_text(big, name, (255, 246, 214))
+        title.set_alpha(alpha)
+        tr = title.get_rect(center=(cx, cy))
+        surface.blit(title, tr)
+        if street:
+            sub = render_text(small, street, (210, 210, 220))
+            sub.set_alpha(alpha)
+            surface.blit(sub, sub.get_rect(center=(cx, cy + 44)))
 
     def _present(self) -> None:
         """把 canvas 呈现到窗口。scale=1 时直接 blit（省去每帧全画面复制）。"""
@@ -816,16 +890,14 @@ class Game:
         return Animation.frame_at(frames, t * 1000.0)
 
     def _draw_portals(self, surface) -> None:
-        """画传送门：白名单内的 type-2 门用 WZ 原版 8 帧动画。"""
+        """画传送门：可通行的按↑门用 WZ 原版 8 帧动画；碰撞门不画（与原版一致）。"""
         frames = self.assets.portal_frames()
         if not frames:
             return
         idx = self._portal_frame_index(frames, self._portal_pulse)
-        for p in self.assets.portals:
-            if p.get("type") != 2:
-                continue
-            tm = str(p.get("targetMap") or "")
-            if tm not in settings.TRAVEL_MAPS:
+        standing = self._portal_at_feet()
+        for p in self._usable_portals():
+            if p.get("trigger") != "up":
                 continue
             sx, sy = self.camera.to_screen(p["x"], p["y"])
             surf, origin, _ = frames[idx]
@@ -834,7 +906,7 @@ class Game:
             rect.bottom = int(sy) + 2
             surface.blit(surf, rect.topleft)
             # 玩家站在传送门上时画金色高亮光环
-            if self._portal_at_feet() is p:
+            if standing is not None and standing["name"] == p["name"]:
                 pygame.draw.ellipse(surface, (255, 255, 140, 220),
                                     (rect.centerx - 18, rect.bottom - 10, 36, 14), 3)
 
