@@ -22,6 +22,11 @@ class Monster:
         self.assets = assets
         self.mob_id = str(int(data["id"]))
         self.index = index
+        self.life_data = data                       # 原始 life 记录（重生用）
+        try:
+            self.mob_time = int(data.get("mobTime"))   # 毫秒；-1=仅切图重生，0=不重生
+        except (TypeError, ValueError):
+            self.mob_time = -1
         self.x = float(data["x"])
         self.cy = float(data.get("cy") or data["y"])   # 地面接触 y
         self.rx0 = float(data["rx0"]) if data.get("rx0") is not None else float(data["x"])

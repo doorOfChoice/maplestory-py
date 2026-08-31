@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import io
 import os
+import queue
 import threading
 import traceback
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -76,9 +78,21 @@ class Assets:
         self._icon_cache: Dict[str, Any] = {}
         self._item_wz_obj = None   # Item.wz 较大，首次取图标时再打开
 
-        # 后台线程加载地图
-        self._load_thread: Optional[threading.Thread] = None
+        # 后台加载：单 loader 线程 + 优先级队列（真实切图 0 优先于预热 1）。
+        # compose/describe 共用 MapRenderer 内部锁，多线程并发只会互相阻塞，
+        # 故所有渲染收敛到一个线程，避免抢锁与 shutdown 期的 use-after-close。
+        self._tasks: "queue.PriorityQueue" = queue.PriorityQueue()
+        self._loader: Optional[threading.Thread] = None
+        self._loader_lock = threading.Lock()
+        self._pending: set = set()
+        self._seq = 0
+        self._closed = False
         self._load_result: Optional[Dict] = None
+
+        # 整图 LRU 缓存：map_id → {desc, img(PIL), bgm, px}，跨图往返免重渲染
+        self._map_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        self._map_cache_px = 0
+        self._cache_lock = threading.Lock()
 
         # 地图静态数据
         self.load_map(map_id)
@@ -155,57 +169,142 @@ class Assets:
     def load_map(self, map_id: str) -> None:
         """切换到另一张地图：重新读取描述 + 整图 Surface（WZ 句柄保持打开）。"""
         self.map_id = map_id
-        self.map_desc = self.map_renderer.describe(map_id)
+        entry = self._cache_get(map_id)
+        if entry is not None:
+            self.map_desc = entry["desc"]
+        else:
+            self.map_desc = self.map_renderer.describe(map_id)
         self.bounds = self.map_desc["bounds"]
         self.footholds = self.map_desc["footholds"]
         self.ropes = self.map_desc["ropes"]
         self.portals = self.map_desc["portals"]
         self.life = self.map_desc["life"]
-        self.map_surface = self._render_map_surface()
+        if entry is not None and entry.get("img") is not None:
+            self.map_surface = pil_to_surface(entry["img"])
+        else:
+            img = self._compose_map(map_id)
+            self.map_surface = pil_to_surface(img)
+            self._cache_put(map_id, self.map_desc, img,
+                            self._bgm_path_of(map_id, self.map_desc))
         self.map_width = self.bounds["width"]
         self.map_height = self.bounds["height"]
 
-    # ── 异步加载 ─────────────────────────────────────────────────────
-    def start_load_map(self, map_id: str) -> None:
-        """在后台线程中渲染地图 PIL Image 并获取描述。"""
-        self._load_thread = threading.Thread(
-            target=self._load_map_worker, args=(map_id,), daemon=True)
-        self._load_result = None
-        self._load_thread.start()
+    # ── 整图 LRU 缓存 ───────────────────────────────────────────────
+    def _cache_get(self, map_id: str) -> Optional[Dict[str, Any]]:
+        """命中则移到最近使用并返回缓存项（含 desc/img/bgm）。"""
+        with self._cache_lock:
+            entry = self._map_cache.get(map_id)
+            if entry is not None:
+                self._map_cache.move_to_end(map_id)
+            return entry
 
-    def _load_map_worker(self, map_id: str) -> None:
-        """后台线程：渲染地图，完成后设 _load_result。"""
+    def _cache_put(self, map_id: str, desc: Dict, img, bgm: str) -> None:
+        """写入整图缓存，并按像素预算淘汰最久未用项（当前图不淘汰）。"""
+        px = int(desc["bounds"]["width"]) * int(desc["bounds"]["height"])
+        with self._cache_lock:
+            old = self._map_cache.pop(map_id, None)
+            if old is not None:
+                self._map_cache_px -= old["px"]
+            self._map_cache[map_id] = {"desc": desc, "img": img,
+                                       "bgm": bgm, "px": px}
+            self._map_cache_px += px
+            while (self._map_cache_px > settings.MAP_CACHE_BUDGET_PX
+                   and len(self._map_cache) > 1):
+                victim = next(iter(self._map_cache))
+                if victim == self.map_id:
+                    # 当前图排到最前，改淘汰次旧者
+                    victim = next(iter(list(self._map_cache)[1:]))
+                dropped = self._map_cache.pop(victim)
+                self._map_cache_px -= dropped["px"]
+
+    def _compose_map(self, map_id: str):
+        """渲染整图为 RGBA PIL Image。"""
+        img = self.map_renderer.compose(
+            map_id, scale=1.0, time_ms=0,
+            life=False, reactors=False, portals=False,
+        )
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+        return img
+
+    def _bgm_path_of(self, map_id: str, desc: Dict) -> str:
         try:
-            desc = self.map_renderer.describe(map_id)
-            img = self.map_renderer.compose(
-                map_id, scale=1.0, time_ms=0,
-                life=False, reactors=False, portals=False,
-            )
-            if img.mode != "RGBA":
-                img = img.convert("RGBA")
-            bgm_path = ""
+            root, _src = self.map_renderer._map_root(map_id)
+            node = root.get("info/bgm")
+            if node is not None:
+                return str(getattr(node, "value", "") or "")
+        except Exception:
+            pass
+        return str(desc.get("bgm") or "")
+
+    # ── 后台加载（单 loader 线程 + 优先级队列）───────────────────────
+    def _enqueue(self, map_id: str, priority: int, is_real: bool) -> None:
+        # 预热可去重；真实切图必须始终入队（否则被同图预热任务吞掉致卡加载）
+        if not is_real:
+            if map_id in self._pending:
+                return
+            self._pending.add(map_id)
+        elif map_id in self._pending:
+            self._pending.discard(map_id)   # 升级为真实加载
+        self._seq += 1
+        self._tasks.put((priority, self._seq, map_id, is_real))
+        self._ensure_loader()
+
+    def _ensure_loader(self) -> None:
+        with self._loader_lock:
+            if self._closed:
+                return
+            if self._loader is None or not self._loader.is_alive():
+                self._loader = threading.Thread(target=self._loader_loop,
+                                                daemon=True)
+                self._loader.start()
+
+    def _loader_loop(self) -> None:
+        while not self._closed:
             try:
-                root, _src = self.map_renderer._map_root(map_id)
-                node = root.get("info/bgm")
-                if node is not None:
-                    bgm_path = str(getattr(node, "value", "") or "")
-                else:
-                    bgm_path = str(desc.get("bgm") or "")
-            except Exception:
-                bgm_path = str(desc.get("bgm") or "")
-            self._load_result = {
-                "map_id": map_id,
-                "desc": desc,
-                "img": img,
-                "bgm_path": bgm_path,
-            }
+                _prio, _seq, map_id, is_real = self._tasks.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            self._pending.discard(map_id)
+            self._render_task(map_id, is_real)
+
+    def _render_task(self, map_id: str, is_real: bool) -> None:
+        """loader 线程内执行：命中缓存直接用，否则 describe+compose 入缓存。"""
+        try:
+            entry = self._cache_get(map_id)
+            if entry is not None and entry.get("img") is not None:
+                if is_real:
+                    self._load_result = {
+                        "map_id": map_id, "desc": entry["desc"],
+                        "img": entry["img"], "bgm_path": entry["bgm"]}
+                return
+            desc = entry["desc"] if entry is not None \
+                else self.map_renderer.describe(map_id)
+            img = self._compose_map(map_id)
+            bgm = self._bgm_path_of(map_id, desc)
+            self._cache_put(map_id, desc, img, bgm)
+            if is_real:
+                self._load_result = {"map_id": map_id, "desc": desc,
+                                     "img": img, "bgm_path": bgm}
         except Exception as e:
             traceback.print_exc()
-            self._load_result = {"error": e}
+            if is_real:
+                self._load_result = {"error": e}
 
-    @property
-    def is_loading(self) -> bool:
-        return self._load_thread is not None and self._load_thread.is_alive()
+    def preload_map(self, map_id: str) -> None:
+        """把地图加入预热队列（低优先级，不阻塞真实切图）。"""
+        if map_id == self.map_id or self._cache_get(map_id) is not None:
+            return
+        self._enqueue(map_id, priority=1, is_real=False)
+
+    def preload_neighbors(self, map_ids) -> None:
+        for mid in map_ids:
+            self.preload_map(mid)
+
+    def start_load_map(self, map_id: str) -> None:
+        """请求真实切图：高优先级入队，主线程轮询 is_load_done。"""
+        self._load_result = None
+        self._enqueue(map_id, priority=0, is_real=True)
 
     @property
     def is_load_done(self) -> bool:
@@ -217,7 +316,6 @@ class Assets:
         if result is None:
             return ""
         if "error" in result:
-            self._load_thread = None
             self._load_result = None
             raise result["error"]
         self.map_id = result["map_id"]
@@ -231,21 +329,10 @@ class Assets:
         self.map_width = self.bounds["width"]
         self.map_height = self.bounds["height"]
         self.map_surface = pil_to_surface(result["img"])
-        self._load_thread = None
         self._load_result = None
         return result["bgm_path"]
 
     # ── 地图 ────────────────────────────────────────────────────────
-    def _render_map_surface(self) -> pygame.Surface:
-        img = self.map_renderer.compose(
-            self.map_id, scale=1.0, time_ms=0,
-            life=False, reactors=False, portals=False,
-        )
-        if img.mode != "RGBA":
-            img = img.convert("RGBA")
-        surf = pygame.image.fromstring(img.tobytes(), img.size, "RGBA")
-        return surf.convert_alpha()
-
     def world_to_image(self, x: float, y: float) -> Tuple[float, float]:
         """世界坐标 → 地图 Surface 像素坐标。"""
         return (x - self.bounds["left"], y - self.bounds["top"])
@@ -478,6 +565,12 @@ class Assets:
     # ── 名字 ────────────────────────────────────────────────────────
     def map_name(self) -> str:
         return to_simplified(self.map_desc.get("name") or f"Map {self.map_id}")
+
+    def map_banner(self) -> Tuple[str, str]:
+        """切图横幅：(主标题=地图名, 副标题=街道名)。数据来自 String.wz Map.img。"""
+        name = to_simplified(self.map_desc.get("name") or f"Map {self.map_id}")
+        street = to_simplified(self.map_desc.get("street") or "")
+        return (name, street)
 
     def minimap_surface(self) -> Optional[pygame.Surface]:
         """官方小地图 canvas（整图缩略图），无则返回 None。缓存。"""
@@ -897,6 +990,10 @@ class Assets:
         return frames
 
     def close(self) -> None:
+        self._closed = True
+        loader = self._loader
+        if loader is not None and loader.is_alive():
+            loader.join(timeout=3.0)   # 等在途 compose 收尾，再关句柄
         for wz in self.wz.values():
             try:
                 wz.close()
