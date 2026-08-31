@@ -20,7 +20,7 @@ v113 全量还原（已与使用者确认选方案 A）。状态面板 UI **必�
 - 玩家→怪物伤害公式（武器 incPAD × 主属性权重 + 副属性/10，技能倍率，
   随机 95%~105%，怪物 PDD 按 LUK 减免）
 - 装备穿戴门控（reqLevel / reqSTR / reqDEX / reqINT / reqLUK）
-- 状态面板（S 键）：`UIWindow.img/Stat` 原版底图 + BtApUp 四态按钮 + BtAuto
+- 状态面板（B 键）：`UIWindow.img/Stat` 原版底图 + BtApUp 四态按钮 + BtAuto
 - 存档 v2→v3（新增 stats/ap，旧档按职业自动分配迁移）
 - 转职奖励武器 1452000 → 1452002 木弓（原短弓需求 Lv25/DEX80，Lv10 无法装备）
 
@@ -82,7 +82,7 @@ reqLevel/reqSTR/reqDEX/reqINT/reqLUK，返回缺失提示（如「敏捷不足�
 | `game/inventory.py` | `stat_bonus()`（装备四维/hp/mp 词条汇总） |
 | `game/save_manager.py` | v3：存 stats/ap；v2→v3 自动分配迁移 |
 | `game/panels.py` | 状态窗口（原版素材 + fallback 自绘） |
-| `game/game.py` | S 键开关状态窗（不与「下跳」冲突：按住空格时 S 仍下跳） |
+| `game/game.py` | B 键开关状态窗（S 为 WASD 下键，避免冲突） |
 
 ## 7. 测试（pytest，纯函数用合成数据，不依赖 WZ）
 

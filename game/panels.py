@@ -4,7 +4,7 @@
   页签用 Item/Tab/enabled|disabled 0..4（0=装备 1=消耗 3=其他，带原版汉字），
   底部页脚画 Item/BtCoin + 金币数。
 · 装备栏窗口：UIWindow/Equip/backgrnd 纸娃娃底板，按原版凹槽位置放装备图标。
-· 状态窗（S 键）：UIWindow/Stat/backgrnd，四维行右端嵌 BtApUp「+」按钮，
+· 状态窗（B 键）：UIWindow/Stat/backgrnd，四维行右端嵌 BtApUp「+」按钮，
   底部 BtAuto 一键分配；穿戴需求（reqLevel/四维）在点击装备时门控。
 · 技能窗口：UIWindow/Skill/backgrnd，升级按钮用 Skill/BtSpUp。
 · 快捷栏：UIWindow/ShortCut/backgrnd 竖条，技能图标嵌在格内。
@@ -782,7 +782,7 @@ class Panels:
                     ty += 16
             ty += 8
 
-    # ── 状态窗（UIWindow/Stat/backgrnd，S 键）────────────────────────
+    # ── 状态窗（UIWindow/Stat/backgrnd，B 键）────────────────────────
     def _draw_stat(self, surface, player) -> None:
         fs = self.ui.font_small
         vw, vh = surface.get_width(), surface.get_height()

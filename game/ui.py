@@ -237,7 +237,7 @@ class UI:
         # 操作提示（左上）
         hint = render_text(
             self.font_small,
-            "I 道具栏  K 技能栏  S 状态  F 喝药  数字键 技能  J 攻击", (255, 255, 255))
+            "I 道具栏  K 技能栏  B 状态  F 喝药  数字键 技能  J 攻击", (255, 255, 255))
         plate = pygame.Surface((hint.get_width() + 16, 20), pygame.SRCALPHA)
         pygame.draw.rect(plate, (0, 0, 0, 120), (0, 0, plate.get_width(), 20),
                          border_radius=6)
