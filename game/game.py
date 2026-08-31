@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import os
+import threading
+import traceback
 from typing import List, Optional, Tuple
 
 import pygame
@@ -28,6 +30,8 @@ from .minimap import MiniMap
 from .panels import Panels
 from .quests import load_quest_defs, render_markup
 from .save_manager import SaveManager
+from .splash import Splash
+from .fonts import load_cjk_font
 
 # 输入对象（把 pygame 按键抽象成 Player.update 需要的形状）
 class _Keys:
@@ -55,72 +59,104 @@ class Game:
         self.clock = pygame.time.Clock()
         self.running = True
 
-        # 存档：读本地 save.json；存在则继续，否则新游戏
+        # 存档概览（轻量、先读），世界构建在后台线程完成
         self.save_manager = SaveManager(settings.SAVE_FILE)
         self.save_data = self.save_manager.load()
         self._save_timer = 0.0
         start_map = (self.save_data["player"]["map_id"]
                      if self.save_data else settings.MAP_ID)
 
-        # 资源
-        self.assets = Assets(start_map, settings.REGION)
-        self.physics = Physics(self.assets.footholds, self.assets.ropes,
-                               bounds=self.assets.bounds)
-        self.camera = Camera(self.assets.map_width, self.assets.map_height,
-                             self.assets.bounds["left"], self.assets.bounds["top"])
-        self.audio = Audio(self.assets, self.assets.map_bgm_path())
-        self.combat = Combat(self.assets)
-        self.ui = UI(self.assets)
-        self.minimap = MiniMap(
-            self.assets.footholds, self.assets.ropes, self.assets.portals,
-            self.assets.bounds, self.assets.map_width, self.assets.map_height,
-            mag=(self.assets.map_desc.get("minimap") or {}).get("mag"),
-            canvas=self.assets.minimap_surface(),
-            map_surface=self.assets.map_surface)
-        self.panels = Panels(self.ui, self.assets)
-        self.panels._quest_goal_lines = self._quest_extra_goal_lines
+        # 开屏：初始化只铺轻量状态，重活全部交给 _build_world 后台线程。
+        # 期间主循环只画 Splash，等 world_ready 后一次性接管。
+        self.splash = Splash()
+        self._boot_progress = 0.0
+        self._boot_status = "正在进入冒险岛"
+        self._world_ready = False
 
-        # 任务数据：解析全部 Quest.wz，仅开放精选任务
-        self.quest_defs = load_quest_defs(self.assets)
-        self.quest_defs = {qid: d for qid, d in self.quest_defs.items()
-                           if qid in settings.ENABLED_QUESTS}
-
-        # 出生点：入口 portal（sp，type 0）；读档时用存档位置
-        spawn = self._find_spawn()
-        self.spawn_x = spawn[0]
-        self.spawn_y = spawn[1]
-        if self.save_data:
-            pd = self.save_data["player"]
-            self.spawn_x = float(pd["x"])
-            self.spawn_y = float(pd["y"]) + settings.FEET_OFFSET
-
-        self.player = Player(self.assets, self.spawn_x, self.spawn_y,
-                             quest_defs=self.quest_defs,
-                             save_data=self.save_data)
-        if not self.save_data:
-            self.player.facing_right = True
-        # 落地吸附到出生点的 foothold
-        self._place_player_at_spawn()
-
-        self.monsters: List[Monster] = []
-        self.npcs: List[NPC] = []
-        self.hits: List[dict] = []
-        self._life_mobs = [d for d in self.assets.life if d["type"] == "mob"]
-        self._life_npcs = [d for d in self.assets.life if d["type"] == "npc"]
-        self._spawn_life()
-
-        self.keys = _Keys()
-        self.dead = False
-        self._talk_npc: Optional[NPC] = None
-        self._quest_flow = None          # 任务对话框状态机（见 _begin_quest_flow）
-        self._portal_cooldown = 0.0      # 传送冷却，防止一帧多次切图
-        self._portal_pulse = 0.0         # 传送门脉冲动画相位
-        self.spawn_grace = settings.SPAWN_GRACE
-
-        # 地图切换异步加载状态机
+        # 地图切换异步加载状态机（world 未就绪前不触发）
         self._loading = False
         self._pending_map: Optional[Tuple[str, Optional[str]]] = None
         self._loading_timer = 0.0
+
+        threading.Thread(target=self._build_world, args=(start_map,),
+                         daemon=True).start()
+
+    # ── 后台构建整个世界 ────────────────────────────────────────────
+    def _build_world(self, start_map: str) -> None:
+        """后台线程执行原先 __init__ 的重活：资源 / 任务 / 实体 / 面板。
+
+        逐步推进 _boot_progress 以驱动开屏进度条；任何异常都让世界就绪
+        并抛给主线程（避免游戏卡死在开屏）。
+        """
+        try:
+            self._boot_progress = 0.05
+            self.assets = Assets(start_map, settings.REGION)
+            self._boot_progress = 0.20
+            self.physics = Physics(self.assets.footholds, self.assets.ropes,
+                                   bounds=self.assets.bounds)
+            self.camera = Camera(self.assets.map_width, self.assets.map_height,
+                                 self.assets.bounds["left"],
+                                 self.assets.bounds["top"])
+            self.audio = Audio(self.assets, self.assets.map_bgm_path())
+            self.combat = Combat(self.assets)
+            self.ui = UI(self.assets)
+            self.minimap = MiniMap(
+                self.assets.footholds, self.assets.ropes, self.assets.portals,
+                self.assets.bounds, self.assets.map_width, self.assets.map_height,
+                mag=(self.assets.map_desc.get("minimap") or {}).get("mag"),
+                canvas=self.assets.minimap_surface(),
+                map_surface=self.assets.map_surface)
+
+            self._boot_progress = 0.40
+            self.panels = Panels(self.ui, self.assets)
+            self.panels._quest_goal_lines = self._quest_extra_goal_lines
+
+            # 任务数据：解析全部 Quest.wz，仅开放精选任务
+            self.quest_defs = load_quest_defs(self.assets)
+            self.quest_defs = {qid: d for qid, d in self.quest_defs.items()
+                               if qid in settings.ENABLED_QUESTS}
+
+            # 出生点：入口 portal（sp，type 0）；读档时用存档位置
+            spawn = self._find_spawn()
+            self.spawn_x = spawn[0]
+            self.spawn_y = spawn[1]
+            if self.save_data:
+                pd = self.save_data["player"]
+                self.spawn_x = float(pd["x"])
+                self.spawn_y = float(pd["y"]) + settings.FEET_OFFSET
+
+            self.player = Player(self.assets, self.spawn_x, self.spawn_y,
+                                 quest_defs=self.quest_defs,
+                                 save_data=self.save_data)
+            if not self.save_data:
+                self.player.facing_right = True
+            # 落地吸附到出生点的 foothold
+            self._place_player_at_spawn()
+
+            self._boot_progress = 0.70
+            self.monsters: List[Monster] = []
+            self.npcs: List[NPC] = []
+            self.hits: List[dict] = []
+            self._life_mobs = [d for d in self.assets.life if d["type"] == "mob"]
+            self._life_npcs = [d for d in self.assets.life if d["type"] == "npc"]
+            self._spawn_life()
+
+            self._boot_progress = 1.0
+            self._boot_status = ""
+        except Exception:
+            traceback.print_exc()
+        finally:
+            self._world_ready = True
+
+    def _finish_bootstrap(self) -> None:
+        """世界构建完成后，在主线程恢复轻量状态并播 BGM / 欢迎对话框。"""
+        self.keys = _Keys()
+        self.dead = False
+        self._talk_npc: Optional[NPC] = None
+        self._quest_flow = None
+        self._portal_cooldown = 0.0
+        self._portal_pulse = 0.0
+        self.spawn_grace = settings.SPAWN_GRACE
 
         self.audio.play_bgm()
         if self.save_data:
@@ -677,12 +713,12 @@ class Game:
 
     def _draw_loading(self) -> None:
         self.canvas.fill((0, 0, 0))
-        font = pygame.font.Font(None, 48)
+        font = load_cjk_font(48)
         dots = "." * (int(self._loading_timer * 3) % 4)
         text = font.render(f"载入中{dots}", True, (255, 255, 255))
         rect = text.get_rect(center=(settings.VIEW_W // 2, settings.VIEW_H // 2))
         self.canvas.blit(text, rect)
-        hint_font = pygame.font.Font(None, 24)
+        hint_font = load_cjk_font(24)
         hint = hint_font.render("Loading map...", True, (160, 160, 160))
         hint_rect = hint.get_rect(center=(settings.VIEW_W // 2, settings.VIEW_H // 2 + 50))
         self.canvas.blit(hint, hint_rect)
@@ -745,12 +781,43 @@ class Game:
             # 尖峰帧（切窗回来/卡顿）限步长：单帧重力下陷必须留在
             # grounded_surface 容差内（G*dt^2 < 2.5px），否则会误穿地
             dt = min(self.clock.tick(settings.FPS) / 1000.0, 0.035)
+            if not self._world_ready:
+                self._bootstrap_frame(dt)
+                continue
+            if not getattr(self, "_boot_done", False):
+                self._finish_bootstrap()
+                self._boot_done = True
             self._handle_input()
             self._update(dt)
             self._draw()
         self._shutdown()
 
+    def _bootstrap_frame(self, dt: float) -> None:
+        """开屏阶段：只画动画、响应关闭，等待世界构建完成。"""
+        self.splash.update(dt)
+        # 仅处理关闭事件，避免开屏期间按键被吞或误触发
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+        self._draw_splash()
+
+    def _draw_splash(self) -> None:
+        self.splash.draw(self.canvas, progress=self._boot_progress,
+                         status=self._boot_status)
+        scaled = pygame.transform.scale(
+            self.canvas, (settings.WINDOW_W, settings.WINDOW_H))
+        self.screen.blit(scaled, (0, 0))
+        pygame.display.flip()
+
     def _shutdown(self) -> None:
+        if not self._world_ready or not getattr(self, "_boot_done", False):
+            # 世界未构建完成（开屏中途退出）：只清理已初始化的资源
+            if hasattr(self, "audio"):
+                self.audio.close()
+            if hasattr(self, "assets"):
+                self.assets.close()
+            pygame.quit()
+            return
         try:
             self.save_manager.flush(SaveManager.collect_data(
                 self.player, self.combat, self.assets.map_id))

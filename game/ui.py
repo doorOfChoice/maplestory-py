@@ -19,14 +19,11 @@ from typing import List, Optional, Tuple
 import pygame
 
 from . import settings
+from .fonts import load_cjk_font
 
 
 def _load_font(size: int) -> pygame.font.Font:
-    for name in ("hiraginosansgb", "songti", "arialunicode"):
-        path = pygame.font.match_font(name)
-        if path:
-            return pygame.font.Font(path, size)
-    return pygame.font.Font(None, size)
+    return load_cjk_font(size)
 
 
 # gauge/bar 内三个凹槽的像素范围（x0, x1），填充条在 y=14 起、高 16
