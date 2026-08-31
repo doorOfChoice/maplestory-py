@@ -26,6 +26,26 @@ def _load_font(size: int) -> pygame.font.Font:
     return load_cjk_font(size)
 
 
+def compute_bubble_rect(npc_sx: float, npc_top_sy: float, w: int, h: int,
+                        tail_w: int, tail_h: int, vw: int, vh: int,
+                        gap: int = 6) -> Tuple[int, int, int]:
+    """对话气泡定位：水平居中于 NPC 头顶、尖尾指向 NPC，贴边时夹紧到屏内。
+
+    返回 (泡左上角 x, y, 尖尾左上角 x)。世界→屏幕换算由调用方完成后传入。
+    """
+    x = int(npc_sx - w / 2)
+    x = max(4, min(x, vw - w - 4))
+    y = max(4, int(npc_top_sy - gap - tail_h - h))
+    tail_x = max(x, min(int(npc_sx - tail_w / 2), x + w - tail_w))
+    return x, y, tail_x
+
+
+def fit_bubble_width(content_w: int, vw: int, pad: int = 36,
+                     min_w: int = 200, max_w: int = 480) -> int:
+    """气泡宽度贴合文本：内容宽 + 内衬，夹在 [min_w, max_w] 且不超屏宽。"""
+    return max(min_w, min(max_w, vw - 24, content_w + pad))
+
+
 # gauge/bar 内三个凹槽的像素范围（x0, x1），填充条在 y=14 起、高 16
 SLOT_HP = (2, 107)
 SLOT_MP = (110, 215)
@@ -54,6 +74,7 @@ class UI:
         self.font_tiny = _load_font(10)
         self.dialog_lines: List[str] = []
         self.dialog_visible = False
+        self.dialog_anchor = None
         self.death_visible = False
         # 上一帧对话框（气泡）占位矩形，供鼠标点击命中判断
         self.dialog_rect: Optional[pygame.Rect] = None
@@ -73,14 +94,18 @@ class UI:
         return hit[0] if hit else None
 
     # ── 对话框 ─────────────────────────────────────────────────────
-    def show_dialog(self, npc_name: str, lines: List[str]) -> None:
-        self.dialog_lines = [f"[{npc_name}]"] + lines
+    def show_dialog(self, npc_name: str, lines: List[str],
+                    anchor=None) -> None:
+        """anchor: 对话中的 NPC 实体（气泡浮其头顶）；None 则屏幕底部居中。"""
+        self.dialog_lines = [npc_name] + lines
         self.dialog_visible = True
+        self.dialog_anchor = anchor
 
     def hide_dialog(self) -> None:
         self.dialog_visible = False
         self.dialog_lines = []
         self.dialog_rect = None
+        self.dialog_anchor = None
 
     def dialog_hit(self, pos) -> bool:
         return (self.dialog_visible and self.dialog_rect is not None
@@ -313,25 +338,36 @@ class UI:
         return bar.get_height() if bar is not None else 71
 
     # ── 对话框绘制 ─────────────────────────────────────────────────
-    def draw_dialog(self, surface) -> None:
+    def draw_dialog(self, surface, camera=None) -> None:
         if not self.dialog_visible or not self.dialog_lines:
             return
         title, *body = self.dialog_lines
         vw, vh = surface.get_width(), surface.get_height()
-        bw = min(560, vw - 24)
-        text_w = bw - 32
+        text_w = min(480, vw - 24) - 32
         wrapped: List[str] = []
         for ln in body:
             wrapped.extend(self._wrap(ln, text_w, self.font))
+        content_w = max([self.font.size(ln)[0] for ln in wrapped]
+                        + [self.font_big.size(title)[0]] or [0])
+        bw = fit_bubble_width(content_w, vw)
 
         pad_top, line_h, pad_bottom = 12, 19, 14
         h = pad_top + 21 + len(wrapped) * line_h + pad_bottom
         balloon = self._balloon(bw, h)
         tail = self._balloon_tail()
         tail_h = tail.get_height() if tail is not None else 0
+        tail_w = tail.get_width() if tail is not None else 0
 
-        x = (vw - bw) // 2
-        y = vh - self._status_bar_h() - tail_h - 4 - h
+        anchor = self.dialog_anchor
+        if camera is not None and anchor is not None:
+            sx, _ = camera.to_screen(anchor.x, anchor.cy)
+            _, top_sy = camera.to_screen(anchor.x, anchor.rect().top)
+            x, y, tail_x = compute_bubble_rect(
+                sx, top_sy, bw, h, tail_w, tail_h, vw, vh)
+        else:
+            x = (vw - bw) // 2
+            y = vh - self._status_bar_h() - tail_h - 4 - h
+            tail_x = x + (bw - tail_w) // 2
         self.dialog_rect = pygame.Rect(x, y, bw, h + tail_h)
 
         if balloon is None:      # 素材缺失退回白纸窗体
@@ -339,7 +375,7 @@ class UI:
             return
         surface.blit(balloon, (x, y))
         if tail is not None:
-            surface.blit(tail, (x + (bw - tail.get_width()) // 2, y + h - 1))
+            surface.blit(tail, (tail_x, y + h - 1))
 
         surface.blit(self.font_big.render(title, True, (255, 216, 96)),
                      (x + 16, y + pad_top - 2))
@@ -350,9 +386,11 @@ class UI:
             surface.blit(shadow, (x + 17, ty + 1))
             surface.blit(text, (x + 16, ty))
             ty += line_h
-        hint = self.font_small.render("Enter/Esc 或点击关闭", True, (160, 165, 175))
-        surface.blit(hint, (x + bw - hint.get_width() - 14,
-                            y + h - hint.get_height() - 5))
+        # 原版风格：泡内右下角黄色 ▼ 闪烁指示（Enter/Esc/点击关闭）
+        if int(pygame.time.get_ticks() / 500) % 2 == 0:
+            bx0, by0 = x + bw - 20, y + h - pad_bottom + 1
+            pygame.draw.polygon(surface, (255, 233, 107),
+                                [(bx0, by0), (bx0 + 10, by0), (bx0 + 5, by0 + 6)])
 
     # ── 任务对话框（UtilDlgEx + BtYes/BtNo/BtOK，非模态）─────────
     def draw_quest(self, surface) -> None:

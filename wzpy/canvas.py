@@ -12,6 +12,7 @@ import io
 import zlib
 from typing import TYPE_CHECKING
 
+import numpy as np
 from PIL import Image
 
 from .crypto import WzKey
@@ -105,23 +106,27 @@ def _decompress(canvas: "WzCanvasProperty", key: WzKey) -> bytes:
     )
 
 
+def _rgb565_to_rgba(v: np.ndarray) -> np.ndarray:
+    """Little-endian uint16 RGB565 pixels → ``(N, 4)`` uint8 RGBA."""
+    out = np.empty((v.shape[0], 4), dtype=np.uint8)
+    out[:, 0] = ((v >> 11) & 0x1F) * 8
+    out[:, 1] = ((v >> 5) & 0x3F) * 4
+    out[:, 2] = (v & 0x1F) * 8
+    out[:, 3] = 0xFF
+    return out
+
+
 def _decode_pixels(data: bytes, width: int, height: int, fmt: int) -> Image.Image:
     """Convert raw decompressed pixels to a PIL image."""
     if fmt == 1:
-        # ARGB4444, 2 bytes per pixel
-        out = bytearray(width * height * 4)
-        for i in range(width * height):
-            lo = data[i * 2]
-            hi = data[i * 2 + 1]
-            b = (lo & 0x0F) | ((lo & 0x0F) << 4)
-            g = (lo & 0xF0) | ((lo & 0xF0) >> 4)
-            r = (hi & 0x0F) | ((hi & 0x0F) << 4)
-            a = (hi & 0xF0) | ((hi & 0xF0) >> 4)
-            out[i * 4 + 0] = r
-            out[i * 4 + 1] = g
-            out[i * 4 + 2] = b
-            out[i * 4 + 3] = a
-        return Image.frombytes("RGBA", (width, height), bytes(out))
+        # ARGB4444, 2 bytes per pixel (little-endian uint16)
+        v = np.frombuffer(data[: width * height * 2], dtype="<u2")
+        out = np.empty((v.shape[0], 4), dtype=np.uint8)
+        out[:, 0] = ((v >> 8) & 0xF) * 17
+        out[:, 1] = ((v >> 4) & 0xF) * 17
+        out[:, 2] = (v & 0xF) * 17
+        out[:, 3] = ((v >> 12) & 0xF) * 17
+        return Image.frombytes("RGBA", (width, height), out.tobytes())
     if fmt == 2:
         # ARGB8888 stored as BGRA on disk
         return Image.frombytes("RGBA", (width, height), data, "raw", "BGRA")
@@ -135,38 +140,26 @@ def _decode_pixels(data: bytes, width: int, height: int, fmt: int) -> Image.Imag
         return small.resize((width, height), Image.NEAREST)
     if fmt == 257:
         # ARGB1555 — uncommon but documented
-        out = bytearray(width * height * 4)
-        for i in range(width * height):
-            v = data[i * 2] | (data[i * 2 + 1] << 8)
-            a = 0xFF if v & 0x8000 else 0x00
-            r = ((v >> 10) & 0x1F) * 8
-            g = ((v >> 5) & 0x1F) * 8
-            b = (v & 0x1F) * 8
-            out[i * 4:i * 4 + 4] = bytes([r, g, b, a])
-        return Image.frombytes("RGBA", (width, height), bytes(out))
+        v = np.frombuffer(data[: width * height * 2], dtype="<u2")
+        out = np.empty((v.shape[0], 4), dtype=np.uint8)
+        out[:, 0] = ((v >> 10) & 0x1F) * 8
+        out[:, 1] = ((v >> 5) & 0x1F) * 8
+        out[:, 2] = (v & 0x1F) * 8
+        out[:, 3] = np.where(v & 0x8000, 0xFF, 0x00)
+        return Image.frombytes("RGBA", (width, height), out.tobytes())
     if fmt == 513:
         # RGB565
-        out = bytearray(width * height * 4)
-        for i in range(width * height):
-            v = data[i * 2] | (data[i * 2 + 1] << 8)
-            r = ((v >> 11) & 0x1F) * 8
-            g = ((v >> 5) & 0x3F) * 4
-            b = (v & 0x1F) * 8
-            out[i * 4:i * 4 + 4] = bytes([r, g, b, 0xFF])
-        return Image.frombytes("RGBA", (width, height), bytes(out))
+        v = np.frombuffer(data[: width * height * 2], dtype="<u2")
+        out = _rgb565_to_rgba(v)
+        return Image.frombytes("RGBA", (width, height), out.tobytes())
     if fmt == 517:
         # downsampled RGB565
         small_w = (width + 15) // 16
         small_h = (height + 15) // 16
         small_data = data[: small_w * small_h * 2]
-        out = bytearray(small_w * small_h * 4)
-        for i in range(small_w * small_h):
-            v = small_data[i * 2] | (small_data[i * 2 + 1] << 8)
-            r = ((v >> 11) & 0x1F) * 8
-            g = ((v >> 5) & 0x3F) * 4
-            b = (v & 0x1F) * 8
-            out[i * 4:i * 4 + 4] = bytes([r, g, b, 0xFF])
-        small = Image.frombytes("RGBA", (small_w, small_h), bytes(out))
+        v = np.frombuffer(small_data, dtype="<u2")
+        out = _rgb565_to_rgba(v)
+        small = Image.frombytes("RGBA", (small_w, small_h), out.tobytes())
         return small.resize((width, height), Image.NEAREST)
     if fmt == 1026:
         return _decode_dxt3(data, width, height)
@@ -186,8 +179,6 @@ def _decode_pixels(data: bytes, width: int, height: int, fmt: int) -> Image.Imag
 # a 1368×720 DXT5 (~62k blocks × 16 inner-loop iterations); NumPy moves
 # everything into C-level array math so the same image decodes in
 # tens of milliseconds.
-
-import numpy as np
 
 
 def _decode_dxt_color_palette(color_block: np.ndarray) -> np.ndarray:

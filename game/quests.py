@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .assets import Assets
 from .localize import to_simplified
@@ -136,8 +136,14 @@ class QuestDef:
         return 0
 
 
-def load_quest_defs(assets: Assets) -> Dict[str, QuestDef]:
-    """从 Quest.wz 解析全部任务 → {qid: QuestDef}。失败静默跳过。"""
+def load_quest_defs(assets: Assets,
+                    qids: Optional[Iterable[str]] = None) -> Dict[str, QuestDef]:
+    """从 Quest.wz 解析任务 → {qid: QuestDef}。失败静默跳过。
+
+    ``qids`` 给定时只解析这些任务的子树（parse_partial 按顶层节点名跳过
+    其余 block，避免全量解析 2000+ 任务与 OpenCC 转换拖慢启动）；
+    为 None 时解析全部。
+    """
     wz = assets.wz["Quest"]
     root = wz.root
     check_img = root.images.get("Check.img")
@@ -147,16 +153,25 @@ def load_quest_defs(assets: Assets) -> Dict[str, QuestDef]:
     if check_img is None:
         return {}
 
-    check = check_img.parse()
-    act = act_img.parse() if act_img is not None else None
-    say = say_img.parse() if say_img is not None else None
-    info = info_img.parse() if info_img is not None else None
+    if qids is None:
+        check = check_img.parse()
+        act = act_img.parse() if act_img is not None else None
+        say = say_img.parse() if say_img is not None else None
+        info = info_img.parse() if info_img is not None else None
+        wanted = [n.name for n in check.children() if n.name.isdigit()]
+    else:
+        wanted = [q for q in qids if str(q).isdigit()]
+        only = frozenset(wanted)
+        check = check_img.parse_partial(only=only)
+        act = act_img.parse_partial(only=only) if act_img is not None else None
+        say = say_img.parse_partial(only=only) if say_img is not None else None
+        info = info_img.parse_partial(only=only) if info_img is not None else None
 
     defs: Dict[str, QuestDef] = {}
-    for node in check.children():
-        if not node.name.isdigit():
+    for qid in wanted:
+        node = check.get(qid)
+        if node is None:
             continue
-        qid = node.name
         try:
             d = _parse_one(qid, node, act, say, info)
         except Exception:

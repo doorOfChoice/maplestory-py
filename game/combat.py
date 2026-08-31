@@ -22,29 +22,83 @@ from .inventory import make_item
 from .fonts import render_text
 
 
-class DamageNumber:
-    FONT = None
+def roll_damage(base: int) -> int:
+    """伤害浮动：基础值 ±10%，最低 1。"""
+    return max(1, int(round(base * random.uniform(0.9, 1.1))))
 
-    def __init__(self, x: float, y: float, amount: int, color=(255, 60, 60)):
+
+class DamageNumber:
+    """官方样式伤害飘字：Effect.wz/BasicEff.img 的 NoRed/NoViolet/NoBlue 像素数字。
+
+    动画照原版：前 400ms 原地全亮，后 600ms 上升 30px 并线性淡出，总寿命 1s。
+    伤害 ≥1000 用大号数字集（NoXxx1），0 伤害显示 Miss。
+    """
+
+    KIND_SETS = {"red": "NoRed", "violet": "NoViolet", "blue": "NoBlue"}
+    FONT = None
+    HOLD = 0.4            # 原地停留时长（秒）
+    FADE = 0.6            # 上升淡出时长（秒）
+    RISE_PX = 30.0        # 淡出期间上升距离
+
+    def __init__(self, x: float, y: float, amount: int, kind: str = "red"):
         self.x = x
         self.y = y
         self.amount = amount
-        self.color = color
-        self.life = 0.9
-        self.vy = -60.0
+        self.kind = kind
+        self.elapsed = 0.0
+
+    @property
+    def set_name(self) -> str:
+        base = self.KIND_SETS.get(self.kind, "NoRed")
+        return base + ("1" if self.amount >= 1000 else "0")
+
+    @property
+    def digits(self) -> List[str]:
+        if self.amount <= 0:
+            return ["Miss"]
+        return list(str(self.amount))
+
+    @property
+    def alpha(self) -> float:
+        t = self.elapsed - self.HOLD
+        if t <= 0.0:
+            return 1.0
+        return max(0.0, 1.0 - t / self.FADE)
+
+    @property
+    def rise(self) -> float:
+        t = self.elapsed - self.HOLD
+        if t <= 0.0:
+            return 0.0
+        return min(self.RISE_PX, self.RISE_PX * t / self.FADE)
 
     def update(self, dt: float) -> bool:
-        self.life -= dt
-        self.y += self.vy * dt
-        self.vy *= (1 - 2.0 * dt)
-        return self.life > 0
+        self.elapsed += dt
+        return self.elapsed < self.HOLD + self.FADE
 
-    def draw(self, surface: pygame.Surface, camera) -> None:
-        if DamageNumber.FONT is None:
-            DamageNumber.FONT = pygame.font.Font(None, 20)
-        sx, sy = camera.to_screen(self.x, self.y)
-        text = render_text(DamageNumber.FONT, str(self.amount), self.color)
-        surface.blit(text, (int(sx - text.get_width() / 2), int(sy)))
+    def draw(self, surface: pygame.Surface, camera, assets=None) -> None:
+        sx, sy = camera.to_screen(self.x, self.y - self.rise)
+        sprites = assets.damage_digits(self.set_name) if assets else {}
+        if not sprites:      # 素材缺失退回字体渲染
+            if DamageNumber.FONT is None:
+                DamageNumber.FONT = pygame.font.Font(None, 20)
+            color = {"violet": (170, 120, 255), "blue": (120, 180, 255)}.get(
+                self.kind, (255, 60, 60))
+            text = render_text(DamageNumber.FONT, str(self.amount or "Miss"), color)
+            surface.blit(text, (int(sx - text.get_width() / 2), int(sy)))
+            return
+        pieces = [sprites.get(d) for d in self.digits]
+        if any(p is None for p in pieces):
+            return
+        total_w = sum(p[0].get_width() for p in pieces)
+        px = int(sx - total_w / 2)
+        fade = self.alpha < 1.0
+        for surf, origin in pieces:
+            if fade:
+                surf = surf.copy()
+                surf.set_alpha(int(255 * self.alpha))
+            surface.blit(surf, (px - origin[0], int(sy) - origin[1]))
+            px += surf.get_width()
 
 
 class DropItem:
@@ -130,7 +184,7 @@ class Arrow:
     def __init__(self, x: float, y: float, vx: float, vy: float,
                  frames: list, hit_frames: list, dmg: int,
                  mob_count: int = 1, life: float = 0.6,
-                 color: Tuple[int, int, int] = (170, 120, 255)):
+                 kind: str = "red"):
         self.x = x
         self.y = y
         self.vx = vx
@@ -140,7 +194,7 @@ class Arrow:
         self.dmg = dmg
         self.mob_count = max(1, mob_count)
         self.life = life
-        self.color = color              # 伤害飘字颜色（普攻红/技能紫）
+        self.kind = kind                # 伤害飘字配色（普攻红/技能紫）
         self.age = 0.0
         self.hit_ids: set = set()
         self.dead = False
@@ -163,7 +217,7 @@ class Arrow:
                 continue
             self.hit_ids.add(id(mob))
             combat.numbers.append(DamageNumber(
-                mob.x, mob.cy - mob.sprite_h, self.dmg, self.color))
+                mob.x, mob.cy - mob.sprite_h, self.dmg, self.kind))
             if self.hit_frames:
                 combat.effects.append(Effect(
                     self.hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45))
@@ -247,7 +301,7 @@ class Combat:
         for mob in targets:
             self.numbers.append(DamageNumber(
                 mob.x, mob.cy - mob.sprite_h, dmg,
-                (170, 120, 255) if skill else (255, 60, 60)))
+                "violet" if skill else "red"))
             if hit_frames:
                 self.effects.append(Effect(
                     hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45))
@@ -265,7 +319,7 @@ class Combat:
         if skill_data is None:
             dmg = player.attack_value()
             n, mob_count = 1, 1
-            color = (255, 60, 60)
+            kind = "red"
             frames = self.assets.normal_arrow_frames() if self.assets else []
             hit_frames: List = []
         else:
@@ -273,7 +327,7 @@ class Combat:
             dmg = int(player.attack_value() * skill_data["damage"])
             n = max(1, int(skill_data.get("bullet_count", 1)))
             mob_count = max(1, skill_data["mob_count"])
-            color = (170, 120, 255)
+            kind = "violet"
             frames = self.assets.skill_ball_frames(sid) if self.assets else []
             hit_frames = self.assets.skill_hit_frames(sid) if self.assets else []
         facing = 1 if player.facing_right else -1
@@ -283,7 +337,7 @@ class Combat:
                 x=player.x + facing * 16.0, y=player.y - 8.0 + offset,
                 vx=facing * settings.ARROW_SPEED, vy=0.0,
                 frames=frames, hit_frames=hit_frames,
-                dmg=dmg, mob_count=mob_count, color=color,
+                dmg=dmg, mob_count=mob_count, kind=kind,
                 life=settings.ARROW_LIFETIME))
 
     def update_arrows(self, dt: float, monsters, player=None) -> None:
@@ -323,7 +377,7 @@ class Combat:
             amount = max(1, int(hit["amount"] * 100.0 / (100 + player.defense_value())))
             player.damage(amount)
             self.numbers.append(DamageNumber(
-                player.x, player.y - 40, amount, (120, 180, 255)))
+                player.x, player.y - 40, amount, "blue"))
 
     def pickup(self, player) -> bool:
         """玩家拾取掉落 → 金币入 Combat，物品入玩家背包。
@@ -378,7 +432,7 @@ class Combat:
         for drop in self.drops:
             drop.draw(surface, camera)
         for num in self.numbers:
-            num.draw(surface, camera)
+            num.draw(surface, camera, self.assets)
 
     def draw_arrows(self, surface: pygame.Surface, camera) -> None:
         """飞行中的箭矢（实体之上、特效之下）。"""

@@ -545,6 +545,30 @@ class Assets:
         self._ui_cache[key] = result
         return result
 
+    def damage_digits(self, set_name: str) -> Dict[str, Tuple]:
+        """官方伤害数字集（Effect.wz/BasicEff.img 的 NoRed0/NoRed1/...）。
+
+        → {键: (Surface, origin)}，键含 '0'-'9'，小号集另有 'Miss'。缓存。
+        """
+        hit = self._effect_cache.get(("dmgnum", set_name))
+        if hit is not None:
+            return hit
+        result: Dict[str, Tuple] = {}
+        image = self.wz["Effect"].root.images.get("BasicEff.img")
+        if image is not None:
+            node = image.parse().get(set_name)
+            if node is not None:
+                for child in node.children():
+                    real = _resolve_uol(child)
+                    if isinstance(real, WzCanvasProperty):
+                        pil = _decode_canvas_prop(real, self.region,
+                                                  self.wz["Effect"])
+                        if pil is not None:
+                            result[child.name] = (pil_to_surface(pil),
+                                                  _canvas_origin(real))
+        self._effect_cache[("dmgnum", set_name)] = result
+        return result
+
     # ── Effect.wz / Skill.wz 帧动画 / Item.wz 图标 ─────────────────
     def effect_frames(self, wz_key: str, img_name: str, node_path: str) -> List:
         """取一个节点下的 canvas 子帧序列 → [(Surface, origin, delay_ms)]。缓存。"""

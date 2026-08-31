@@ -13,6 +13,7 @@ import pygame
 from . import settings
 from .animation import Animation
 from .assets import Assets
+from .combat import roll_damage
 
 
 class Monster:
@@ -188,7 +189,7 @@ class Monster:
                 audio.play("GameIn", 0.3)
             mobs.append({
                 "type": "contact",
-                "amount": settings.MOB_CONTACT_DAMAGE,
+                "amount": roll_damage(self.attack_power),
                 "x": self.x, "y": self.cy - 30,
                 "id": self.mob_id,
             })

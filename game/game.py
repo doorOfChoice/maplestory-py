@@ -24,6 +24,7 @@ from .monster import Monster
 from .npc import NPC
 from .combat import Combat
 from .combat import DamageNumber
+from . import dialogues
 from .effects import Effect
 from .jobs import JOBS, can_advance
 from .ui import UI
@@ -95,6 +96,20 @@ class Game:
             self._boot_progress = 0.05
             self.assets = Assets(start_map, settings.REGION)
             self._boot_progress = 0.20
+            # 任务解析与地图/实体构建并行：Quest.wz 与其他 WZ 各自独立
+            # reader_lock，线程安全；Player 构造前 join 取回结果。
+            quest_box: dict = {}
+
+            def _load_quests() -> None:
+                try:
+                    quest_box["defs"] = load_quest_defs(
+                        self.assets, settings.ENABLED_QUESTS)
+                except Exception:
+                    traceback.print_exc()
+                    quest_box["defs"] = {}
+
+            quest_thread = threading.Thread(target=_load_quests, daemon=True)
+            quest_thread.start()
             self.physics = Physics(self.assets.footholds, self.assets.ropes,
                                    bounds=self.assets.bounds)
             self.camera = Camera(self.assets.map_width, self.assets.map_height,
@@ -114,10 +129,9 @@ class Game:
             self.panels = Panels(self.ui, self.assets)
             self.panels._quest_goal_lines = self._quest_extra_goal_lines
 
-            # 任务数据：解析全部 Quest.wz，仅开放精选任务
-            self.quest_defs = load_quest_defs(self.assets)
-            self.quest_defs = {qid: d for qid, d in self.quest_defs.items()
-                               if qid in settings.ENABLED_QUESTS}
+            # 任务数据：等待后台解析完成（只解析 ENABLED_QUESTS 精选任务）
+            quest_thread.join()
+            self.quest_defs = quest_box.get("defs") or {}
 
             # 出生点：入口 portal（sp，type 0）；读档时用存档位置
             spawn = self._find_spawn()
@@ -332,8 +346,9 @@ class Game:
                     return
                 if self._begin_quest_flow(npc):
                     return
-                self.ui.show_dialog(npc.name, ["你好，冒险者！", "小心东边山丘上的怪物。",
-                                               "攻击按 J，击败怪物可获得经验与掉落物。"])
+                self.ui.show_dialog(npc.name,
+                                    dialogues.get_dialog(npc.npc_id, npc.name),
+                                    anchor=npc)
                 return
 
     # ── 转职对话流程 ───────────────────────────────────────────────
@@ -341,7 +356,7 @@ class Game:
         """导师对话：可转职弹确认框；已转职/等级不足给对应提示。"""
         jobdef = JOBS[settings.BOWMAN_JOB]
         if self.player.job == jobdef.code:
-            self.ui.show_dialog(npc.name, ["你已经是一名出色的弓箭手了。"])
+            self.ui.show_dialog(npc.name, ["你已经是一名出色的弓箭手了。"], anchor=npc)
             return True
         if can_advance(self.player, jobdef):
             self._quest_flow = {"npc": npc, "quest": None, "stage": "advance"}
@@ -352,7 +367,7 @@ class Game:
             return True
         self.ui.show_dialog(npc.name, [
             "你还太弱小了，达到等级再来找我吧。",
-            f"（当前 Lv{self.player.level} / 需要 Lv{jobdef.advance_lv}）"])
+            f"（当前 Lv{self.player.level} / 需要 Lv{jobdef.advance_lv}）"], anchor=npc)
         return True
 
     # ── 任务对话状态机 ─────────────────────────────────────────────
@@ -672,7 +687,7 @@ class Game:
             self.player.damage(settings.FALL_OUT_DAMAGE)
             self.combat.numbers.append(DamageNumber(
                 self.player.x, self.player.y - 40,
-                settings.FALL_OUT_DAMAGE, (120, 180, 255)))
+                settings.FALL_OUT_DAMAGE, "blue"))
             self._place_player_at_spawn()
 
         # 攻击判定：远程（普攻与技能）起手一次性生成箭（近战仍在首帧结算）
@@ -760,7 +775,7 @@ class Game:
         self.ui.draw_map_name(self.canvas, self.assets.map_name(), name_y)
         self.panels.draw_quickslots(self.canvas, self.player)
         self.panels.draw(self.canvas, self.player, self.combat.meso)
-        self.ui.draw_dialog(self.canvas)
+        self.ui.draw_dialog(self.canvas, self.camera)
         self.ui.draw_quest(self.canvas)
         self.ui.draw_death(self.canvas)
 

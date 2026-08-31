@@ -81,7 +81,6 @@ MOB_CHASE_SPEED = 70.0
 MOB_PATROL_SPEED = 30.0
 MOB_ATTACK_RANGE = 40.0          # 接触伤害距离（水平）
 MOB_CONTACT_Y_RANGE = 40.0       # 接触伤害距离（垂直，脚底 y 差）
-MOB_CONTACT_DAMAGE = 8
 MOB_KNOCKBACK = 60.0             # 受击击退
 SPAWN_GRACE = 3.0                # 出生/重生后怪物不追击不攻击的秒数
 
