@@ -117,17 +117,17 @@ class Game:
 
         self.audio.play_bgm()
         if self.save_data:
-            self.ui.show_dialog("讀取存檔", [
-                f"歡迎回來，Lv.{self.player.level} 冒險者！",
-                "已從本地存檔載入你的進度。",
-                "（對話不影響行動，Enter/Esc 或點擊關閉）"])
+            self.ui.show_dialog("读取存档", [
+                f"欢迎回来，Lv.{self.player.level} 冒险者！",
+                "已从本地存档载入你的进度。",
+                "（对话不影响行动，Enter/Esc 或点击关闭）"])
         else:
-            self.ui.show_dialog("歡迎", ["冒險島 v113 · 弓箭手村東部小山",
-                                         "A/D(或←→) 移動  空格 跳躍  S+空格 下跳",
-                                         "W(或↑) 爬繩/梯  J 攻擊  1/2 技能  F 喝藥",
-                                         "I 道具欄  K 技能欄  Q 任務日誌  Enter 對話  R 復活",
-                                         "走到發光傳送門前按 ↑ 可切換地圖；NPC 頭頂燈泡表示有任務。"
-                                         "（對話不影響行動，Enter/Esc 或點擊關閉）"])
+            self.ui.show_dialog("欢迎", ["冒险岛 v113 · 弓箭手村东部小山",
+                                         "A/D(或←→) 移动  空格 跳跃  S+空格 下跳",
+                                         "W(或↑) 爬绳/梯  J 攻击  1/2 技能  F 喝药",
+                                         "I 道具栏  K 技能栏  Q 任务日志  Enter 对话  R 复活",
+                                         "走到发光传送门前按 ↑ 可切换地图；NPC 头顶灯泡表示有任务。"
+                                         "（对话不影响行动，Enter/Esc 或点击关闭）"])
 
     # ── 生成 ───────────────────────────────────────────────────────
     def _find_spawn(self):
@@ -273,8 +273,8 @@ class Game:
                 self._talk_npc = npc
                 if self._begin_quest_flow(npc):
                     return
-                self.ui.show_dialog(npc.name, ["你好，冒險者！", "小心東邊山丘上的怪物。",
-                                               "攻擊按 J，擊敗怪物可獲得經驗與掉落物。"])
+                self.ui.show_dialog(npc.name, ["你好，冒险者！", "小心东边山丘上的怪物。",
+                                               "攻击按 J，击败怪物可获得经验与掉落物。"])
                 return
 
     # ── 任务对话状态机 ─────────────────────────────────────────────
@@ -318,19 +318,19 @@ class Game:
 
     def _show_quest_offer(self, qid: str) -> None:
         d = self.quest_defs[qid]
-        lines = [self._qmark(l) for l in d.accept_lines] or [f"要接受任務「{d.name}」嗎？"]
-        self.ui.show_quest(f"任務 · {d.name}", lines, ["yes", "no"])
+        lines = [self._qmark(l) for l in d.accept_lines] or [f"要接受任务「{d.name}」吗？"]
+        self.ui.show_quest(f"任务 · {d.name}", lines, ["yes", "no"])
 
     def _show_quest_complete(self, qid: str) -> None:
         d = self.quest_defs[qid]
         lines = [self._qmark(l) for l in d.complete_lines] or [
-            f"已完成任務「{d.name}」的所有條件！要領取獎勵嗎？"]
-        self.ui.show_quest(f"任務完成 · {d.name}", lines, ["yes", "no"])
+            f"已完成任务「{d.name}」的所有条件！要领取奖励吗？"]
+        self.ui.show_quest(f"任务完成 · {d.name}", lines, ["yes", "no"])
 
     def _show_quest_status(self, qid: str) -> None:
         d = self.quest_defs[qid]
         lines = [self._qmark(l) for l in d.complete_stop] or \
-                [f"「{d.name}」還未完成，繼續努力吧！"]
+                [f"「{d.name}」还未完成，继续努力吧！"]
         self.ui.show_quest(d.name, lines, ["ok"])
 
     def _quest_button(self, key: str) -> None:
@@ -346,27 +346,27 @@ class Game:
                 if quests.accept(qid, self.player):
                     d = self.quest_defs[qid]
                     self.audio.play("QuestClear", 0.5)
-                    self.panels.flash(f"任務接受：{d.name}")
+                    self.panels.flash(f"任务接受：{d.name}")
                     flow["stage"] = "accepted"
                     lines = [self._qmark(l) for l in d.accept_yes] or \
-                            [f"已接受任務「{d.name}」。按 Q 查看任務日誌。"]
+                            [f"已接受任务「{d.name}」。按 Q 查看任务日志。"]
                     self.ui.show_quest(d.name, lines, ["ok"])
                 else:
                     self.ui.hide_quest()
             else:
                 d = self.quest_defs[qid]
                 flow["stage"] = "declined"
-                lines = [self._qmark(l) for l in d.accept_no] or ["好吧，改變心意的話再來找我。"]
+                lines = [self._qmark(l) for l in d.accept_no] or ["好吧，改变心意的话再来找我。"]
                 self.ui.show_quest(d.name, lines, ["ok"])
         elif flow["stage"] == "complete":
             if key == "yes":
                 if quests.complete(qid, self.player, self.combat,
                                    self.assets, self.audio):
                     d = self.quest_defs[qid]
-                    self.panels.flash(f"任務完成：{d.name}")
+                    self.panels.flash(f"任务完成：{d.name}")
                     flow["stage"] = "completed"
                     lines = [self._qmark(l) for l in d.complete_yes] or \
-                            [f"已獲得任務「{d.name}」的獎勵！"]
+                            [f"已获得任务「{d.name}」的奖励！"]
                     self.ui.show_quest(d.name, lines, ["ok"])
                 else:
                     self.ui.hide_quest()
@@ -385,19 +385,19 @@ class Game:
         lines: List[str] = []
         for mid, count in d.kills:
             cur = q.kill_progress(qid, mid)
-            lines.append(f"擊殺 {self.assets.mob_name_of(mid)}  {cur}/{count}")
+            lines.append(f"击杀 {self.assets.mob_name_of(mid)}  {cur}/{count}")
         for iid, count in d.end_items:
             cur = q.item_progress(self.player, qid, iid)
             lines.append(f"收集 {self.assets.item_name(str(iid)) or f'#{iid}'}  {cur}/{count}")
         if not lines and d.desc1:
             lines.append(d.desc1)
         if d.reward_exp:
-            lines.append(f"獎勵：經驗 {d.reward_exp}")
+            lines.append(f"奖励：经验 {d.reward_exp}")
         if d.reward_money:
-            lines.append(f"獎勵：金幣 {d.reward_money}")
+            lines.append(f"奖励：金币 {d.reward_money}")
         for iid, count in d.reward_items:
             if count > 0:
-                lines.append(f"獎勵：{self.assets.item_name(str(iid)) or f'#{iid}'} ×{count}")
+                lines.append(f"奖励：{self.assets.item_name(str(iid)) or f'#{iid}'} ×{count}")
         return lines
 
     # ── 重生 ───────────────────────────────────────────────────────
@@ -518,7 +518,7 @@ class Game:
 
     # ── 存档 ─────────────────────────────────────────────────────────
     def _save_game(self) -> None:
-        """收集當前遊戲狀態，非同步寫入本地存檔（不阻塞主循環）。"""
+        """收集当前游戏状态，非同步写入本地存档（不阻塞主循环）。"""
         try:
             self.save_manager.request_save(SaveManager.collect_data(
                 self.player, self.combat, self.assets.map_id))
@@ -658,7 +658,7 @@ class Game:
         self.canvas.fill((0, 0, 0))
         font = pygame.font.Font(None, 48)
         dots = "." * (int(self._loading_timer * 3) % 4)
-        text = font.render(f"載入中{dots}", True, (255, 255, 255))
+        text = font.render(f"载入中{dots}", True, (255, 255, 255))
         rect = text.get_rect(center=(settings.VIEW_W // 2, settings.VIEW_H // 2))
         self.canvas.blit(text, rect)
         hint_font = pygame.font.Font(None, 24)
@@ -671,7 +671,7 @@ class Game:
         pygame.display.flip()
 
     def _portal_frame_index(self, frames, t: float) -> int:
-        """依累積秒數定位動畫幀：每幀顯示其 delay 毫秒時長（循環播放）。"""
+        """依累积秒数定位动画帧：每帧显示其 delay 毫秒时长（循环播放）。"""
         return Animation.frame_at(frames, t * 1000.0)
 
     def _draw_portals(self, surface) -> None:

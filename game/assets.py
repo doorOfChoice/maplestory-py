@@ -29,6 +29,7 @@ from wzpy.character import CharacterRenderer, DEFAULT_EAR_TYPE
 from wzpy.properties import WzCanvasProperty, WzUolProperty
 
 from . import settings
+from .localize import to_simplified
 
 # 攻击姿态回退顺序（玩家攻击用）
 ATTACK_POSES = ("swingO1", "swingO2", "swingO3", "stabO1", "stabO2")
@@ -364,7 +365,8 @@ class Assets:
         try:
             image = self.wz["String"].root.get("Npc.img")
             node = image.parse().get(str(int(npc_id))) if image else None
-            return node.get("name").value if node and node.get("name") else f"NPC {npc_id}"
+            name = node.get("name").value if node and node.get("name") else f"NPC {npc_id}"
+            return to_simplified(str(name))
         except Exception:
             return f"NPC {npc_id}"
     def _mob_action_canvases(self, mob_id: str, action: str) -> List[WzCanvasProperty]:
@@ -468,33 +470,33 @@ class Assets:
 
     # ── 名字 ────────────────────────────────────────────────────────
     def map_name(self) -> str:
-        return self.map_desc.get("name") or f"Map {self.map_id}"
+        return to_simplified(self.map_desc.get("name") or f"Map {self.map_id}")
 
     def map_name_of(self, map_id) -> str:
-        """任意地圖 id → 名稱（String.wz Map.img）。"""
+        """任意地图 id → 名称（String.wz Map.img）。"""
         try:
             image = self.wz["String"].root.get("Map.img")
             if image is not None:
                 for category in image.parse().children():
                     entry = category.get(str(int(map_id)))
                     if entry is not None and entry.get("mapName") is not None:
-                        return str(entry.get("mapName").value)
+                        return to_simplified(str(entry.get("mapName").value))
         except Exception:
             pass
         try:
             root, _ = self.map_renderer._map_root(map_id)
             node = root.get("info/mapName")
             if node is not None:
-                return str(getattr(node, "value", "") or "")
+                return to_simplified(str(getattr(node, "value", "") or ""))
         except Exception:
             pass
-        return f"地圖 {map_id}"
+        return f"地图 {map_id}"
 
     def mob_name_of(self, mob_id) -> str:
-        """任意怪物 id → 名稱。"""
+        """任意怪物 id → 名称。"""
         try:
             d = self.mob_renderer.describe(mob_id)
-            return d.get("name") or f"怪物 {mob_id}"
+            return to_simplified(d.get("name") or f"怪物 {mob_id}")
         except Exception:
             return f"怪物 {mob_id}"
 
@@ -764,6 +766,7 @@ class Assets:
                         result = str(nm.value) if nm is not None else None
         except Exception:
             result = None
+        result = to_simplified(result) if result else result
         self._icon_cache[key] = result
         return result
 

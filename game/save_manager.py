@@ -1,7 +1,7 @@
-"""存檔管理：把玩家狀態序列化為 JSON 並寫盤。
+"""存档管理：把玩家状态序列化为 JSON 并写盘。
 
-主執行緒只做快照收集（純記憶體 dict），檔案寫入在後台執行緒執行，
-不阻塞遊戲主循環。退出時 `flush()` 同步等待最後一次寫入完成。
+主执行绪只做快照收集（纯记忆体 dict），档案写入在后台执行绪执行，
+不阻塞游戏主循环。退出时 `flush()` 同步等待最后一次写入完成。
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 
 class SaveManager:
-    """非同步存檔管理：request_save 提交快照，後台線程寫盤。"""
+    """非同步存档管理：request_save 提交快照，后台线程写盘。"""
 
     def __init__(self, path: Path):
         self.path = path
@@ -23,7 +23,7 @@ class SaveManager:
         self._thread: Optional[threading.Thread] = None
 
     def load(self) -> Optional[dict]:
-        """讀取存檔。不存在或損壞時回傳 None。"""
+        """读取存档。不存在或损坏时回传 None。"""
         if not self.path.exists():
             return None
         try:
@@ -32,7 +32,7 @@ class SaveManager:
             return None
 
     def request_save(self, data: dict) -> None:
-        """提交快照，非同步寫盤（不阻塞主執行緒）。"""
+        """提交快照，非同步写盘（不阻塞主执行绪）。"""
         with self._lock:
             self._pending = data
             if self._thread is None or not self._thread.is_alive():
@@ -40,10 +40,10 @@ class SaveManager:
                 self._thread.start()
 
     def flush(self, data: Optional[dict] = None) -> None:
-        """等待/完成寫入（退出時使用）。
+        """等待/完成写入（退出时使用）。
 
-        無 data：僅等待後台線程把已排隊的快照寫完。
-        有 data：清掉排隊中的舊快照，等舊寫入結束後同步寫入最新。
+        无 data：仅等待后台线程把已排队的快照写完。
+        有 data：清掉排队中的旧快照，等旧写入结束后同步写入最新。
         """
         if data is None:
             with self._lock:
@@ -59,7 +59,7 @@ class SaveManager:
         self._write(data)
 
     def _drain(self) -> None:
-        """後台線程：消費最新待寫快照後退出。"""
+        """后台线程：消费最新待写快照后退出。"""
         while True:
             with self._lock:
                 data = self._pending
@@ -69,7 +69,7 @@ class SaveManager:
             self._write(data)
 
     def _write(self, data: dict) -> None:
-        """原子寫入：先寫 tmp 再 rename。"""
+        """原子写入：先写 tmp 再 rename。"""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -77,7 +77,7 @@ class SaveManager:
 
     @staticmethod
     def collect_data(player, combat, map_id: str) -> dict:
-        """收集所有需要存檔的遊戲狀態為 dict。"""
+        """收集所有需要存档的游戏状态为 dict。"""
         return {
             "version": 1,
             "player": {

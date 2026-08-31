@@ -1,9 +1,9 @@
-"""共用動畫引擎：單幀累積型（Animation）與無狀態選幀（frame_at）。
+"""共用动画引擎：单帧累积型（Animation）与无状态选帧（frame_at）。
 
-Animation 支援兩種幀格式：
-  - 二元組 ``(Surface, delay_ms)``
-  - 三元組 ``(Surface, origin, delay_ms)``
-delay 永遠是 tuple 的最後一個元素（``f[-1]``）。
+Animation 支援两种帧格式：
+  - 二元组 ``(Surface, delay_ms)``
+  - 三元组 ``(Surface, origin, delay_ms)``
+delay 永远是 tuple 的最后一个元素（``f[-1]``）。
 """
 
 from __future__ import annotations
@@ -12,16 +12,16 @@ from typing import List, Tuple, Union
 
 _Frame = Union[Tuple, List]
 
-# 支援的幀格式：最後一個元素永遠是 delay_ms
+# 支援的帧格式：最后一个元素永远是 delay_ms
 #   (Surface, delay_ms)
 #   (Surface, origin, delay_ms)
 
 
 class Animation:
-    """狀態機型動畫：保有 frame + accum 狀態，每幀呼叫 advance(dt) 推進。
+    """状态机型动画：保有 frame + accum 状态，每帧呼叫 advance(dt) 推进。
 
-    loop=True   → 永遠循環播放，advance 回傳 True 表示繞回首幀
-    loop=False  → 播完後 done=True，advance 回傳 True 表示已播完
+    loop=True   → 永远循环播放，advance 回传 True 表示绕回首帧
+    loop=False  → 播完后 done=True，advance 回传 True 表示已播完
     """
 
     def __init__(self, frames: List[_Frame], loop: bool = True):
@@ -33,12 +33,12 @@ class Animation:
 
     @property
     def delay(self) -> int:
-        """當前幀的 delay（毫秒）。"""
+        """当前帧的 delay（毫秒）。"""
         return self.frames[self.frame][-1]
 
     @property
     def surface(self):
-        """當前幀 Surface；無幀時回傳 None。"""
+        """当前帧 Surface；无帧时回传 None。"""
         return self.frames[self.frame][0] if self.frames else None
 
     def restart(self) -> None:
@@ -47,7 +47,7 @@ class Animation:
         self.done = not self.frames
 
     def advance(self, dt: float) -> bool:
-        """推進動畫。回傳 True 表示繞回（loop）或播完（non-loop）。"""
+        """推进动画。回传 True 表示绕回（loop）或播完（non-loop）。"""
         if self.done or not self.frames:
             return True
         self.accum += dt * 1000.0
@@ -70,9 +70,9 @@ class Animation:
 
     @staticmethod
     def frame_at(frames: List[_Frame], t_ms: float) -> int:
-        """無狀態選幀：依總 delay 取模後逐幀累加定位。
+        """无状态选帧：依总 delay 取模后逐帧累加定位。
 
-        適合傳送門、任務燈泡、金幣旋轉等「不保有幀狀態」的動畫。
+        适合传送门、任务灯泡、金币旋转等「不保有帧状态」的动画。
         """
         if not frames:
             return 0

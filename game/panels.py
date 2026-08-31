@@ -235,7 +235,7 @@ class Panels:
                     if player.inventory.unequip(slot):
                         player.refresh_equips()
                     else:
-                        self.flash("裝備欄已滿")
+                        self.flash("装备栏已满")
                     return True
             for rect, tab, idx in self._cell_rects:
                 if rect.collidepoint(pos):
@@ -271,11 +271,11 @@ class Panels:
         elif tab == "equip":
             items = list(inv.equips)
             if idx < len(items) and items[idx].slot is None:
-                self.flash(f"無法穿戴 {items[idx].name}")
+                self.flash(f"无法穿戴 {items[idx].name}")
             elif idx < len(items) and inv.equip(idx):
                 player.refresh_equips()
             elif idx < len(items):
-                self.flash("裝備欄已滿")
+                self.flash("装备栏已满")
 
     def flash(self, text: str, duration: float = 1.6) -> None:
         """顶部居中短暂提示（如无法穿戴 / 背包已满）。"""
@@ -395,7 +395,7 @@ class Panels:
         coin = self._wz("Item/BtCoin/normal/0")
         if coin is not None:
             surface.blit(coin, (x + 10, y + 266))
-        surface.blit(fs.render(f"金幣 {meso:,}", True, (110, 68, 18)),
+        surface.blit(fs.render(f"金币 {meso:,}", True, (110, 68, 18)),
                      (x + 28, y + 265))
 
     def _draw_inventory_fallback(self, surface, player, meso: int) -> None:
@@ -415,11 +415,11 @@ class Panels:
         rect = pygame.Rect(x, y, w, h)
         self._inv_rect = rect
         _panel(surface, rect)
-        surface.blit(f.render("道具欄 (I)", True, (235, 235, 240)), (x + PAD, y + 8))
-        meso_txt = f.render(f"{meso} 楓幣", True, (255, 220, 90))
+        surface.blit(f.render("道具栏 (I)", True, (235, 235, 240)), (x + PAD, y + 8))
+        meso_txt = f.render(f"{meso} 枫币", True, (255, 220, 90))
         surface.blit(meso_txt, (x + w - PAD - 34 - meso_txt.get_width(), y + 8))
         self._add_chrome(surface, "inv", x, y, w, 24)
-        for i, (key, label) in enumerate((("consume", "消耗"), ("equip", "裝備"),
+        for i, (key, label) in enumerate((("consume", "消耗"), ("equip", "装备"),
                                           ("etc", "其他"))):
             tr = pygame.Rect(x + PAD + i * 58, y + 28, 54, 18)
             on = key == tab
@@ -502,7 +502,7 @@ class Panels:
         rect = pygame.Rect(x, y, w, h)
         self._equip_rect = rect
         _panel(surface, rect)
-        surface.blit(f.render("裝備欄", True, (235, 235, 240)), (x + PAD, y + 8))
+        surface.blit(f.render("装备栏", True, (235, 235, 240)), (x + PAD, y + 8))
         stat = fs.render(
             f"攻 {player.attack_value()} 防 {player.defense_value()} "
             f"SP {player.skills.sp}", True, (150, 210, 160))
@@ -529,6 +529,22 @@ class Panels:
             self._slot_rects.append((cell, slot))
 
     # ── 技能窗口（UIWindow/Skill 底板）─────────────────────────────
+    def _skill_tip(self, d, lv: int, mouse, row: pygame.Rect) -> None:
+        """悬停技能行时把描述/伤害/快捷键放进深色 Tooltip，避免行内文字溢出。"""
+        if self._tooltip is not None or not row.collidepoint(mouse):
+            return
+        lines = [d.name]
+        if d.desc:
+            lines.append(d.desc)
+        if lv > 0:
+            lines.append(f"伤害 {d.stat(lv, 'damage', 100)}% · 消耗 MP{d.stat(lv, 'mpCon', 0)}")
+            key = settings.SKILL_HOTKEYS.get(d.id)
+            if key:
+                lines.append(f"快捷键 {key}")
+        else:
+            lines.append(f"Lv{settings.SKILL_UNLOCK_LEVEL.get(d.id, 1)} 可学习")
+        self._tooltip = "\n".join(lines)
+
     def _draw_skills(self, surface, player) -> None:
         book = player.skills
         f, fs = self.ui.font, self.ui.font_small
@@ -554,6 +570,7 @@ class Panels:
 
         row_h = 48
         top = y + 52
+        mouse = pygame.mouse.get_pos()
         for i, sid in enumerate(sids[:4]):
             d = book.defs.get(sid)
             if d is None:
@@ -564,19 +581,19 @@ class Panels:
             if icon is not None:
                 surface.blit(pygame.transform.scale(icon, (40, 40)), (x + 8, ry + 4))
             locked = lv == 0
-            color = (150, 154, 165) if locked else (58, 50, 44)
-            key = settings.SKILL_HOTKEYS.get(sid)
-            keytxt = f"[{key}] " if key and lv > 0 else ""
-            name_txt = f"{keytxt}{d.name} Lv{lv}/{d.max_level}"
-            surface.blit(fs.render(name_txt, True, color), (x + 52, ry + 2))
-            desc = d.desc if not locked else f"Lv{settings.SKILL_UNLOCK_LEVEL.get(sid)} 可學習"
-            surface.blit(fs.render(desc[:14], True, (110, 104, 96)),
-                         (x + 52, ry + 18))
+            color = (98, 92, 86) if locked else (46, 38, 32)
+            name_txt = f"{d.name} Lv{lv}/{d.max_level}"
+            surface.blit(fs.render(name_txt, True, color), (x + 52, ry + 6))
             if lv > 0:
                 dmg = d.stat(lv, "damage", 100)
                 mp = d.stat(lv, "mpCon", 0)
-                surface.blit(fs.render(f"{dmg}% MP{mp}", True, (52, 108, 60)),
-                             (x + 52, ry + 32))
+                surface.blit(fs.render(f"{dmg}%  MP{mp}", True, (40, 90, 46)),
+                             (x + 52, ry + 26))
+            else:
+                need = settings.SKILL_UNLOCK_LEVEL.get(sid, 1)
+                surface.blit(fs.render(f"Lv{need} 可学习", True, color),
+                             (x + 52, ry + 26))
+            self._skill_tip(d, lv, mouse, pygame.Rect(x + 4, ry, SKL_W - 8, row_h))
             # 升级按钮（原版 BtSpUp）
             if book.sp > 0 and lv < d.max_level:
                 btn = pygame.Rect(x + SKL_W - 20, ry + 4,
@@ -601,11 +618,12 @@ class Panels:
         rect = pygame.Rect(x, y, w, h)
         self._skill_rect = rect
         _panel(surface, rect)
-        surface.blit(f.render("技能欄 (K)", True, (235, 235, 240)), (x + PAD, y + 8))
+        surface.blit(f.render("技能栏 (K)", True, (235, 235, 240)), (x + PAD, y + 8))
         sp = f.render(f"SP {book.sp}", True,
                       (255, 220, 90) if book.sp > 0 else (140, 146, 160))
         surface.blit(sp, (x + w - PAD - 34 - sp.get_width(), y + 8))
         self._add_chrome(surface, "skill", x, y, w, 24)
+        mouse = pygame.mouse.get_pos()
         for i, sid in enumerate(sids):
             d = book.defs.get(sid)
             if d is None:
@@ -624,14 +642,15 @@ class Panels:
             keytxt = f"  [{key}]" if key and lv > 0 else ""
             name_txt = f"{d.name} Lv{lv}/{d.max_level}{keytxt}"
             surface.blit(f.render(name_txt, True, color), (row.x + 46, ry + 6))
-            desc = d.desc if not locked else f"Lv{settings.SKILL_UNLOCK_LEVEL.get(sid)} 可學習"
-            surface.blit(fs.render(desc[:24], True, (150, 156, 170)),
-                         (row.x + 46, ry + 26))
             if lv > 0:
                 dmg = d.stat(lv, "damage", 100)
                 mp = d.stat(lv, "mpCon", 0)
                 info = fs.render(f"{dmg}% MP{mp}", True, (150, 210, 160))
-                surface.blit(info, (row.right - info.get_width() - 8, ry + 28))
+                surface.blit(info, (row.x + 46, ry + 28))
+            else:
+                surface.blit(fs.render(f"Lv{settings.SKILL_UNLOCK_LEVEL.get(sid)} 可学习",
+                                       True, (150, 156, 170)), (row.x + 46, ry + 28))
+            self._skill_tip(d, lv, mouse, row)
             if book.sp > 0 and lv < d.max_level:
                 btn = pygame.Rect(row.right - 26, ry + 4, 22, 22)
                 pygame.draw.rect(surface, (70, 130, 90), btn, border_radius=4)
@@ -660,13 +679,13 @@ class Panels:
                   if quests.is_accepted(qid)]
 
         # 标题（backgrnd2 为浅底，文字用深色）
-        surface.blit(f.render("任務日誌 (Q)", True, (60, 52, 44)),
+        surface.blit(f.render("任务日志 (Q)", True, (60, 52, 44)),
                      (x + 12, y + 4))
-        count = fs.render(f"進行中 {len(active)}", True, (120, 108, 92))
+        count = fs.render(f"进行中 {len(active)}", True, (120, 108, 92))
         surface.blit(count, (x + QST_W - count.get_width() - 40, y + 7))
 
         if not active:
-            empty = fs.render("目前沒有進行中的任務", True, (120, 108, 92))
+            empty = fs.render("目前没有进行中的任务", True, (120, 108, 92))
             surface.blit(empty, (x + 20, y + 60))
             return
 
@@ -684,7 +703,7 @@ class Panels:
             # 目标 NPC（优先交付 NPC，无则用接取 NPC）
             npc_id = d.end_npc if d.end_npc is not None else d.start_npc
             if npc_id is not None:
-                npc_txt = fs.render(f"目標 NPC：{self.assets.npc_name(str(npc_id))}",
+                npc_txt = fs.render(f"目标 NPC：{self.assets.npc_name(str(npc_id))}",
                                     True, (140, 110, 60))
                 surface.blit(npc_txt, (x + 30, ty))
                 ty += 16
@@ -789,16 +808,16 @@ class Panels:
                 lines.append(" ".join(parts))
             slot = islot_to_slot(item.info.get("islot") or "")
             if slot:
-                lines.append(SLOT_NAMES.get(slot, slot) + " · 點擊穿上")
+                lines.append(SLOT_NAMES.get(slot, slot) + " · 点击穿上")
             else:
-                lines.append("（此 WZ 資源缺少外觀，無法穿戴）")
+                lines.append("（此 WZ 资源缺少外观，无法穿戴）")
         elif item.kind == "consume":
             spec = item.info.get("spec") or {}
             if spec.get("hp"):
-                lines.append(f"恢復 HP {spec['hp']}")
+                lines.append(f"恢复 HP {spec['hp']}")
             if spec.get("mp"):
-                lines.append(f"恢復 MP {spec['mp']}")
-            lines.append("點擊使用")
+                lines.append(f"恢复 MP {spec['mp']}")
+            lines.append("点击使用")
         return "\n".join(lines)
 
     def _draw_tooltip(self, surface, mouse_pos) -> None:

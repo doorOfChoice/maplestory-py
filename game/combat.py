@@ -61,7 +61,7 @@ class DropItem:
         self.vx = random.uniform(-30, 30)
         self.vy = -120.0
         self.taken = False
-        self.name = item.get("name") if item else f"{self.meso} 金幣"
+        self.name = item.get("name") if item else f"{self.meso} 金币"
         # 落地基准：脚下 foothold 的表面（略微抬高让图形贴地），缺省用生成点
         self.ground_y = (ground_y if ground_y is not None
                          else y) - 4.0

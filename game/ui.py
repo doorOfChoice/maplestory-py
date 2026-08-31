@@ -7,7 +7,7 @@
 · NPC 对话 / 系统提示：ChatBalloon/npc 官方黑半透明九宫格气泡（含底部尖尾），
   即原版冒险岛 NPC 谈话窗体；NPC 名为金色首行，正文白色自动换行。
 · 死亡界面：红色帷幕 + UIWindow/UtilDlgEx 内嵌白纸窗体（原版系统公告窗）。
-· 地图名：半透明黑色圆角名牌（UI.wz 的 MiniMap/title 自带"小地圖"字样，
+· 地图名：半透明黑色圆角名牌（UI.wz 的 MiniMap/title 自带"小地图"字样，
   拉伸会花，故不用）。
 中文文本仍用系统 CJK 字体渲染。
 """
@@ -204,7 +204,7 @@ class UI:
 
         # 击杀 / 金币 / 背包（白色横栏右端，深色文字）
         info = self.font_small.render(
-            f"擊殺 {combat.total_kills}  金幣 {combat.meso}  背包 {player.inventory.total_items()}",
+            f"击杀 {combat.total_kills}  金币 {combat.meso}  背包 {player.inventory.total_items()}",
             True, (90, 96, 110))
         surface.blit(info, (bx + bar.get_width() - 238 - info.get_width(), by + 4))
 
@@ -213,7 +213,7 @@ class UI:
 
         # 操作提示（左上）
         hint = self.font_small.render(
-            "I 道具欄  K 技能欄  F 喝藥  1/2 技能  J 攻擊", True, (255, 255, 255))
+            "I 道具栏  K 技能栏  F 喝药  1/2 技能  J 攻击", True, (255, 255, 255))
         plate = pygame.Surface((hint.get_width() + 16, 20), pygame.SRCALPHA)
         pygame.draw.rect(plate, (0, 0, 0, 120), (0, 0, plate.get_width(), 20),
                          border_radius=6)
@@ -350,7 +350,7 @@ class UI:
             surface.blit(shadow, (x + 17, ty + 1))
             surface.blit(text, (x + 16, ty))
             ty += line_h
-        hint = self.font_small.render("Enter/Esc 或點擊關閉", True, (160, 165, 175))
+        hint = self.font_small.render("Enter/Esc 或点击关闭", True, (160, 165, 175))
         surface.blit(hint, (x + bw - hint.get_width() - 14,
                             y + h - hint.get_height() - 5))
 

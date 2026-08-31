@@ -1,11 +1,11 @@
-"""任務系統：解析 Quest.wz（Check/Act/Say/QuestInfo）→ QuestDef 數據模型。
+"""任务系统：解析 Quest.wz（Check/Act/Say/QuestInfo）→ QuestDef 数据模型。
 
-· QuestDef：單一任務的全部靜態數據 —— 接取條件（給予 NPC / 等級 / 職業 / 前置任務 /
-  所需物品）、完成條件（交付 NPC / 擊殺 mob / 收集 item）、接取獎勵（Act/0）、
-  完成獎勵（Act/1：exp / meso / 物品，負數=收回）、nextQuest 連鎖、Say 對話文本。
-· 文本標記渲染：把官方 Say 文本（#b/#r/#k 顏色、#p# NPC名、#t# 物品名、#m# 地圖名、
-  #o# 怪物名、#L..#l# 選項、\\n 換行）解析成可繪制的純文本行。
-· QuestLog：玩家運行時的任務狀態機 —— 未接 / 進行中 / 已完成，進度計數（擊殺 / 收集）。
+· QuestDef：单一任务的全部静态数据 —— 接取条件（给予 NPC / 等级 / 职业 / 前置任务 /
+  所需物品）、完成条件（交付 NPC / 击杀 mob / 收集 item）、接取奖励（Act/0）、
+  完成奖励（Act/1：exp / meso / 物品，负数=收回）、nextQuest 连锁、Say 对话文本。
+· 文本标记渲染：把官方 Say 文本（#b/#r/#k 颜色、#p# NPC名、#t# 物品名、#m# 地图名、
+  #o# 怪物名、#L..#l# 选项、\\n 换行）解析成可绘制的纯文本行。
+· QuestLog：玩家运行时的任务状态机 —— 未接 / 进行中 / 已完成，进度计数（击杀 / 收集）。
 """
 
 from __future__ import annotations
@@ -15,10 +15,11 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from .assets import Assets
+from .localize import to_simplified
 
-# 任務狀態
-Q_AVAILABLE = "available"    # 可接取（條件滿足，由 NPC 提供）
-Q_ACCEPTED = "accepted"      # 進行中
+# 任务状态
+Q_AVAILABLE = "available"    # 可接取（条件满足，由 NPC 提供）
+Q_ACCEPTED = "accepted"      # 进行中
 Q_COMPLETED = "completed"    # 已完成
 
 
@@ -39,13 +40,13 @@ def _str(node) -> str:
     if node is None:
         return ""
     try:
-        return str(node.value)
+        return to_simplified(str(node.value))
     except (TypeError, ValueError):
         return ""
 
 
 def _child_map(sub) -> Dict[str, Any]:
-    """WzSubProperty 的命名子節點 → dict。"""
+    """WzSubProperty 的命名子节点 → dict。"""
     if sub is None:
         return {}
     return {c.name: c for c in sub.children()}
@@ -64,14 +65,14 @@ def _list_pairs(sub, key_id: str = "id", key_count: str = "count") -> List[Tuple
 
 
 def _parse_jobs(job_sub) -> List[int]:
-    """job 節點下 0..N 的職業限制；無限制返回空列表。"""
+    """job 节点下 0..N 的职业限制；无限制返回空列表。"""
     if job_sub is None:
         return []
     return [_int(c) for c in job_sub.children() if c.name.isdigit()]
 
 
 def _say_lines(sub) -> List[str]:
-    """把 Say 節點下的 0..N 個數字子節點按順序收集成文本行。"""
+    """把 Say 节点下的 0..N 个数字子节点按顺序收集成文本行。"""
     lines: List[str] = []
     if sub is None:
         return lines
@@ -91,37 +92,37 @@ class QuestDef:
     parent: str = ""
     order: int = 0
     area: int = 0
-    # ── 接取條件（Check/0）──────────────────────────────
+    # ── 接取条件（Check/0）──────────────────────────────
     start_npc: Optional[int] = None
     lvmin: int = 0
     lvmax: int = 0            # 0 = 不限
     jobs: List[int] = field(default_factory=list)   # 空 = 不限
     start_items: List[Tuple[int, int]] = field(default_factory=list)  # 接取需持有
     prereq: List[Tuple[int, int]] = field(default_factory=list)       # (quest, state)
-    # ── 完成條件（Check/1）──────────────────────────────
+    # ── 完成条件（Check/1）──────────────────────────────
     end_npc: Optional[int] = None
     kills: List[Tuple[int, int]] = field(default_factory=list)        # (mob, count)
     end_items: List[Tuple[int, int]] = field(default_factory=list)    # (item, count)
-    # ── 接取獎勵（Act/0）────────────────────────────────
+    # ── 接取奖励（Act/0）────────────────────────────────
     accept_items: List[Tuple[int, int]] = field(default_factory=list)
-    # ── 完成獎勵（Act/1）────────────────────────────────
+    # ── 完成奖励（Act/1）────────────────────────────────
     reward_exp: int = 0
     reward_money: int = 0
-    reward_items: List[Tuple[int, int]] = field(default_factory=list) # 負數=收回
+    reward_items: List[Tuple[int, int]] = field(default_factory=list) # 负数=收回
     next_quest: Optional[int] = None
-    # ── Say 對話 ────────────────────────────────────────
+    # ── Say 对话 ────────────────────────────────────────
     accept_lines: List[str] = field(default_factory=list)
     accept_yes: List[str] = field(default_factory=list)
     accept_no: List[str] = field(default_factory=list)
     complete_lines: List[str] = field(default_factory=list)
     complete_yes: List[str] = field(default_factory=list)
-    complete_stop: List[str] = field(default_factory=list)   # 條件未滿足時的提示
+    complete_stop: List[str] = field(default_factory=list)   # 条件未满足时的提示
     # ── QuestInfo 描述 ──────────────────────────────────
     desc0: str = ""           # 接取前提示
-    desc1: str = ""           # 進行中描述
+    desc1: str = ""           # 进行中描述
     desc2: str = ""           # 完成描述
 
-    # ── 便捷查詢 ────────────────────────────────────────
+    # ── 便捷查询 ────────────────────────────────────────
     def kill_req(self, mob_id: int) -> int:
         for mid, count in self.kills:
             if mid == mob_id:
@@ -136,7 +137,7 @@ class QuestDef:
 
 
 def load_quest_defs(assets: Assets) -> Dict[str, QuestDef]:
-    """從 Quest.wz 解析全部任務 → {qid: QuestDef}。失敗靜默跳過。"""
+    """从 Quest.wz 解析全部任务 → {qid: QuestDef}。失败静默跳过。"""
     wz = assets.wz["Quest"]
     root = wz.root
     check_img = root.images.get("Check.img")
@@ -210,7 +211,7 @@ def _parse_one(qid: str, node, act, say, info) -> Optional[QuestDef]:
     inf = info.get(qid) if info is not None else None
     name = _str(_get(inf, "name"))
     if not name:
-        name = f"任務 {qid}"
+        name = f"任务 {qid}"
     return QuestDef(
         qid=qid,
         name=name,
@@ -257,23 +258,23 @@ def _collect_stop(stop_node) -> List[str]:
 
 
 # ════════════════════════════════════════════════════════════════════
-# 文本標記渲染
+# 文本标记渲染
 # ════════════════════════════════════════════════════════════════════
 
-# 名稱標記：\x23 為 ASCII '#'
+# 名称标记：\x23 为 ASCII '#'
 _NAME_RE = re.compile(r"#([ptmoi])(\d+)#")
-# 選項標記：#L0# ... #l（整體去掉）
+# 选项标记：#L0# ... #l（整体去掉）
 _CHOICE_RE = re.compile(r"#L\d+#|#l")
-# 顏色標記：#b #r #g #d #k 等
+# 颜色标记：#b #r #g #d #k 等
 _COLOR_RE = re.compile(r"#[brgdk]")
 
 
 def render_markup(text: str, assets: Optional[Assets] = None,
                   map_name=None, npc_name=None, item_name=None,
                   mob_name=None) -> str:
-    """把官方 Say 文本解析成純文本（去標記、替換名稱、\\n 轉換行）。
+    """把官方 Say 文本解析成纯文本（去标记、替换名称、\\n 转换行）。
 
-    #p<id># → NPC 名 / #t<id># → 物品名 / #m<id># → 地圖名 / #o<id># → 怪物名。
+    #p<id># → NPC 名 / #t<id># → 物品名 / #m<id># → 地图名 / #o<id># → 怪物名。
     """
     if not text:
         return ""
@@ -298,7 +299,7 @@ def render_markup(text: str, assets: Optional[Assets] = None,
 
 
 def wrap_lines(text: str, width_px, font, _wrap) -> List[str]:
-    """按可用寬度把多段（\\n 分隔）文本折行。"""
+    """按可用宽度把多段（\\n 分隔）文本折行。"""
     lines: List[str] = []
     for seg in text.split("\n"):
         lines.extend(_wrap(seg.strip(), width_px, font))
@@ -306,20 +307,20 @@ def wrap_lines(text: str, width_px, font, _wrap) -> List[str]:
 
 
 # ════════════════════════════════════════════════════════════════════
-# 任務狀態機
+# 任务状态机
 # ════════════════════════════════════════════════════════════════════
 
 class QuestLog:
-    """玩家任務狀態。由 Player 持有；Game 在 NPC 對話 / 擊殺 / 拾取時調用。"""
+    """玩家任务状态。由 Player 持有；Game 在 NPC 对话 / 击杀 / 拾取时调用。"""
 
     def __init__(self, defs: Dict[str, QuestDef]):
         self.defs = defs
         self.status: Dict[str, str] = {}        # qid → Q_ACCEPTED / Q_COMPLETED
         self.kills: Dict[str, Dict[int, int]] = {}   # qid → {mob_id: count}
-        # 收集進度：直接讀背包 etc 數量，這裡僅緩存上限用
-        self.accepted_order: List[str] = []     # 記錄接取順序（任務日誌用）
+        # 收集进度：直接读背包 etc 数量，这里仅缓存上限用
+        self.accepted_order: List[str] = []     # 记录接取顺序（任务日志用）
 
-    # ── 查詢 ────────────────────────────────────────────────────────
+    # ── 查询 ────────────────────────────────────────────────────────
     def is_accepted(self, qid: str) -> bool:
         return self.status.get(qid) == Q_ACCEPTED
 
@@ -333,7 +334,7 @@ class QuestLog:
         return self.defs.get(qid)
 
     def can_start(self, qid: str, player) -> bool:
-        """接取條件：等級 / 職業 / 前置任務 / 所需物品。"""
+        """接取条件：等级 / 职业 / 前置任务 / 所需物品。"""
         d = self.defs.get(qid)
         if d is None or self.started(qid) or d.start_npc is None:
             return False
@@ -358,7 +359,7 @@ class QuestLog:
         return True
 
     def can_complete(self, qid: str, player) -> bool:
-        """完成條件：擊殺數量 / 收集數量（end_items）。"""
+        """完成条件：击杀数量 / 收集数量（end_items）。"""
         d = self.defs.get(qid)
         if d is None or not self.is_accepted(qid):
             return False
@@ -389,21 +390,21 @@ class QuestLog:
                 return item.count
         return 0
 
-    # ── 動作 ────────────────────────────────────────────────────────
+    # ── 动作 ────────────────────────────────────────────────────────
     def accept(self, qid: str, player) -> bool:
         if not self.can_start(qid, player):
             return False
         self.status[qid] = Q_ACCEPTED
         self.kills.setdefault(qid, {})
         self.accepted_order.append(qid)
-        # Act/0：接取時贈送物品
+        # Act/0：接取时赠送物品
         for item_id, count in self.defs[qid].accept_items:
             self._give_item(player, item_id, count)
         return True
 
     def complete(self, qid: str, player, combat=None, assets=None,
                  audio=None) -> bool:
-        """完成任務：套用 Act/1 獎勵（exp / meso / 物品；負數收回）。"""
+        """完成任务：套用 Act/1 奖励（exp / meso / 物品；负数收回）。"""
         d = self.defs.get(qid)
         if d is None or not self.can_complete(qid, player):
             return False
@@ -429,9 +430,9 @@ class QuestLog:
             audio.play("QuestClear", 0.6)
         return True
 
-    # ── 進度鉤子 ────────────────────────────────────────────────────
+    # ── 进度钩子 ────────────────────────────────────────────────────
     def on_kill(self, mob_id: int) -> None:
-        """擊殺怪物：為所有需要該怪的進行中任務計數。"""
+        """击杀怪物：为所有需要该怪的进行中任务计数。"""
         for qid, d in self.defs.items():
             if not self.is_accepted(qid):
                 continue
@@ -439,7 +440,7 @@ class QuestLog:
                 rec = self.kills.setdefault(qid, {})
                 rec[mob_id] = min(rec.get(mob_id, 0) + 1, d.kill_req(mob_id))
 
-    # ── 內部 ────────────────────────────────────────────────────────
+    # ── 内部 ────────────────────────────────────────────────────────
     @staticmethod
     def _give_item(player, item_id: int, count: int) -> None:
         from .inventory import make_item

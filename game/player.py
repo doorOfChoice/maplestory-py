@@ -68,7 +68,7 @@ class Player:
         self._load_anim(POSE_IDLE)
 
     def _init_new_game(self, assets: Assets, quest_defs) -> None:
-        """新遊戲初始化：預設屬性、初始藥水、預設裝備、技能初始贈送。"""
+        """新游戏初始化：预设属性、初始药水、预设装备、技能初始赠送。"""
         self.hp = settings.PLAYER_MAX_HP
         self.max_hp = settings.PLAYER_MAX_HP
         self.mp = settings.PLAYER_MAX_MP
@@ -88,7 +88,7 @@ class Player:
         self.quests = QuestLog(quest_defs or {})
 
     def _apply_save_data(self, data: dict, assets: Assets, quest_defs) -> None:
-        """從存檔 dict 恢復玩家狀態。"""
+        """从存档 dict 恢复玩家状态。"""
         pd = data["player"]
         self.level = pd["level"]
         self.exp = pd["exp"]
@@ -467,7 +467,7 @@ class Player:
             return None
         rng = settings.ATTACK_RANGE
         if self.pending_skill is not None and self.pending_skill["range"] > 0:
-            # 技能范围以玩家为中心（如劍氣縱橫 range 130）
+            # 技能范围以玩家为中心（如剑气纵横 range 130）
             rng = float(self.pending_skill["range"])
             left = self.x - rng / 2
         elif self.facing_right:

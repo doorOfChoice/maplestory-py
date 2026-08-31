@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 
 from . import settings
 from .assets import Assets
+from .localize import to_simplified
 
 
 class SkillDef:
@@ -70,8 +71,8 @@ def load_skill_defs(assets: Assets, skill_ids: List[str]) -> Dict[str, SkillDef]
                 if sn is not None:
                     nm = sn.get("name")
                     de = sn.get("desc")
-                    name = str(nm.value) if nm is not None else name
-                    desc = str(de.value) if de is not None else ""
+                    name = to_simplified(str(nm.value)) if nm is not None else name
+                    desc = to_simplified(str(de.value)) if de is not None else ""
             max_lv = min(len(levels), settings.SKILL_MAX_LEVEL)
             defs[sid] = SkillDef(sid, name, desc, levels[:max_lv], max_lv)
     except Exception:
@@ -87,7 +88,7 @@ class SkillBook:
         self.levels: Dict[str, int] = {}
         self.sp = 0
         self.cooldowns: Dict[str, float] = {}
-        # 1 级自动赠送首个可学技能（魔天一擊），让开局就有技能体验
+        # 1 级自动赠送首个可学技能（魔天一击），让开局就有技能体验
         first = next((sid for sid, lv in sorted(
             settings.SKILL_UNLOCK_LEVEL.items(), key=lambda kv: kv[1])), None)
         if first in self.defs:
