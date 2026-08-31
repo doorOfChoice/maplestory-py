@@ -17,6 +17,7 @@ from .physics import Physics
 from .inventory import Inventory, make_item
 from .skills import SkillBook
 from .quests import QuestLog
+from .motion import approach, JumpFeather
 
 POSE_IDLE = "stand1"
 POSE_RUN = "walk1"
@@ -59,6 +60,9 @@ class Player:
         self.drop_timer = 0.0
         self.hurt_timer = 0.0
         self.invuln_timer = 0.0
+        # 跳跃手感：按压缓冲 + 土狼时间
+        self.feather = JumpFeather(settings.JUMP_BUFFER_TIME,
+                                   settings.COYOTE_TIME)
 
         if save_data is not None:
             self._apply_save_data(save_data, assets, quest_defs)
@@ -156,28 +160,31 @@ class Player:
         return False
 
     # ── 控制 ───────────────────────────────────────────────────────
-    def move_left(self) -> None:
-        self.vx = -settings.MOVE_SPEED
-        self.facing_right = False
-
-    def move_right(self) -> None:
-        self.vx = settings.MOVE_SPEED
-        self.facing_right = True
-
     def stop_move(self) -> None:
         self.vx = 0.0
 
     def jump(self) -> None:
+        # 记录跳跃意图（缓冲），供 update 在可跳时机（含土狼窗口）执行。
+        self.feather.press()
+        self._try_jump()
+
+    def _try_jump(self) -> None:
+        """在地面 / 土狼窗口 / 绳梯 / 蹬墙 的跳。成功则清空缓冲避免重复起跳。"""
         if self.climbing:
             # 从绳/梯上跳下：向上小跳（JUMP_VELOCITY 本身为负）
             self.climbing = False
             self.detach_cooldown = 0.20
             self.vy = settings.JUMP_VELOCITY * 0.4
+            self.feather.consume()
             return
-        if self.on_ground:
+        if self.attacking:
+            return   # 攻击硬直中不起跳（原地挥击）
+        if self.on_ground or self.feather.coyote > 0.0:
             self.vy = settings.JUMP_VELOCITY
             self.on_ground = False
-        elif self.wall_dir and not self.attacking and self.hurt_timer <= 0:
+            self.feather.consume()
+            return
+        if self.wall_dir and not self.attacking and self.hurt_timer <= 0:
             # 蹬墙跳：反向弹开 + 向上，短暂失控期内屏蔽朝原墙方向的输入
             d = self.wall_dir
             self.vy = settings.JUMP_VELOCITY
@@ -186,6 +193,7 @@ class Player:
             self.wall_dir = 0
             self.wall_side = d
             self.wall_lock = settings.WALL_JUMP_LOCK
+            self.feather.consume()
 
     def drop_through(self, physics: Optional[Physics] = None) -> None:
         if self.on_ground and self.cur_fh is not None:
@@ -293,6 +301,13 @@ class Player:
         push_back_to_wall = self.wall_side != 0 and self.wall_lock > 0 and (
             (self.wall_side > 0 and keys.right and not keys.left)
             or (self.wall_side < 0 and keys.left and not keys.right))
+
+        # 跳跃手感：推进缓冲/土狼窗口，并在可跳（缓冲内 & 地面/土狼窗口）时重试起跳。
+        # 顺序放在输入之前：落地前一瞬按跳 → 缓冲保留 → 落地这帧立即接上，按键跟手。
+        self.feather.tick(dt, self.on_ground)
+        if self.feather.buffered:
+            self._try_jump()
+
         if self.attacking:
             self.stop_move()
         elif self.hurt_timer > 0:
@@ -300,12 +315,19 @@ class Player:
             self.vx *= max(0.0, 1 - 6.0 * dt)
         elif push_back_to_wall:
             pass    # 蹬墙跳失控期：保持弹开速度，方向输入先不抵消
-        elif keys.left and not keys.right:
-            self.move_left()
-        elif keys.right and not keys.left:
-            self.move_right()
         else:
-            self.stop_move()
+            # 水平缓动：地面快、空中按 AIR_ACCEL 打折扣 → 柔化起停（丝滑的关键）。
+            target_vx = 0.0
+            if keys.left and not keys.right:
+                target_vx = -settings.MOVE_SPEED
+                self.facing_right = False
+            elif keys.right and not keys.left:
+                target_vx = settings.MOVE_SPEED
+                self.facing_right = True
+            accel = settings.MOVE_ACCEL
+            if not self.on_ground:
+                accel *= settings.AIR_ACCEL
+            self.vx = approach(self.vx, target_vx, accel * dt)
 
         # 爬梯/爬绳（含细绳）
         ladder = physics.rope_at(self.x, self.y)

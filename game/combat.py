@@ -19,6 +19,7 @@ from .animation import Animation
 from .assets import Assets
 from .effects import Effect
 from .inventory import make_item
+from .fonts import render_text
 
 
 class DamageNumber:
@@ -42,7 +43,7 @@ class DamageNumber:
         if DamageNumber.FONT is None:
             DamageNumber.FONT = pygame.font.Font(None, 20)
         sx, sy = camera.to_screen(self.x, self.y)
-        text = DamageNumber.FONT.render(str(self.amount), True, self.color)
+        text = render_text(DamageNumber.FONT, str(self.amount), self.color)
         surface.blit(text, (int(sx - text.get_width() / 2), int(sy)))
 
 

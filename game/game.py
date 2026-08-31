@@ -31,7 +31,7 @@ from .panels import Panels
 from .quests import load_quest_defs, render_markup
 from .save_manager import SaveManager
 from .splash import Splash
-from .fonts import load_cjk_font
+from .fonts import load_cjk_font, render_text
 
 # 输入对象（把 pygame 按键抽象成 Player.update 需要的形状）
 class _Keys:
@@ -77,6 +77,8 @@ class Game:
         self._loading = False
         self._pending_map: Optional[Tuple[str, Optional[str]]] = None
         self._loading_timer = 0.0
+        # 黑场淡入进度（0=无；进入游戏/切图/重生后置 1，随 dt 递减）
+        self.fade = 0.0
 
         threading.Thread(target=self._build_world, args=(start_map,),
                          daemon=True).start()
@@ -157,6 +159,7 @@ class Game:
         self._portal_cooldown = 0.0
         self._portal_pulse = 0.0
         self.spawn_grace = settings.SPAWN_GRACE
+        self.fade = 1.0        # 开屏进入游戏时黑场淡入
 
         self.audio.play_bgm()
         if self.save_data:
@@ -474,6 +477,8 @@ class Game:
         self.player.attacking = False
         self.player.hurt_timer = 0.0
         self.player.invuln_timer = 0.0
+        self.player.feather.consume()
+        self.fade = 1.0        # 重生黑场淡入
         self._place_player_at_spawn()
         self._spawn_life()
         self.combat.drops.clear()
@@ -496,10 +501,10 @@ class Game:
                 return p
         return None
 
-    def _check_portal(self) -> bool:
+    def _check_portal(self, dt: float) -> bool:
         """玩家站在 type-2 传送门上按住 ↑ 键才切图（与原版一致）。返回是否切图。"""
         if self._portal_cooldown > 0:
-            self._portal_cooldown -= 1 / 60
+            self._portal_cooldown -= dt
             return False
         if not self.keys.up:
             return False
@@ -556,6 +561,7 @@ class Game:
         self.panels.flash(self.assets.map_name())
         self._loading = False
         self._pending_map = None
+        self.fade = 1.0        # 黑场淡入新地图
 
     def _portal_position(self, portal_name: Optional[str]):
         """目标地图出生点：优先指定 portal，其次 sp 入口。"""
@@ -579,6 +585,9 @@ class Game:
     # ── 更新 ───────────────────────────────────────────────────────
     def _update(self, dt: float) -> None:
         self._portal_pulse += dt
+        # 黑场淡入计时（切图 / 重生后用真实 dt 递减）
+        if self.fade > 0.0:
+            self.fade = max(0.0, self.fade - dt / settings.FADE_TIME)
         # 定时自动存档
         self._save_timer += dt
         if self._save_timer >= settings.SAVE_INTERVAL:
@@ -615,7 +624,7 @@ class Game:
 
         # 传送门检测
         if not self.ui.quest_visible and not self.ui.dialog_visible:
-            if self._check_portal():
+            if self._check_portal(dt):
                 return
 
         # 掉出地图底部：回出生点并扣血（避免永远下坠）
@@ -705,27 +714,37 @@ class Game:
         self.ui.draw_quest(self.canvas)
         self.ui.draw_death(self.canvas)
 
-        # 2x 放大到窗口
-        scaled = pygame.transform.scale(
-            self.canvas, (settings.WINDOW_W, settings.WINDOW_H))
-        self.screen.blit(scaled, (0, 0))
+        # 黑场淡入（切图 / 重生后从黑渐变到场景，避免瞬间弹出）
+        if self.fade > 0.0:
+            alpha = int(255 * self.fade)
+            veil = pygame.Surface((settings.VIEW_W, settings.VIEW_H),
+                                  pygame.SRCALPHA)
+            veil.fill((0, 0, 0, alpha))
+            self.canvas.blit(veil, (0, 0))
+
+        self._present()
+
+    def _present(self) -> None:
+        """把 canvas 呈现到窗口。scale=1 时直接 blit（省去每帧全画面复制）。"""
+        canvas = self.canvas
+        if settings.WINDOW_SCALE != 1:
+            canvas = pygame.transform.scale(
+                canvas, (settings.WINDOW_W, settings.WINDOW_H))
+        self.screen.blit(canvas, (0, 0))
         pygame.display.flip()
 
     def _draw_loading(self) -> None:
         self.canvas.fill((0, 0, 0))
         font = load_cjk_font(48)
         dots = "." * (int(self._loading_timer * 3) % 4)
-        text = font.render(f"载入中{dots}", True, (255, 255, 255))
+        text = render_text(font, f"载入中{dots}", (255, 255, 255))
         rect = text.get_rect(center=(settings.VIEW_W // 2, settings.VIEW_H // 2))
         self.canvas.blit(text, rect)
         hint_font = load_cjk_font(24)
-        hint = hint_font.render("Loading map...", True, (160, 160, 160))
+        hint = render_text(hint_font, "Loading map...", (160, 160, 160))
         hint_rect = hint.get_rect(center=(settings.VIEW_W // 2, settings.VIEW_H // 2 + 50))
         self.canvas.blit(hint, hint_rect)
-        scaled = pygame.transform.scale(
-            self.canvas, (settings.WINDOW_W, settings.WINDOW_H))
-        self.screen.blit(scaled, (0, 0))
-        pygame.display.flip()
+        self._present()
 
     def _portal_frame_index(self, frames, t: float) -> int:
         """依累积秒数定位动画帧：每帧显示其 delay 毫秒时长（循环播放）。"""
@@ -804,10 +823,7 @@ class Game:
     def _draw_splash(self) -> None:
         self.splash.draw(self.canvas, progress=self._boot_progress,
                          status=self._boot_status)
-        scaled = pygame.transform.scale(
-            self.canvas, (settings.WINDOW_W, settings.WINDOW_H))
-        self.screen.blit(scaled, (0, 0))
-        pygame.display.flip()
+        self._present()
 
     def _shutdown(self) -> None:
         if not self._world_ready or not getattr(self, "_boot_done", False):

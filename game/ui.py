@@ -19,7 +19,7 @@ from typing import List, Optional, Tuple
 import pygame
 
 from . import settings
-from .fonts import load_cjk_font
+from .fonts import load_cjk_font, render_text
 
 
 def _load_font(size: int) -> pygame.font.Font:
@@ -188,7 +188,7 @@ class UI:
         # 数值：HP/MP 用官方像素数字（跟在烤死的 HP/MP 标签后面）
         self.draw_wz_number(surface, f"{int(player.hp)}/{player.max_hp}", gx + 20, gy + 2)
         self.draw_wz_number(surface, f"{int(player.mp)}/{player.max_mp}", gx + 131, gy + 2)
-        exp_txt = self.font_small.render(f"{ratios[2] * 100:.2f}%", True, (255, 255, 255))
+        exp_txt = render_text(self.font_small, f"{ratios[2] * 100:.2f}%", (255, 255, 255))
         surface.blit(exp_txt, (gx + 250, gy))
         # 等级数字（跟在烤死的 "Lv." 凹槽后面）
         self.draw_wz_number(surface, str(player.level), bx + 36, by + 50)
@@ -201,16 +201,18 @@ class UI:
                                    + i * 54, by + bar.get_height() - btn.get_height() - 8))
 
         # 击杀 / 金币 / 背包（白色横栏右端，深色文字）
-        info = self.font_small.render(
+        info = render_text(
+            self.font_small,
             f"击杀 {combat.total_kills}  金币 {combat.meso}  背包 {player.inventory.total_items()}",
-            True, (90, 96, 110))
+            (90, 96, 110))
         surface.blit(info, (bx + bar.get_width() - 238 - info.get_width(), by + 4))
 
         # 地图名：由 game 层按小地图面板位置调用 draw_map_name（右上避让）
 
         # 操作提示（左上）
-        hint = self.font_small.render(
-            "I 道具栏  K 技能栏  F 喝药  1/2 技能  J 攻击", True, (255, 255, 255))
+        hint = render_text(
+            self.font_small,
+            "I 道具栏  K 技能栏  F 喝药  1/2 技能  J 攻击", (255, 255, 255))
         plate = pygame.Surface((hint.get_width() + 16, 20), pygame.SRCALPHA)
         pygame.draw.rect(plate, (0, 0, 0, 120), (0, 0, plate.get_width(), 20),
                          border_radius=6)

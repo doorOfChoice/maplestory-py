@@ -54,6 +54,7 @@ class Monster:
         self.action = "stand"
         self.anim = Animation([], loop=True)
         self.origin = (0, 0)
+        self._flipped = None      # 预翻转帧（dir>0 时用），避免每帧 flip
         self.dir = -1 if self.flip else 1   # 朝向：+1 右
 
         # AI 状态
@@ -76,10 +77,14 @@ class Monster:
         if action == self.action and self.anim.frames:
             return
         self.action = action
-        self.anim.frames = self.assets.mob_frames(self.mob_id, action)
+        raw = self.assets.mob_frames(self.mob_id, action)
+        self.anim.frames = raw
         self.anim.loop = True
         self.anim.restart()
         self.origin = self.assets.mob_origin(self.mob_id, action) or (0, 0)
+        # 预翻转缓存：每帧 draw 只取帧、不重复 flip（帧序/delay 与原始一致）
+        self._flipped = ([(pygame.transform.flip(s, True, False), d)
+                          for s, d in raw] if raw else None)
 
     # ── 受击 / 死亡 ────────────────────────────────────────────────
     def take_hit(self, damage: int, from_x: Optional[float] = None) -> bool:
@@ -273,14 +278,15 @@ class Monster:
 
     # ── 绘制 ───────────────────────────────────────────────────────
     def draw(self, surface: pygame.Surface, camera) -> None:
-        frame_surf = self.anim.surface
+        # 朝向为右时用预翻转帧，避开每帧 transform.flip（频繁分配触发 GC 尖峰）
+        frames = self._flipped if self.dir > 0 else self.anim.frames
+        if not frames or self.anim.frame >= len(frames):
+            return
+        frame_surf = frames[self.anim.frame][0]
         if frame_surf is None:
             return
         if self.hit_flash > 0 and int(self.hit_flash * 60) % 2 == 0:
             return
-        # 朝向：美术默认朝左（未翻转），向右移动时水平翻转
-        if self.dir > 0:
-            frame_surf = pygame.transform.flip(frame_surf, True, False)
         # 锚点：脚底 = (x, cy)；origin 是帧内原点（脚底）相对左上角偏移
         sx, sy = camera.to_screen(self.x, self.cy)
         top_left = (sx - self.origin[0], sy - self.origin[1])

@@ -34,13 +34,17 @@ class Camera:
         return (self.img_x, self.img_y)
 
     def center_on(self, wx: float, wy: float) -> None:
-        """把目标世界坐标尽量放到视口中央，并夹紧到地图边界。"""
+        """把目标世界坐标尽量放到视口中央，并夹紧到地图边界。
+
+        相机位置取整成像素：地图 blit 用 int(img_x)，实体用浮点再取整，
+        两者若不共用同一整数基准会在±1px 间来回抖动。取整后两处一致即可消除。
+        """
         vw, vh = settings.VIEW_W, settings.VIEW_H
         tx = wx - vw / 2
         tx = max(self.bounds_left, min(tx, self.bounds_left + self.map_width - vw))
         ty = wy - vh * 0.6
         ty = max(self.bounds_top, min(ty, self.bounds_top + self.map_height - vh))
-        self.x, self.y = tx, ty
+        self.x, self.y = int(tx), int(ty)
 
     def to_screen(self, wx: float, wy: float) -> Tuple[float, float]:
         """世界坐标 → 屏幕坐标。"""

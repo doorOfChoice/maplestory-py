@@ -26,12 +26,16 @@ WINDOW_SCALE = 1
 WINDOW_W = VIEW_W * WINDOW_SCALE
 WINDOW_H = VIEW_H * WINDOW_SCALE
 FPS = 60
+FADE_TIME = 0.4                 # 地图切换 / 重生后的黑场淡入秒数
 
 # ── 角色物理（世界坐标，y 向下）────────────────────────────────────
 GRAVITY = 2200.0                 # px/s^2
 MOVE_SPEED = 150.0               # 地面水平速度 px/s
-AIR_ACCEL = 0.55                 # 空中水平加速度倍率
+MOVE_ACCEL = 2600.0              # 地面水平加速度 px/s^2（速度缓动，避免瞬起瞬停）
+AIR_ACCEL = 0.55                 # 空中水平加速度倍率（对 MOVE_ACCEL 打折扣）
 JUMP_VELOCITY = -700.0           # 起跳初速度（向上为负）
+COYOTE_TIME = 0.08               # 离开地面后仍可起跳的窗口（秒）
+JUMP_BUFFER_TIME = 0.12          # 落地前一瞬按跳仍生效的缓冲（秒）
 MAX_FALL_SPEED = 1600.0
 LADDER_SPEED = 130.0             # 爬梯速度
 CLIMB_TOP_OVERSHOOT = 40.0       # 爬出绳/梯顶端的最大越出距离（用于落到顶部平台）
