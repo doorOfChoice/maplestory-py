@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import os
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import pygame
 
@@ -95,6 +95,11 @@ class Game:
         self._portal_pulse = 0.0         # 传送门脉冲动画相位
         self.spawn_grace = settings.SPAWN_GRACE
 
+        # 地图切换异步加载状态机
+        self._loading = False
+        self._pending_map: Optional[Tuple[str, Optional[str]]] = None
+        self._loading_timer = 0.0
+
         self.audio.play_bgm()
         self.ui.show_dialog("歡迎", ["冒險島 v113 · 弓箭手村東部小山",
                                      "A/D(或←→) 移動  空格 跳躍  S+空格 下跳",
@@ -118,18 +123,11 @@ class Game:
 
     # ── 输入 ───────────────────────────────────────────────────────
     def _handle_input(self) -> None:
-        pressed = pygame.key.get_pressed()
-        # WASD 与方向键并存
-        self.keys.left = bool(pressed[pygame.K_LEFT] or pressed[pygame.K_a])
-        self.keys.right = bool(pressed[pygame.K_RIGHT] or pressed[pygame.K_d])
-        self.keys.up = bool(pressed[pygame.K_UP] or pressed[pygame.K_w])
-        self.keys.down = bool(pressed[pygame.K_DOWN] or pressed[pygame.K_s])
-        self.keys.attack = bool(pressed[pygame.K_j])
-        self.keys.jump = bool(pressed[pygame.K_SPACE])
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+            elif self._loading:
+                continue       # 加载期间只处理关闭事件
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if not self.dead:
                     cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
@@ -213,6 +211,18 @@ class Game:
                     self.player.drop_through(self.physics)
                 elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                     self._try_talk()
+
+        # 加载期间不采集按键、不兜底攻击
+        if self._loading:
+            return
+        pressed = pygame.key.get_pressed()
+        # WASD 与方向键并存
+        self.keys.left = bool(pressed[pygame.K_LEFT] or pressed[pygame.K_a])
+        self.keys.right = bool(pressed[pygame.K_RIGHT] or pressed[pygame.K_d])
+        self.keys.up = bool(pressed[pygame.K_UP] or pressed[pygame.K_w])
+        self.keys.down = bool(pressed[pygame.K_DOWN] or pressed[pygame.K_s])
+        self.keys.attack = bool(pressed[pygame.K_j])
+        self.keys.jump = bool(pressed[pygame.K_SPACE])
 
         # 兜底：弹窗瞬间按住的 J 等按键事件会被模态分支吞掉，
         # 用持续按键状态补触发攻击（按下即生效，无需等松开重按）
@@ -432,23 +442,32 @@ class Game:
         return False
 
     def _enter_map(self, map_id: str, portal_name: Optional[str]) -> None:
-        """切换到目标地图：重建资源 / 物理 / 相机 / BGM / 生命实体 / 玩家位置。"""
+        """切换到目标地图：后台渲染地图，主线程显示加载画面。"""
+        if self._loading:
+            return
         self.ui.hide_dialog()
         self.ui.hide_quest()
         self._talk_npc = None
         self._quest_flow = None
         self.audio.stop_bgm()
 
-        self.assets.load_map(map_id)
+        self.assets.start_load_map(map_id)
+        self._loading = True
+        self._pending_map = (map_id, portal_name)
+        self._loading_timer = 0.0
+
+    def _finish_loading(self) -> None:
+        """后台线程完成后，在主线程恢复游戏状态。"""
+        bgm_path = self.assets.finish_load_map()
+        map_id, portal_name = self._pending_map
         self.physics = Physics(self.assets.footholds, self.assets.ropes,
                                bounds=self.assets.bounds)
         self.camera = Camera(self.assets.map_width, self.assets.map_height,
                              self.assets.bounds["left"], self.assets.bounds["top"])
-        self.audio.bgm_path = self.assets.map_bgm_path()
+        self.audio.bgm_path = bgm_path
         self._life_mobs = [d for d in self.assets.life if d["type"] == "mob"]
         self._life_npcs = [d for d in self.assets.life if d["type"] == "npc"]
 
-        # 玩家出生到目标传送门（或 sp 入口）
         sx, sy = self._portal_position(portal_name)
         self.spawn_x, self.spawn_y = sx, sy
         self._place_player_at_spawn()
@@ -461,6 +480,8 @@ class Game:
 
         self.audio.play_bgm()
         self.panels.flash(self.assets.map_name())
+        self._loading = False
+        self._pending_map = None
 
     def _portal_position(self, portal_name: Optional[str]):
         """目标地图出生点：优先指定 portal，其次 sp 入口。"""
@@ -475,6 +496,12 @@ class Game:
     # ── 更新 ───────────────────────────────────────────────────────
     def _update(self, dt: float) -> None:
         self._portal_pulse += dt
+        # 地图切换加载中：等待后台线程，恢复后继续游戏逻辑
+        if self._loading:
+            self._loading_timer += dt
+            if self.assets.is_load_done:
+                self._finish_loading()
+            return
         if self.dead:
             return
 
@@ -554,6 +581,9 @@ class Game:
 
     # ── 绘制 ───────────────────────────────────────────────────────
     def _draw(self) -> None:
+        if self._loading:
+            self._draw_loading()
+            return
         # 地图
         self.canvas.blit(
             self.assets.map_surface, (0, 0),
@@ -582,6 +612,22 @@ class Game:
         self.ui.draw_death(self.canvas)
 
         # 2x 放大到窗口
+        scaled = pygame.transform.scale(
+            self.canvas, (settings.WINDOW_W, settings.WINDOW_H))
+        self.screen.blit(scaled, (0, 0))
+        pygame.display.flip()
+
+    def _draw_loading(self) -> None:
+        self.canvas.fill((0, 0, 0))
+        font = pygame.font.Font(None, 48)
+        dots = "." * (int(self._loading_timer * 3) % 4)
+        text = font.render(f"載入中{dots}", True, (255, 255, 255))
+        rect = text.get_rect(center=(settings.VIEW_W // 2, settings.VIEW_H // 2))
+        self.canvas.blit(text, rect)
+        hint_font = pygame.font.Font(None, 24)
+        hint = hint_font.render("Loading map...", True, (160, 160, 160))
+        hint_rect = hint.get_rect(center=(settings.VIEW_W // 2, settings.VIEW_H // 2 + 50))
+        self.canvas.blit(hint, hint_rect)
         scaled = pygame.transform.scale(
             self.canvas, (settings.WINDOW_W, settings.WINDOW_H))
         self.screen.blit(scaled, (0, 0))

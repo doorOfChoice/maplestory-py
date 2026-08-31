@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import os
 import threading
+import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -73,8 +74,80 @@ class Assets:
         self._icon_cache: Dict[str, Any] = {}
         self._item_wz_obj = None   # Item.wz 较大，首次取图标时再打开
 
+        # 后台线程加载地图
+        self._load_thread: Optional[threading.Thread] = None
+        self._load_result: Optional[Dict] = None
+
         # 地图静态数据
         self.load_map(map_id)
+
+        # 后台预热各类常用素材，避免首次使用时主线程卡顿
+        threading.Thread(target=self._warmup, daemon=True).start()
+
+    def _warmup(self) -> None:
+        """后台线程预热：预加载特效/传送门/UI/人物姿态等常用缓存。"""
+        try:
+            self.levelup_frames()
+            self.portal_frames()
+            self._item_wz()
+            self.meso_frames()
+            self.quest_icon_frames(0)
+            self.quest_icon_frames(2)
+            for sid in ("1001004", "1001005"):
+                try:
+                    self.skill_icon(sid)
+                    self.skill_effect_frames(sid)
+                    self.skill_hit_frames(sid)
+                except Exception:
+                    pass
+            self._warmup_ui()
+            self._warmup_player_poses()
+        except Exception:
+            pass
+
+    def _warmup_ui(self) -> None:
+        """后台预热 HUD / 面板 / 对话框 的 UI 素材。"""
+        paths: List[Tuple[str, str]] = [
+            ("StatusBar.img", "base/backgrnd"),
+            ("StatusBar.img", "gauge/bar"),
+            ("StatusBar.img", "gauge/graduation"),
+            ("StatusBar.img", "gauge/gray"),
+            ("UIWindow.img", "Item/backgrnd"),
+            ("UIWindow.img", "Equip/backgrnd"),
+            ("UIWindow.img", "Skill/backgrnd"),
+            ("UIWindow.img", "ShortCut/backgrnd"),
+            ("UIWindow.img", "Quest/backgrnd2"),
+            ("UIWindow.img", "Item/BtCoin/normal/0"),
+            ("UIWindow.img", "Skill/BtSpUp/normal/0"),
+            ("ChatBalloon.img", "arrow"),
+            ("UtilDlgEx.img", "it"),
+            ("UtilDlgEx.img", "ic"),
+            ("UtilDlgEx.img", "is"),
+        ]
+        for d in "0123456789/":
+            paths.append(("StatusBar.img", f"number/{d}"))
+        for i in range(3):
+            paths.append(("UIWindow.img", f"Item/Tab/enabled/{i}"))
+            paths.append(("UIWindow.img", f"Item/Tab/disabled/{i}"))
+            paths.append(("UIWindow.img", f"BtUIClose/normal/{i}"))
+        for i in range(9):
+            paths.append(("ChatBalloon.img", f"npc/{i}"))
+        for img, path in paths:
+            try:
+                self.ui_surface(img, path)
+            except Exception:
+                pass
+
+    def _warmup_player_poses(self) -> None:
+        """后台预热玩家常驻姿态帧（站/走/跳/爬/攻，两种朝向）。"""
+        equips = list(settings.DEFAULT_EQUIPS)
+        for pose in ("stand1", "walk1", "jump", "ladder", "rope",
+                     "swingO1", "swingO2"):
+            try:
+                self.character_frames(equips, pose, False)
+                self.character_frames(equips, pose, True)
+            except Exception:
+                pass
 
     def load_map(self, map_id: str) -> None:
         """切换到另一张地图：重新读取描述 + 整图 Surface（WZ 句柄保持打开）。"""
@@ -88,6 +161,76 @@ class Assets:
         self.map_surface = self._render_map_surface()
         self.map_width = self.bounds["width"]
         self.map_height = self.bounds["height"]
+
+    # ── 异步加载 ─────────────────────────────────────────────────────
+    def start_load_map(self, map_id: str) -> None:
+        """在后台线程中渲染地图 PIL Image 并获取描述。"""
+        self._load_thread = threading.Thread(
+            target=self._load_map_worker, args=(map_id,), daemon=True)
+        self._load_result = None
+        self._load_thread.start()
+
+    def _load_map_worker(self, map_id: str) -> None:
+        """后台线程：渲染地图，完成后设 _load_result。"""
+        try:
+            desc = self.map_renderer.describe(map_id)
+            img = self.map_renderer.compose(
+                map_id, scale=1.0, time_ms=0,
+                life=False, reactors=False, portals=False,
+            )
+            if img.mode != "RGBA":
+                img = img.convert("RGBA")
+            bgm_path = ""
+            try:
+                root, _src = self.map_renderer._map_root(map_id)
+                node = root.get("info/bgm")
+                if node is not None:
+                    bgm_path = str(getattr(node, "value", "") or "")
+                else:
+                    bgm_path = str(desc.get("bgm") or "")
+            except Exception:
+                bgm_path = str(desc.get("bgm") or "")
+            self._load_result = {
+                "map_id": map_id,
+                "desc": desc,
+                "img": img,
+                "bgm_path": bgm_path,
+            }
+        except Exception as e:
+            traceback.print_exc()
+            self._load_result = {"error": e}
+
+    @property
+    def is_loading(self) -> bool:
+        return self._load_thread is not None and self._load_thread.is_alive()
+
+    @property
+    def is_load_done(self) -> bool:
+        return self._load_result is not None
+
+    def finish_load_map(self) -> str:
+        """完成后台加载，将结果应用到当前状态。必须在主线程调用。返回 bgm_path。"""
+        result = self._load_result
+        if result is None:
+            return ""
+        if "error" in result:
+            self._load_thread = None
+            self._load_result = None
+            raise result["error"]
+        self.map_id = result["map_id"]
+        desc = result["desc"]
+        self.map_desc = desc
+        self.bounds = desc["bounds"]
+        self.footholds = desc["footholds"]
+        self.ropes = desc["ropes"]
+        self.portals = desc["portals"]
+        self.life = desc["life"]
+        self.map_width = self.bounds["width"]
+        self.map_height = self.bounds["height"]
+        self.map_surface = pil_to_surface(result["img"])
+        self._load_thread = None
+        self._load_result = None
+        return result["bgm_path"]
 
     # ── 地图 ────────────────────────────────────────────────────────
     def _render_map_surface(self) -> pygame.Surface:
