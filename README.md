@@ -1,8 +1,8 @@
 # MapleStory v113 · pygame 单机重制
 
-以 Python + pygame 重制 MapleStory v113（全球版，EMS 资产）的单机版：直接读取官方 WZ 封存，重现地图场景、怪物、NPC、任务、技能与背包系统。
+以 Python + pygame 重制 MapleStory v113（台湾版）的单机版：直接读取官方 WZ 封存，重现地图场景、怪物、NPC、任务、技能与背包系统。
 
-> 本项目只`读取` WZ 资产，任何时候都`不写入` `113/` 文件夹。
+> 本项目只`读取` WZ 资产，任何时候都`不写入` `wz/` 文件夹。
 
 ## 游戏截图
 
@@ -31,7 +31,17 @@
 
 - Python ≥ 3.12
 - 包管理：`uv`
-- MapleStory v113（EMS）WZ 文件放在项目根目录的 `113/`（已 gitignore，需自行提供）
+- MapleStory v113（台湾版）WZ 文件，见下方「获取 WZ 资产」（仓库不提供）
+
+## 获取 WZ 资产
+
+本项目**不附带任何 WZ 文件**，需自行准备：
+
+1. 前往 [MapleStoryUnity/wzData](https://github.com/MapleStoryUnity/wzData)，在 **TMS (Taiwan)** 一节下载 **113** 版本的 WZ 压缩包
+2. 解压后，将其中全部 `.wz` 文件（Map.wz、Mob.wz、Character.wz、Npc.wz、String.wz、Sound.wz、UI.wz ……）复制到项目根目录的 `wz/` 文件夹下
+3. 再执行下方的安装与启动命令
+
+> `wz/` 目录本身会提交到仓库（仅含 `.gitkeep` 占位），目录内的 WZ 文件已被 gitignore，不会被提交。
 
 ## 安装与执行
 
@@ -62,7 +72,7 @@ uv run pytest      # 跑测试
 ```
 wzpy/      函数库层：WZ 解析、解密、渲染器（可独立重复使用）
 game/      应用层：游戏循环、物理、实体、战斗、技能、背包、任务、UI、存档
-113/       WZ 原档（只读，未纳入版本控制）
+wz/        WZ 原档（只读；目录纳入版本控制，WZ 文件本身未纳入）
 screenshots/   README 用游戏截图
 tests/      pytest 整合测试（合成数据，不需 WZ 文件）
 ```
@@ -72,7 +82,7 @@ tests/      pytest 整合测试（合成数据，不需 WZ 文件）
 - 模块 docstring、类别说明与代码注释一律使用**简体中文**
 - 常量集中于 `game/settings.py`；实体物理热点类别使用 `__slots__`
 - 新功能或修 bug 依循 TDD（见 `.agents/skills/tdd/`）：透过公开接口写整合测试，不用 mock
-- 测试不得依赖 `113/` 存在的环境，请以合成数据建构
+- 测试不得依赖 `wz/` 下 WZ 文件存在的环境，请以合成数据建构
 
 ## 授权与声明
 

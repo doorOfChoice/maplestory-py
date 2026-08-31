@@ -8,7 +8,7 @@ from pathlib import Path
 
 # ── 路径 ─────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-WZ_DIR = PROJECT_ROOT / "113"
+WZ_DIR = PROJECT_ROOT / "wz"
 REGION = "EMS"
 
 SAVE_DIR = PROJECT_ROOT / "saves"
