@@ -10,7 +10,7 @@ Game 主循环持有 Combat，负责：
 from __future__ import annotations
 
 import random
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import pygame
 
@@ -120,12 +120,86 @@ class DropItem:
         pygame.draw.circle(surface, (255, 255, 220), (int(sx - 1), int(sy - 1)), 2)
 
 
+class Arrow:
+    """远程弹道实体：直线快箭（无重力）+ 穿透计数。
+
+    命中结算在飞行中进行：与未命中过的怪 rect 相交 → 伤害 + 飘字 + hit 特效；
+    累计命中数达 mobCount、寿命耗尽或出界即消失。
+    """
+
+    def __init__(self, x: float, y: float, vx: float, vy: float,
+                 frames: list, hit_frames: list, dmg: int,
+                 mob_count: int = 1, life: float = 0.6,
+                 color: Tuple[int, int, int] = (170, 120, 255)):
+        self.x = x
+        self.y = y
+        self.vx = vx
+        self.vy = vy
+        self.frames = frames            # [(Surface, origin, delay_ms)]
+        self.hit_frames = hit_frames
+        self.dmg = dmg
+        self.mob_count = max(1, mob_count)
+        self.life = life
+        self.color = color              # 伤害飘字颜色（普攻红/技能紫）
+        self.age = 0.0
+        self.hit_ids: set = set()
+        self.dead = False
+        self._flipped: Optional[list] = None
+
+    def rect(self) -> pygame.Rect:
+        return pygame.Rect(int(self.x - 6), int(self.y - 6), 12, 12)
+
+    def update(self, dt: float, monsters, combat, player=None) -> None:
+        if self.dead:
+            return
+        self.life -= dt
+        self.age += dt
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        for mob in monsters:
+            if mob.dead or id(mob) in self.hit_ids:
+                continue
+            if not self.rect().colliderect(mob.rect()):
+                continue
+            self.hit_ids.add(id(mob))
+            combat.numbers.append(DamageNumber(
+                mob.x, mob.cy - mob.sprite_h, self.dmg, self.color))
+            if self.hit_frames:
+                combat.effects.append(Effect(
+                    self.hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45))
+            died = mob.take_hit(self.dmg, from_x=self.x)
+            if died and player is not None:
+                combat._on_kill(player, mob)
+            if len(self.hit_ids) >= self.mob_count:
+                self.dead = True
+                return
+        if self.life <= 0:
+            self.dead = True
+
+    def draw(self, surface: pygame.Surface, camera) -> None:
+        if not self.frames:
+            return
+        frames = self.frames
+        if self.vx < 0:
+            if self._flipped is None:
+                self._flipped = [
+                    (pygame.transform.flip(s, True, False),
+                     (s.get_width() - 1 - ox, oy), d)
+                    for s, (ox, oy), d in frames]
+            frames = self._flipped
+        idx = Animation.frame_at(frames, self.age * 1000.0)
+        img, origin, _ = frames[idx]
+        sx, sy = camera.to_screen(self.x, self.y)
+        surface.blit(img, (int(sx - origin[0]), int(sy - origin[1])))
+
+
 class Combat:
     def __init__(self, assets: Assets):
         self.assets = assets
         self.numbers: List[DamageNumber] = []
         self.drops: List[DropItem] = []
         self.effects: List[object] = []      # 命中火花 / 升级特效等
+        self.arrows: List[Arrow] = []        # 飞行中的远程弹道
         self.meso = 0                        # 拾取的金币
         self.total_kills = 0
         self.pending_exp: List[int] = []
@@ -158,7 +232,7 @@ class Combat:
         player.attack_hit_applied = True
         skill = player.pending_skill
         skill_id = skill["id"] if skill else None
-        hit_frames = self.assets.skill_hit_frames(skill_id or "1001004")
+        hit_frames = self.assets.skill_hit_frames(skill_id) if skill_id else []
         cx, cy = player.x, player.y
 
         targets = [m for m in monsters if not m.dead and rect.colliderect(m.rect())]
@@ -180,6 +254,42 @@ class Combat:
             died = mob.take_hit(dmg, from_x=player.x)
             if died:
                 self._on_kill(player, mob)
+
+    # ── 远程弹道 ───────────────────────────────────────────────────
+    def spawn_arrows(self, player, skill_data: Optional[dict]) -> None:
+        """一次远程起手：按 bulletCount 生成错峰直线箭，从手部位置出发。
+
+        skill_data=None 为普攻：单箭、攻击力 100%、红色飘字，
+        弹道贴图用箭矢物品的 bullet 节点（原版同款）。
+        """
+        if skill_data is None:
+            dmg = player.attack_value()
+            n, mob_count = 1, 1
+            color = (255, 60, 60)
+            frames = self.assets.normal_arrow_frames() if self.assets else []
+            hit_frames: List = []
+        else:
+            sid = skill_data["id"]
+            dmg = int(player.attack_value() * skill_data["damage"])
+            n = max(1, int(skill_data.get("bullet_count", 1)))
+            mob_count = max(1, skill_data["mob_count"])
+            color = (170, 120, 255)
+            frames = self.assets.skill_ball_frames(sid) if self.assets else []
+            hit_frames = self.assets.skill_hit_frames(sid) if self.assets else []
+        facing = 1 if player.facing_right else -1
+        for i in range(n):
+            offset = (i - (n - 1) / 2.0) * 7.0     # 多支箭纵向错峰
+            self.arrows.append(Arrow(
+                x=player.x + facing * 16.0, y=player.y - 8.0 + offset,
+                vx=facing * settings.ARROW_SPEED, vy=0.0,
+                frames=frames, hit_frames=hit_frames,
+                dmg=dmg, mob_count=mob_count, color=color,
+                life=settings.ARROW_LIFETIME))
+
+    def update_arrows(self, dt: float, monsters, player=None) -> None:
+        for a in self.arrows:
+            a.update(dt, monsters, self, player)
+        self.arrows = [a for a in self.arrows if not a.dead]
 
     def _on_kill(self, player, mob) -> None:
         """击杀结算：经验 + 金币必掉 + 概率掉物品。"""
@@ -269,6 +379,11 @@ class Combat:
             drop.draw(surface, camera)
         for num in self.numbers:
             num.draw(surface, camera)
+
+    def draw_arrows(self, surface: pygame.Surface, camera) -> None:
+        """飞行中的箭矢（实体之上、特效之下）。"""
+        for a in self.arrows:
+            a.draw(surface, camera)
 
     def draw_effects(self, surface: pygame.Surface, camera) -> None:
         """命中火花 / 升级特效（叠在实体之上）。"""

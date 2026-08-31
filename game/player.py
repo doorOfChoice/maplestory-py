@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 import pygame
 
@@ -15,6 +15,7 @@ from .animation import Animation
 from .assets import Assets
 from .physics import Physics
 from .inventory import Inventory, make_item
+from .jobs import JOBS, is_ranged_weapon
 from .skills import SkillBook
 from .quests import QuestLog
 from .motion import approach, JumpFeather
@@ -49,6 +50,7 @@ class Player:
         self.attacking = False
         self.attack_pose = ""
         self.attack_hit_applied = False
+        self.attack_projectile_spawned = False
         self.attack_timer = 0.0
         self.climbing = False
         self.detach_cooldown = 0.0
@@ -86,7 +88,7 @@ class Player:
             item = make_item(eid, assets)
             if item.slot is not None:
                 self.inventory.equipped[item.slot] = item
-        self.skills = SkillBook(assets)
+        self.skills = SkillBook(assets, self.job)
         self.pending_skill: Optional[dict] = None
         self.refresh_equips()
         self.quests = QuestLog(quest_defs or {})
@@ -105,7 +107,7 @@ class Player:
         self.anim_flip = self.facing_right
 
         self.inventory = Inventory.from_dict(data.get("inventory", {}), assets)
-        self.skills = SkillBook(assets)
+        self.skills = SkillBook(assets, self.job)
         self.skills.from_dict(data.get("skills", {}))
         self.pending_skill = None
         self.refresh_equips()
@@ -126,6 +128,26 @@ class Player:
         return int(settings.BASE_EXP_NEED * (settings.EXP_GROWTH ** (self.level - 1)))
 
     # ── 装备 / 属性 ────────────────────────────────────────────────
+    def advance_to(self, code: int, assets: Assets) -> None:
+        """转职：改 job → 重建职业技能树 + 附赠被动/快捷键 → 补发初始武器。"""
+        jobdef = JOBS[code]
+        self.job = code
+        self.skills = SkillBook(assets, code)
+        self.skills.on_advance(jobdef)
+        if jobdef.starter_weapon is not None:
+            item = make_item(jobdef.starter_weapon, assets)
+            if item.slot is not None and self.inventory.equipped.get("weapon") is None:
+                self.inventory.equipped[item.slot] = item
+            elif item.slot is not None:
+                self.inventory.add(item)   # 已持其他武器：短弓入背包
+        self.refresh_equips()
+
+    def is_ranged(self) -> bool:
+        """远程职业且手持弓/弩。"""
+        weapon = self.inventory.equipped.get("weapon")
+        return (self.job == settings.BOWMAN_JOB and weapon is not None
+                and is_ranged_weapon(weapon.id))
+
     def refresh_equips(self) -> None:
         """装备栏变更后同步外观（equips 列表驱动角色渲染）。"""
         self.equips = self.inventory.equip_ids()
@@ -228,6 +250,7 @@ class Player:
         self.attacking = True
         self.attack_pose = self.assets.attack_pose(self.equips)
         self.attack_hit_applied = False
+        self.attack_projectile_spawned = False
         self.attack_timer = 3.0
         self._load_anim(self.attack_pose)
         return True

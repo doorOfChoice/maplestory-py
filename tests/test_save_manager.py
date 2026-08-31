@@ -56,7 +56,7 @@ def test_skillbook_to_from_dict_roundtrip():
             root = Root()
         def __init__(self):
             self.wz = {"Skill": self.FakeWz(), "String": self.FakeWz()}
-    sb = SkillBook(FakeAssets())
+    sb = SkillBook(FakeAssets(), 0)
     sb.sp = 10
     sb.levels["1001004"] = 3
     sb.levels["1001005"] = 1
@@ -65,7 +65,7 @@ def test_skillbook_to_from_dict_roundtrip():
     assert d["sp"] == 10
     assert d["levels"] == {"1001004": 3, "1001005": 1}
 
-    sb2 = SkillBook(FakeAssets())
+    sb2 = SkillBook(FakeAssets(), 0)
     sb2.from_dict(d)
     assert sb2.sp == 10
     assert sb2.levels["1001004"] == 3
@@ -94,7 +94,7 @@ def test_questlog_to_from_dict_roundtrip():
 
 def test_save_manager_write_read_roundtrip():
     """SaveManager.flush + load 檔案內容一致。"""
-    data = {"version": 1, "player": {"level": 5, "hp": 80}}
+    data = {"version": 2, "player": {"level": 5, "hp": 80, "job": 0}}
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "save.json"
         sm = SaveManager(path)
@@ -106,7 +106,7 @@ def test_save_manager_write_read_roundtrip():
 
 def test_save_manager_request_save_eventually_persists():
     """request_save 非同步提交後，後台線程最終寫入磁碟。"""
-    data = {"version": 1, "player": {"level": 7, "hp": 60}}
+    data = {"version": 2, "player": {"level": 7, "hp": 60, "job": 0}}
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "save.json"
         sm = SaveManager(path)

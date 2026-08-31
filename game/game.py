@@ -25,6 +25,7 @@ from .npc import NPC
 from .combat import Combat
 from .combat import DamageNumber
 from .effects import Effect
+from .jobs import JOBS, can_advance
 from .ui import UI
 from .minimap import MiniMap
 from .panels import Panels
@@ -170,9 +171,10 @@ class Game:
         else:
             self.ui.show_dialog("欢迎", ["冒险岛 v113 · 弓箭手村东部小山",
                                          "A/D(或←→) 移动  空格 跳跃  S+空格 下跳",
-                                         "W(或↑) 爬绳/梯  J 攻击  1/2 技能  F 喝药",
+                                         "W(或↑) 爬绳/梯  J 攻击  数字键 技能  F 喝药",
                                          "I 道具栏  K 技能栏  Q 任务日志  Enter 对话  R 复活",
-                                         "走到发光传送门前按 ↑ 可切换地图；NPC 头顶灯泡表示有任务。"
+                                         "新手练到 Lv10 后，找出生点旁的赫麗娜转职弓箭手；"
+                                         "走到发光传送门前按 ↑ 可切换地图。"
                                          "（对话不影响行动，Enter/Esc 或点击关闭）"])
 
     # ── 生成 ───────────────────────────────────────────────────────
@@ -187,6 +189,12 @@ class Game:
                          for i, d in enumerate(self._life_mobs)]
         self.npcs = [NPC(self.assets, d, i)
                      for i, d in enumerate(self._life_npcs)]
+        # 导师注入：原版赫麗娜在 100000201（不可达），在出生图额外生成一个实例
+        if self.assets.map_id == settings.TRAINER_SPAWN_MAP:
+            self.npcs.append(NPC(self.assets, {
+                "id": settings.BOWMAN_TRAINER_NPC,
+                "x": settings.TRAINER_SPAWN[0],
+                "cy": settings.TRAINER_SPAWN[1]}, len(self.npcs)))
 
     # ── 输入 ───────────────────────────────────────────────────────
     def _handle_input(self) -> None:
@@ -252,7 +260,7 @@ class Game:
                 elif event.key == pygame.K_f:
                     if self.player.use_potion():
                         self.audio.play("PickUpItem", 0.4)
-                elif event.key in (pygame.K_1, pygame.K_2):
+                elif pygame.K_1 <= event.key <= pygame.K_9:
                     self._cast_skill(event.key - pygame.K_1 + 1)
                 elif event.key == pygame.K_w:
                     # W 只用于上绳/梯（长按逻辑在 Player.update 中处理），不触发跳跃
@@ -300,8 +308,8 @@ class Game:
             self.player.start_attack()
 
     def _cast_skill(self, hotkey: int) -> None:
-        """按快捷键施放技能（1/2）。成功则播放技能施放特效。"""
-        sid = settings.HOTKEY_SKILLS.get(hotkey)
+        """按数字快捷键施放技能（读职业动态快捷键表）。成功则播放施放特效。"""
+        sid = self.player.skills.hotkeys.get(hotkey)
         if sid is None:
             return
         data = self.player.skills.cast(sid, self.player.level)
@@ -314,16 +322,38 @@ class Game:
                     eff, self.player.x, self.player.y))
 
     def _try_talk(self) -> None:
-        """与 NPC 对话：优先任务交互（可交付 > 可接取 > 进行中），否则普通寒暄。"""
+        """与 NPC 对话：导师转职 > 任务交互 > 普通寒暄。"""
         for npc in self.npcs:
             if npc.rect().colliderect(
                     pygame.Rect(int(self.player.x - 20), int(self.player.y - 40), 40, 80)):
                 self._talk_npc = npc
+                if npc.npc_id == settings.BOWMAN_TRAINER_NPC \
+                        and self._begin_advance_flow(npc):
+                    return
                 if self._begin_quest_flow(npc):
                     return
                 self.ui.show_dialog(npc.name, ["你好，冒险者！", "小心东边山丘上的怪物。",
                                                "攻击按 J，击败怪物可获得经验与掉落物。"])
                 return
+
+    # ── 转职对话流程 ───────────────────────────────────────────────
+    def _begin_advance_flow(self, npc) -> bool:
+        """导师对话：可转职弹确认框；已转职/等级不足给对应提示。"""
+        jobdef = JOBS[settings.BOWMAN_JOB]
+        if self.player.job == jobdef.code:
+            self.ui.show_dialog(npc.name, ["你已经是一名出色的弓箭手了。"])
+            return True
+        if can_advance(self.player, jobdef):
+            self._quest_flow = {"npc": npc, "quest": None, "stage": "advance"}
+            self.ui.show_quest(f"转职 · {jobdef.name}", [
+                "你想成为弓箭手吗？",
+                f"达到 Lv{jobdef.advance_lv} 的新手可以转职为{jobdef.name}，",
+                "转职后我会送你一把短弓并教你弓箭手的技能。"], ["yes", "no"])
+            return True
+        self.ui.show_dialog(npc.name, [
+            "你还太弱小了，达到等级再来找我吧。",
+            f"（当前 Lv{self.player.level} / 需要 Lv{jobdef.advance_lv}）"])
+        return True
 
     # ── 任务对话状态机 ─────────────────────────────────────────────
     def _begin_quest_flow(self, npc) -> bool:
@@ -382,10 +412,18 @@ class Game:
         self.ui.show_quest(d.name, lines, ["ok"])
 
     def _quest_button(self, key: str) -> None:
-        """任务对话框按钮回调：yes / no / ok。"""
+        """任务/转职对话框按钮回调：yes / no / ok。"""
         flow = self._quest_flow
         if flow is None:
             self.ui.hide_quest()
+            return
+        if flow["stage"] == "advance":
+            self.ui.hide_quest()
+            self._quest_flow = None
+            if key == "yes":
+                self.player.advance_to(settings.BOWMAN_JOB, self.assets)
+                self.audio.play("LevelUp", 0.6)
+                self.panels.flash("转职成功：弓箭手")
             return
         qid = flow["quest"]
         quests = self.player.quests
@@ -484,6 +522,7 @@ class Game:
         self.combat.drops.clear()
         self.combat.numbers.clear()
         self.combat.effects.clear()
+        self.combat.arrows.clear()
 
     # ── 传送门 / 地图切换 ──────────────────────────────────────────
     def _portal_at_feet(self) -> Optional[dict]:
@@ -554,6 +593,7 @@ class Game:
         self.combat.drops.clear()
         self.combat.numbers.clear()
         self.combat.effects.clear()
+        self.combat.arrows.clear()
         self.hits.clear()
         self._portal_cooldown = 0.8
 
@@ -635,9 +675,14 @@ class Game:
                 settings.FALL_OUT_DAMAGE, (120, 180, 255)))
             self._place_player_at_spawn()
 
-        # 攻击判定
+        # 攻击判定：远程（普攻与技能）起手一次性生成箭（近战仍在首帧结算）
         if self.player.attacking:
-            self.combat.player_attack(self.player, self.monsters)
+            if self.player.is_ranged():
+                if not self.player.attack_projectile_spawned:
+                    self.player.attack_projectile_spawned = True
+                    self.combat.spawn_arrows(self.player, self.player.pending_skill)
+            else:
+                self.combat.player_attack(self.player, self.monsters)
 
         # 经验结算（击杀累积后逐条发放，可升级；升级播官方特效不弹窗）
         while self.combat.pending_exp:
@@ -658,6 +703,9 @@ class Game:
         self.monsters = [m for m in self.monsters
                          if not (m.dead and m.remove_after <= 0)]
         self.combat.apply_mob_hits(self.player, self.hits)
+
+        # 飞行中的箭（在怪物移动之后结算，命中数受 mobCount 限制）
+        self.combat.update_arrows(dt, self.monsters, self.player)
 
         # NPC
         for npc in self.npcs:
@@ -698,6 +746,8 @@ class Game:
         # 玩家
         if not self.dead:
             self.player.draw(self.canvas, self.camera)
+        # 飞行中的箭（实体之上）
+        self.combat.draw_arrows(self.canvas, self.camera)
         # 命中火花 / 升级特效（实体之上）
         self.combat.draw_effects(self.canvas, self.camera)
         # HUD / 面板 / 对话框 / 死亡

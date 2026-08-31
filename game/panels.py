@@ -20,6 +20,7 @@ from typing import List, Optional, Tuple
 import pygame
 
 from . import settings
+from .jobs import JOBS
 from .inventory import SLOT_ORDER, islot_to_slot
 
 SLOT_NAMES = {
@@ -246,7 +247,7 @@ class Panels:
         if self.skill_visible:
             for rect, sid in self._skill_rows:
                 if rect.collidepoint(pos):
-                    player.skills.learn_or_upgrade(sid, player.level)
+                    player.skills.learn(sid, player.level)
                     return True
             if self._skill_rect.collidepoint(pos):
                 return True
@@ -484,9 +485,10 @@ class Panels:
                     self._tooltip = self._item_tip(item)
             self._slot_rects.append((cell, slot))
 
-        # 标题条右侧：攻/防/SP 摘要（浅色条 → 深字）
+        # 标题条右侧：职业 + 攻/防摘要（浅色条 → 深字）
+        job_name = JOBS.get(player.job).name if player.job in JOBS else ""
         stat = fs.render(
-            f"攻 {player.attack_value()} 防 {player.defense_value()}",
+            f"{job_name}  攻 {player.attack_value()} 防 {player.defense_value()}",
             True, (70, 72, 86))
         surface.blit(stat, (x + EQP_W - stat.get_width() - 40, y + 6))
 
@@ -529,7 +531,10 @@ class Panels:
             self._slot_rects.append((cell, slot))
 
     # ── 技能窗口（UIWindow/Skill 底板）─────────────────────────────
-    def _skill_tip(self, d, lv: int, mouse, row: pygame.Rect) -> None:
+    def _hotkey_of(self, book, sid: str) -> Optional[int]:
+        return next((k for k, v in book.hotkeys.items() if v == sid), None)
+
+    def _skill_tip(self, book, d, lv: int, mouse, row: pygame.Rect) -> None:
         """悬停技能行时把描述/伤害/快捷键放进深色 Tooltip，避免行内文字溢出。"""
         if self._tooltip is not None or not row.collidepoint(mouse):
             return
@@ -538,11 +543,12 @@ class Panels:
             lines.append(d.desc)
         if lv > 0:
             lines.append(f"伤害 {d.stat(lv, 'damage', 100)}% · 消耗 MP{d.stat(lv, 'mpCon', 0)}")
-            key = settings.SKILL_HOTKEYS.get(d.id)
+            key = self._hotkey_of(book, d.id)
             if key:
                 lines.append(f"快捷键 {key}")
         else:
-            lines.append(f"Lv{settings.SKILL_UNLOCK_LEVEL.get(d.id, 1)} 可学习")
+            need = d.char_level or 1
+            lines.append(f"Lv{need} 可学习")
         self._tooltip = "\n".join(lines)
 
     def _draw_skills(self, surface, player) -> None:
@@ -550,8 +556,7 @@ class Panels:
         f, fs = self.ui.font, self.ui.font_small
         ft = self.ui.font_tiny
         vw, vh = surface.get_width(), surface.get_height()
-        sids = sorted(set(book.known()) | set(book.unlocked_for(player.level)),
-                      key=lambda s: settings.SKILL_UNLOCK_LEVEL.get(s, 99))
+        sids = book.learnable()
         bg = self._wz(SKL_BG)
         base = (vw - 4 - SHT_W - 6 - SKL_W, vh - SKL_H - BAR_RESERVE - 2)
         x, y = self._resolve_pos("skill", base, (SKL_W, SKL_H), vw, vh)
@@ -577,7 +582,7 @@ class Panels:
         row_img_h = 38
         top = y + 49
         mouse = pygame.mouse.get_pos()
-        for i, sid in enumerate(sids[:4]):
+        for i, sid in enumerate(sids[:6]):
             d = book.defs.get(sid)
             if d is None:
                 continue
@@ -603,10 +608,9 @@ class Panels:
                 surface.blit(ft.render(f"{dmg}%  MP{mp}", True, (40, 90, 46)),
                              (tx, ry + 20))
             else:
-                need = settings.SKILL_UNLOCK_LEVEL.get(sid, 1)
-                surface.blit(ft.render(f"Lv{need} 可学习", True, color),
+                surface.blit(ft.render(f"Lv{d.char_level or 1} 可学习", True, color),
                              (tx, ry + 20))
-            self._skill_tip(d, lv, mouse, pygame.Rect(row_x, ry, row_w, row_img_h))
+            self._skill_tip(book, d, lv, mouse, pygame.Rect(row_x, ry, row_w, row_img_h))
             # 升级按钮（原版 BtSpUp）
             if book.sp > 0 and lv < d.max_level:
                 btn = pygame.Rect(row_x + row_w - 20, ry + 3,
@@ -651,7 +655,7 @@ class Panels:
                              (row.x + 6, ry + 8))
             locked = lv == 0
             color = (140, 146, 160) if locked else (235, 235, 240)
-            key = settings.SKILL_HOTKEYS.get(sid)
+            key = self._hotkey_of(book, sid)
             keytxt = f"  [{key}]" if key and lv > 0 else ""
             name_txt = _ellipsize(f"{d.name} Lv{lv}/{d.max_level}{keytxt}", f,
                                   row.right - (row.x + 52) - 6)
@@ -662,9 +666,9 @@ class Panels:
                 info = fs.render(f"{dmg}% MP{mp}", True, (150, 210, 160))
                 surface.blit(info, (row.x + 52, ry + 28))
             else:
-                surface.blit(fs.render(f"Lv{settings.SKILL_UNLOCK_LEVEL.get(sid)} 可学习",
+                surface.blit(fs.render(f"Lv{d.char_level or 1} 可学习",
                                        True, (150, 156, 170)), (row.x + 52, ry + 28))
-            self._skill_tip(d, lv, mouse, row)
+            self._skill_tip(book, d, lv, mouse, row)
             if book.sp > 0 and lv < d.max_level:
                 btn = pygame.Rect(row.right - 26, ry + 4, 22, 22)
                 pygame.draw.rect(surface, (70, 130, 90), btn, border_radius=4)
@@ -742,10 +746,10 @@ class Panels:
         x = vw - SHT_W - 4
         y = vh - SHT_H - BAR_RESERVE - 2
         surface.blit(bg, (x, y))
-        # 键位 1..n 依次放进 2 列 × 6 行格子里
-        hotkeys = sorted(settings.HOTKEY_SKILLS)
+        # 键位 1..n 依次放进 2 列 × 6 行格子里（读职业动态快捷键表）
+        hotkeys = sorted(player.skills.hotkeys)
         for n, hk in enumerate(hotkeys):
-            sid = settings.HOTKEY_SKILLS[hk]
+            sid = player.skills.hotkeys[hk]
             d = player.skills.defs.get(sid)
             if d is None or player.skills.levels.get(sid, 0) <= 0:
                 continue
@@ -778,12 +782,12 @@ class Panels:
         fs = self.ui.font_small
         vw, vh = surface.get_width(), surface.get_height()
         y = vh - 146
-        for sid in settings.SKILL_HOTKEYS:
+        for key in sorted(player.skills.hotkeys):
+            sid = player.skills.hotkeys[key]
             d = player.skills.defs.get(sid)
             if d is None or player.skills.levels.get(sid, 0) <= 0:
                 continue
             lv = player.skills.levels[sid]
-            key = settings.SKILL_HOTKEYS[sid]
             slot = pygame.Rect(0, 0, 46, 46)
             slot.right = vw - 14
             slot.y = y

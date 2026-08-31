@@ -29,6 +29,7 @@ from wzpy.character import CharacterRenderer, DEFAULT_EAR_TYPE
 from wzpy.properties import WzCanvasProperty, WzUolProperty
 
 from . import settings
+from .jobs import is_ranged_weapon, resolve_skill_img
 from .localize import to_simplified
 
 # 攻击姿态回退顺序（玩家攻击用）
@@ -94,11 +95,12 @@ class Assets:
             self.meso_frames()
             self.quest_icon_frames(0)
             self.quest_icon_frames(2)
-            for sid in ("1001004", "1001005"):
+            for sid in ("3001004", "3001005"):
                 try:
                     self.skill_icon(sid)
                     self.skill_effect_frames(sid)
                     self.skill_hit_frames(sid)
+                    self.skill_ball_frames(sid)
                 except Exception:
                     pass
             self._warmup_ui()
@@ -306,6 +308,11 @@ class Assets:
             (e for e in equips if self.char_renderer and _is_weapon(e)), None
         )
         poses = self.char_renderer.get_weapon_poses(weapon) if weapon else []
+        if weapon is not None and is_ranged_weapon(weapon):
+            # 弓用 shoot1、弩用 shoot2（原版拉弓动作），武器无该动作时回退近战表
+            pref = "shoot1" if int(weapon) // 10000 == 145 else "shoot2"
+            if pref in poses:
+                return pref
         for pref in ATTACK_POSES:
             if pref in poses:
                 return pref
@@ -797,7 +804,7 @@ class Assets:
         if hit is not None:
             return hit
         result = None
-        img = self.wz["Skill"].root.images.get("100.img")
+        img = self.wz["Skill"].root.images.get(resolve_skill_img(skill_id))
         if img is not None:
             node = img.parse().get(f"skill/{skill_id}/icon")
             if isinstance(node, WzCanvasProperty):
@@ -809,11 +816,39 @@ class Assets:
 
     def skill_effect_frames(self, skill_id: str) -> List:
         """技能施放特效（角色身位播放）。"""
-        return self.effect_frames("Skill", "100.img", f"skill/{skill_id}/effect")
+        return self.effect_frames("Skill", resolve_skill_img(skill_id),
+                                  f"skill/{skill_id}/effect")
 
     def skill_hit_frames(self, skill_id: str = "1001004") -> List:
         """技能命中特效（怪物身位播放）。"""
-        return self.effect_frames("Skill", "100.img", f"skill/{skill_id}/hit/0")
+        return self.effect_frames("Skill", resolve_skill_img(skill_id),
+                                  f"skill/{skill_id}/hit/0")
+
+    def skill_ball_frames(self, skill_id: str) -> List:
+        """技能弹道贴图（如箭矢 ball/*），[(Surface, origin, delay_ms)]。"""
+        return self.effect_frames("Skill", resolve_skill_img(skill_id),
+                                  f"skill/{skill_id}/ball")
+
+    def normal_arrow_frames(self) -> List:
+        """普攻箭矢贴图：原版用箭矢物品（金币箭 2060000）的 bullet 节点渲染。"""
+        key = ("Item", "0206.img", f"{settings.NORMAL_ARROW_ITEM_ID}/bullet")
+        hit = self._effect_cache.get(key)
+        if hit is not None:
+            return hit
+        result: List[Tuple[pygame.Surface, Tuple[int, int], int]] = []
+        group = self._item_wz().root.subdirs.get("Consume")
+        if group is not None and "0206.img" in group.images:
+            node = group.images["0206.img"].parse().get(key[2])
+            if node is not None:
+                for child in node.children():
+                    real = _resolve_uol(child)
+                    if isinstance(real, WzCanvasProperty):
+                        pil = _decode_canvas_prop(real, self.region, self._item_wz())
+                        if pil is not None:
+                            result.append((pil_to_surface(pil),
+                                           _canvas_origin(real), _canvas_delay(real)))
+        self._effect_cache[key] = result
+        return result
 
     def meso_frames(self) -> List[Tuple[pygame.Surface, int]]:
         """金币（Item.wz/Special/09000000 iconRaw 的 4 帧旋转动画）。缓存。"""
@@ -863,7 +898,7 @@ def pil_to_surface(img: Image.Image) -> pygame.Surface:
 
 def _is_weapon(eid: str) -> bool:
     try:
-        return int(eid) // 10000 == 13
+        return 130 <= int(eid) // 10000 <= 149
     except Exception:
         return False
 

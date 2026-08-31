@@ -23,13 +23,25 @@ class SaveManager:
         self._thread: Optional[threading.Thread] = None
 
     def load(self) -> Optional[dict]:
-        """读取存档。不存在或损坏时回传 None。"""
+        """读取存档。不存在或损坏时回传 None；v1 旧档自动迁移为 v2。"""
         if not self.path.exists():
             return None
         try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            return self.migrate(json.loads(self.path.read_text(encoding="utf-8")))
         except Exception:
             return None
+
+    @staticmethod
+    def migrate(data: dict) -> dict:
+        """把 v1 旧档迁移为 v2：补 job 缺省 0、快捷键缺省空表。"""
+        if data.get("version", 1) >= 2:
+            return data
+        player = data.setdefault("player", {})
+        player.setdefault("job", 0)
+        skills = data.setdefault("skills", {})
+        skills.setdefault("hotkeys", {})
+        data["version"] = 2
+        return data
 
     def request_save(self, data: dict) -> None:
         """提交快照，非同步写盘（不阻塞主执行绪）。"""
@@ -79,7 +91,7 @@ class SaveManager:
     def collect_data(player, combat, map_id: str) -> dict:
         """收集所有需要存档的游戏状态为 dict。"""
         return {
-            "version": 1,
+            "version": 2,
             "player": {
                 "level": player.level,
                 "exp": player.exp,
