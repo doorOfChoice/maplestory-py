@@ -28,6 +28,12 @@ class NPC:
         self.frame = 0
         self.accum = 0.0
         self.talking = False
+        # 任务指示灯（由 Game 每帧传入 marker）
+        self._marker = -1
+        self._marker_accum = 0.0
+
+    def set_marker(self, marker: int) -> None:
+        self._marker = marker
 
     def update(self, dt: float) -> None:
         if not self.frames:
@@ -44,10 +50,26 @@ class NPC:
             w, h = self.frames[self.frame][0].get_size()
         return pygame.Rect(int(self.x - w / 2), int(self.cy - h), w, h)
 
-    def draw(self, surface: pygame.Surface, camera) -> None:
+    def draw(self, surface: pygame.Surface, camera, marker: int = -1) -> None:
         if not self.frames:
             return
         frame_surf, _ = self.frames[self.frame]
         sx, sy = camera.to_screen(self.x, self.cy)
         top_left = (sx - self.origin[0], sy - self.origin[1])
         surface.blit(frame_surf, (int(top_left[0]), int(top_left[1])))
+        if marker >= 0:
+            self._draw_marker(surface, camera, marker)
+
+    def _draw_marker(self, surface: pygame.Surface, camera, marker: int) -> None:
+        """头顶任务灯泡：0=可接取 1=进行中 2=可交付（QuestIcon 帧动画）。"""
+        frames = self.assets.quest_icon_frames(marker)
+        if not frames:
+            return
+        self._marker_accum += 1
+        total = sum(d for _, d in frames) or 1
+        img = frames[int(self._marker_accum * 60 % total) % len(frames)][0]
+        sx, sy = camera.to_screen(self.x, self.cy)
+        w, h = img.get_size()
+        # 画在 NPC 头顶：以 sprite 顶边为基准再抬高一点
+        top = sy - self.origin[1] - h + 6
+        surface.blit(img, (int(sx - w / 2), int(top)))

@@ -15,6 +15,7 @@ from .assets import Assets
 from .physics import Physics
 from .inventory import Inventory, make_item
 from .skills import SkillBook
+from .quests import QuestLog
 
 POSE_IDLE = "stand1"
 POSE_RUN = "walk1"
@@ -25,7 +26,7 @@ POSE_ROPE = "rope"
 
 class Player:
     def __init__(self, assets: Assets, spawn_x: float, spawn_y: float,
-                 equips: Optional[List[str]] = None):
+                 equips: Optional[List[str]] = None, quest_defs=None):
         self.assets = assets
         self.equips = equips or settings.DEFAULT_EQUIPS
         self.x = float(spawn_x)
@@ -43,6 +44,9 @@ class Player:
         self.accum = 0.0
         self.frames: List[Tuple[pygame.Surface, int]] = []
         self.navel_px = (0, 0)
+
+        # 职业（初心者=0；本作单角色演示）
+        self.job = 0
 
         # 状态
         self.attacking = False
@@ -80,6 +84,9 @@ class Player:
         self.skills = SkillBook(assets)
         self.pending_skill: Optional[dict] = None   # 本次攻击使用的技能数据
         self.refresh_equips()
+
+        # 任务状态机
+        self.quests = QuestLog(quest_defs or {})
 
         self._load_anim(POSE_IDLE)
 

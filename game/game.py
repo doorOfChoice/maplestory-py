@@ -24,6 +24,7 @@ from .combat import DamageNumber
 from .effects import Effect
 from .ui import UI
 from .panels import Panels
+from .quests import load_quest_defs, render_markup
 
 # 输入对象（把 pygame 按键抽象成 Player.update 需要的形状）
 class _Keys:
@@ -61,13 +62,20 @@ class Game:
         self.combat = Combat(self.assets)
         self.ui = UI(self.assets)
         self.panels = Panels(self.ui, self.assets)
+        self.panels._quest_goal_lines = self._quest_extra_goal_lines
+
+        # 任务数据：解析全部 Quest.wz，仅开放精选任务
+        self.quest_defs = load_quest_defs(self.assets)
+        self.quest_defs = {qid: d for qid, d in self.quest_defs.items()
+                           if qid in settings.ENABLED_QUESTS}
 
         # 出生点：入口 portal（sp，type 0）
         spawn = self._find_spawn()
         self.spawn_x = spawn[0]
         self.spawn_y = spawn[1]
 
-        self.player = Player(self.assets, self.spawn_x, self.spawn_y)
+        self.player = Player(self.assets, self.spawn_x, self.spawn_y,
+                             quest_defs=self.quest_defs)
         self.player.facing_right = True
         # 落地吸附到出生点的 foothold
         self._place_player_at_spawn()
@@ -82,15 +90,17 @@ class Game:
         self.keys = _Keys()
         self.dead = False
         self._talk_npc: Optional[NPC] = None
+        self._quest_flow = None          # 任务对话框状态机（见 _begin_quest_flow）
+        self._portal_cooldown = 0.0      # 传送冷却，防止一帧多次切图
         self.spawn_grace = settings.SPAWN_GRACE
 
         self.audio.play_bgm()
         self.ui.show_dialog("歡迎", ["冒險島 v113 · 弓箭手村東部小山",
                                      "A/D(或←→) 移動  空格 跳躍  S+空格 下跳",
                                      "W(或↑) 爬繩/梯  J 攻擊  1/2 技能  F 喝藥",
-                                     "I 道具欄  K 技能欄  Enter 對話  R 復活",
-                                     "（對話不影響行動，Enter/Esc 或點擊氣球關閉；"
-                                     "窗口可點 × 關閉、拖標題欄移動）"])
+                                     "I 道具欄  K 技能欄  Q 任務日誌  Enter 對話  R 復活",
+                                     "走到發光傳送門可切換地圖；NPC 頭頂燈泡表示有任務。"
+                                     "（對話不影響行動，Enter/Esc 或點擊關閉）"])
 
     # ── 生成 ───────────────────────────────────────────────────────
     def _find_spawn(self):
@@ -123,7 +133,13 @@ class Game:
                 if not self.dead:
                     cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
                     cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
-                    if self.ui.dialog_hit((cx, cy)):
+                    # 任务对话框按钮优先
+                    btn = self.ui.quest_hit((cx, cy))
+                    if btn is not None:
+                        self._quest_button(btn)
+                    elif self.ui.quest_dialog_hit((cx, cy)):
+                        pass   # 点对话框空白处不关闭（选项型）
+                    elif self.ui.dialog_hit((cx, cy)):
                         # 点击气泡本体 → 关闭对话（面板照常可点）
                         self.ui.hide_dialog()
                         self._talk_npc = None
@@ -141,6 +157,17 @@ class Game:
                     if event.key == pygame.K_r:
                         self.respawn()
                     continue
+                # 任务对话框：Enter/Esc 视为 OK（有 yes/no 时视为拒绝/关闭）
+                if self.ui.quest_visible:
+                    if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER,
+                                     pygame.K_SPACE, pygame.K_ESCAPE):
+                        if self._quest_flow is not None \
+                                and self._quest_flow["stage"] in ("offer", "complete"):
+                            self._quest_button("no")
+                        else:
+                            self.ui.hide_quest()
+                            self._quest_flow = None
+                        continue
                 # 对话框非模态：Enter/空格/Esc 关闭本次按键；其余按键照常
                 if self.ui.dialog_visible:
                     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER,
@@ -152,6 +179,8 @@ class Game:
                     self.panels.toggle_inventory()
                 elif event.key == pygame.K_k:
                     self.panels.toggle_skill()
+                elif event.key == pygame.K_q:
+                    self.panels.toggle_quest_log()
                 elif event.key == pygame.K_f:
                     if self.player.use_potion():
                         self.audio.play("PickUpItem", 0.4)
@@ -202,13 +231,137 @@ class Game:
                     eff, self.player.x, self.player.y))
 
     def _try_talk(self) -> None:
+        """与 NPC 对话：优先任务交互（可交付 > 可接取 > 进行中），否则普通寒暄。"""
         for npc in self.npcs:
             if npc.rect().colliderect(
                     pygame.Rect(int(self.player.x - 20), int(self.player.y - 40), 40, 80)):
+                self._talk_npc = npc
+                if self._begin_quest_flow(npc):
+                    return
                 self.ui.show_dialog(npc.name, ["你好，冒險者！", "小心東邊山丘上的怪物。",
                                                "攻擊按 J，擊敗怪物可獲得經驗與掉落物。"])
-                self._talk_npc = npc
                 return
+
+    # ── 任务对话状态机 ─────────────────────────────────────────────
+    def _begin_quest_flow(self, npc) -> bool:
+        """检查与 NPC 的任务交互。返回是否进入了任务对话框。"""
+        quests = self.player.quests
+        npc_id = npc.npc_id
+
+        # 1. 可交付（进行中且条件满足）
+        for qid, d in self.quest_defs.items():
+            if d.end_npc is not None and str(d.end_npc) == npc_id \
+                    and quests.is_accepted(qid) and quests.can_complete(qid, self.player):
+                self._quest_flow = {"npc": npc, "quest": qid, "stage": "complete"}
+                self._show_quest_complete(qid)
+                return True
+
+        # 2. 可接取（给予 NPC 是这位，且条件满足、未接未完成）
+        for qid, d in self.quest_defs.items():
+            if d.start_npc is not None and str(d.start_npc) == npc_id \
+                    and not quests.started(qid) and quests.can_start(qid, self.player):
+                self._quest_flow = {"npc": npc, "quest": qid, "stage": "offer"}
+                self._show_quest_offer(qid)
+                return True
+
+        # 3. 进行中但条件未满足（交付 NPC 是这位）
+        for qid, d in self.quest_defs.items():
+            if d.end_npc is not None and str(d.end_npc) == npc_id \
+                    and quests.is_accepted(qid):
+                self._quest_flow = {"npc": npc, "quest": qid, "stage": "status"}
+                self._show_quest_status(qid)
+                return True
+
+        return False
+
+    def _qmark(self, text: str) -> str:
+        """把官方 Say 文本里的标记替换为可读文本。"""
+        a = self.assets
+        return render_markup(text, a,
+                             map_name=a.map_name_of, npc_name=a.npc_name,
+                             item_name=a.item_name, mob_name=a.mob_name_of)
+
+    def _show_quest_offer(self, qid: str) -> None:
+        d = self.quest_defs[qid]
+        lines = [self._qmark(l) for l in d.accept_lines] or [f"要接受任務「{d.name}」嗎？"]
+        self.ui.show_quest(f"任務 · {d.name}", lines, ["yes", "no"])
+
+    def _show_quest_complete(self, qid: str) -> None:
+        d = self.quest_defs[qid]
+        lines = [self._qmark(l) for l in d.complete_lines] or [
+            f"已完成任務「{d.name}」的所有條件！要領取獎勵嗎？"]
+        self.ui.show_quest(f"任務完成 · {d.name}", lines, ["yes", "no"])
+
+    def _show_quest_status(self, qid: str) -> None:
+        d = self.quest_defs[qid]
+        lines = [self._qmark(l) for l in d.complete_stop] or \
+                [f"「{d.name}」還未完成，繼續努力吧！"]
+        self.ui.show_quest(d.name, lines, ["ok"])
+
+    def _quest_button(self, key: str) -> None:
+        """任务对话框按钮回调：yes / no / ok。"""
+        flow = self._quest_flow
+        if flow is None:
+            self.ui.hide_quest()
+            return
+        qid = flow["quest"]
+        quests = self.player.quests
+        if flow["stage"] == "offer":
+            if key == "yes":
+                if quests.accept(qid, self.player):
+                    d = self.quest_defs[qid]
+                    self.audio.play("QuestClear", 0.5)
+                    self.panels.flash(f"任務接受：{d.name}")
+                    flow["stage"] = "accepted"
+                    lines = [self._qmark(l) for l in d.accept_yes] or \
+                            [f"已接受任務「{d.name}」。按 Q 查看任務日誌。"]
+                    self.ui.show_quest(d.name, lines, ["ok"])
+                else:
+                    self.ui.hide_quest()
+            else:
+                d = self.quest_defs[qid]
+                flow["stage"] = "declined"
+                lines = [self._qmark(l) for l in d.accept_no] or ["好吧，改變心意的話再來找我。"]
+                self.ui.show_quest(d.name, lines, ["ok"])
+        elif flow["stage"] == "complete":
+            if key == "yes":
+                if quests.complete(qid, self.player, self.combat,
+                                   self.assets, self.audio):
+                    d = self.quest_defs[qid]
+                    self.panels.flash(f"任務完成：{d.name}")
+                    flow["stage"] = "completed"
+                    lines = [self._qmark(l) for l in d.complete_yes] or \
+                            [f"已獲得任務「{d.name}」的獎勵！"]
+                    self.ui.show_quest(d.name, lines, ["ok"])
+                else:
+                    self.ui.hide_quest()
+            else:
+                self.ui.hide_quest()
+        else:   # status / accepted / declined / completed 只展示 → 关闭
+            self.ui.hide_quest()
+            self._quest_flow = None
+
+    def _quest_extra_goal_lines(self, qid: str) -> List[str]:
+        """任务日志：生成当前进行中任务的目标行（击杀 / 收集）。"""
+        d = self.quest_defs.get(qid)
+        if d is None:
+            return []
+        q = self.player.quests
+        lines: List[str] = []
+        for mid, count in d.kills:
+            cur = q.kill_progress(qid, mid)
+            lines.append(f"擊殺 {self.assets.mob_name_of(mid)}  {cur}/{count}")
+        for iid, count in d.end_items:
+            cur = q.item_progress(self.player, qid, iid)
+            lines.append(f"收集 {self.assets.item_name(str(iid)) or f'#{iid}'}  {cur}/{count}")
+        if d.reward_exp:
+            lines.append(f"獎勵：經驗 {d.reward_exp}")
+        if d.reward_money:
+            lines.append(f"獎勵：金幣 {d.reward_money}")
+        for iid, count in d.reward_items:
+            if count > 0:
+                lines.append(f"獎勵：{self.assets.item_name(str(iid)) or f'#{iid}'} ×{count}")
+        return lines
 
     # ── 重生 ───────────────────────────────────────────────────────
     def _place_player_at_spawn(self) -> None:
@@ -245,6 +398,67 @@ class Game:
         self.combat.numbers.clear()
         self.combat.effects.clear()
 
+    # ── 传送门 / 地图切换 ──────────────────────────────────────────
+    def _check_portal(self) -> bool:
+        """玩家踩到 type-2 传送门（目标在白名单内）→ 切图。返回是否切图。"""
+        if self._portal_cooldown > 0:
+            self._portal_cooldown -= 1 / 60
+            return False
+        feet = self.player.y + settings.FEET_OFFSET
+        pr = pygame.Rect(int(self.player.x - 12), int(feet - 12), 24, 24)
+        for p in self.assets.portals:
+            if p.get("type") != 2:
+                continue
+            tm = str(p.get("targetMap") or "")
+            if tm not in settings.TRAVEL_MAPS:
+                continue
+            prt = pygame.Rect(int(p["x"]) - 14, int(p["y"]) - 14, 28, 28)
+            if pr.colliderect(prt):
+                self._enter_map(tm, p.get("targetName"))
+                return True
+        return False
+
+    def _enter_map(self, map_id: str, portal_name: Optional[str]) -> None:
+        """切换到目标地图：重建资源 / 物理 / 相机 / BGM / 生命实体 / 玩家位置。"""
+        self.ui.hide_dialog()
+        self.ui.hide_quest()
+        self._talk_npc = None
+        self._quest_flow = None
+        self.audio.stop_bgm()
+
+        self.assets.load_map(map_id)
+        self.physics = Physics(self.assets.footholds, self.assets.ropes,
+                               bounds=self.assets.bounds)
+        self.camera = Camera(self.assets.map_width, self.assets.map_height,
+                             self.assets.bounds["left"], self.assets.bounds["top"])
+        self.audio.bgm_path = self.assets.map_bgm_path()
+        self._life_mobs = [d for d in self.assets.life if d["type"] == "mob"]
+        self._life_npcs = [d for d in self.assets.life if d["type"] == "npc"]
+
+        # 玩家出生到目标传送门（或 sp 入口）
+        sx, sy = self._portal_position(portal_name)
+        self.spawn_x, self.spawn_y = sx, sy
+        self._place_player_at_spawn()
+        self._spawn_life()
+        self.combat.drops.clear()
+        self.combat.numbers.clear()
+        self.combat.effects.clear()
+        self.hits.clear()
+        self._portal_cooldown = 0.8
+
+        self.audio.play_bgm()
+        self.panels.flash(self.assets.map_name())
+
+    def _portal_position(self, portal_name: Optional[str]):
+        """目标地图出生点：优先指定 portal，其次 sp 入口。"""
+        for p in self.assets.portals:
+            if portal_name and p.get("name") == portal_name:
+                return float(p["x"]), float(p["y"])
+        for p in self.assets.portals:
+            if p.get("type") == 0:      # sp
+                return float(p["x"]), float(p["y"])
+        return float(self.assets.bounds["left"]), float(self.assets.bounds["top"])
+
     # ── 更新 ───────────────────────────────────────────────────────
     def _update(self, dt: float) -> None:
         if self.dead:
@@ -256,6 +470,12 @@ class Game:
             if abs(self.player.x - r.centerx) > 140:
                 self.ui.hide_dialog()
                 self._talk_npc = None
+        # 任务对话框同样在走远后收起
+        if self.ui.quest_visible and self._quest_flow is not None:
+            r = self._quest_flow["npc"].rect()
+            if abs(self.player.x - r.centerx) > 140:
+                self.ui.hide_quest()
+                self._quest_flow = None
 
         # 出生保护计时
         if self.spawn_grace > 0:
@@ -263,6 +483,11 @@ class Game:
 
         # 玩家
         self.player.update(dt, self.keys, self.physics, self.audio)
+
+        # 传送门检测
+        if not self.ui.quest_visible and not self.ui.dialog_visible:
+            if self._check_portal():
+                return
 
         # 掉出地图底部：回出生点并扣血（避免永远下坠）
         if self.player.y > self.assets.map_height + 80:
@@ -320,11 +545,13 @@ class Game:
             self.assets.map_surface, (0, 0),
             pygame.Rect(self.camera.img_x, self.camera.img_y,
                         settings.VIEW_W, settings.VIEW_H))
+        # 传送门（地图之上，实体之下）
+        self._draw_portals(self.canvas)
         # 掉落物（地图之上，实体之下）
         self.combat.draw(self.canvas, self.camera)
-        # NPC / 怪物
+        # NPC / 怪物（NPC 头顶画任务灯泡）
         for npc in self.npcs:
-            npc.draw(self.canvas, self.camera)
+            npc.draw(self.canvas, self.camera, self._npc_marker(npc))
         for mob in self.monsters:
             mob.draw(self.canvas, self.camera)
         # 玩家
@@ -337,6 +564,7 @@ class Game:
         self.panels.draw_quickslots(self.canvas, self.player)
         self.panels.draw(self.canvas, self.player, self.combat.meso)
         self.ui.draw_dialog(self.canvas)
+        self.ui.draw_quest(self.canvas)
         self.ui.draw_death(self.canvas)
 
         # 2x 放大到窗口
@@ -344,6 +572,44 @@ class Game:
             self.canvas, (settings.WINDOW_W, settings.WINDOW_H))
         self.screen.blit(scaled, (0, 0))
         pygame.display.flip()
+
+    def _draw_portals(self, surface) -> None:
+        """画传送门：白名单内的 type-2 门画成发光小圆柱（玩家可走入切图）。"""
+        for p in self.assets.portals:
+            if p.get("type") != 2:
+                continue
+            tm = str(p.get("targetMap") or "")
+            if tm not in settings.TRAVEL_MAPS:
+                continue
+            sx, sy = self.camera.to_screen(p["x"], p["y"])
+            rect = pygame.Rect(int(sx - 9), int(sy - 34), 18, 34)
+            glow = pygame.Surface((rect.w, rect.h), pygame.SRCALPHA)
+            color = (120, 200, 255, 140)
+            pygame.draw.ellipse(glow, color, glow.get_rect())
+            surface.blit(glow, rect.topleft)
+            pygame.draw.ellipse(surface, (220, 245, 255),
+                                (rect.x + 2, rect.y + 6, rect.w - 4, rect.h - 14), 1)
+
+    def _npc_marker(self, npc) -> int:
+        """NPC 任务灯泡：2=可交付 / 0=可接取 / 1=进行中 / -1=无任务。"""
+        quests = self.player.quests
+        npc_id = npc.npc_id
+        # 可交付优先
+        for qid, d in self.quest_defs.items():
+            if d.end_npc is not None and str(d.end_npc) == npc_id \
+                    and quests.is_accepted(qid) and quests.can_complete(qid, self.player):
+                return 2
+        # 可接取
+        for qid, d in self.quest_defs.items():
+            if d.start_npc is not None and str(d.start_npc) == npc_id \
+                    and not quests.started(qid) and quests.can_start(qid, self.player):
+                return 0
+        # 进行中（交付 NPC 是这位）
+        for qid, d in self.quest_defs.items():
+            if d.end_npc is not None and str(d.end_npc) == npc_id \
+                    and quests.is_accepted(qid):
+                return 1
+        return -1
 
     # ── 主循环 ─────────────────────────────────────────────────────
     def run(self) -> None:

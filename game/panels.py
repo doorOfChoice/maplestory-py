@@ -65,6 +65,12 @@ SHT_CELL_X = [4, 48]
 SHT_CELL_Y = [24, 58, 93, 127, 162, 196]
 SHT_CELL_W, SHT_CELL_H = 41, 34
 
+# 任务日志：UIWindow/Quest/backgrnd2（305×396）
+QST_BG = "Quest/backgrnd2"
+QST_W, QST_H = 305, 396
+QST_HEAD_Y = 24          # 标题条下沿（可拖拽区）
+QST_ROW_H = 26           # 每行任务条目高度
+
 # 页签（带原版汉字，宽 26~27 高 16）：游戏内 3 页 → 原版 装备/消耗/其他
 TAB_INDEX = {"equip": 0, "consume": 1, "etc": 3}
 TAB_LABEL = {"consume": "消耗", "equip": "装备", "etc": "其他"}
@@ -92,12 +98,15 @@ class Panels:
         self.inv_visible = False
         self.equip_visible = False
         self.skill_visible = False
+        self.questlog_visible = False
         self.inv_tab = "consume"          # consume | equip | etc
         self._tooltip: Optional[str] = None
         self._toast: Optional[Tuple[str, float]] = None   # (文本, 剩余秒)
         self._inv_rect = pygame.Rect(0, 0, 0, 0)
         self._equip_rect = pygame.Rect(0, 0, 0, 0)
         self._skill_rect = pygame.Rect(0, 0, 0, 0)
+        self._questlog_rect = pygame.Rect(0, 0, 0, 0)
+        self._quest_goal_lines = None    # Game 注入：qid → 目标行列表
         self._cell_rects: List[tuple] = []   # (Rect, tab, index)
         self._slot_rects: List[tuple] = []   # (Rect, slot)
         self._skill_rows: List[tuple] = []   # (Rect, skill_id)
@@ -127,6 +136,11 @@ class Panels:
         if not self.skill_visible and self._drag and self._drag[0] == "skill":
             self._drag = None
 
+    def toggle_quest_log(self) -> None:
+        self.questlog_visible = not self.questlog_visible
+        if not self.questlog_visible and self._drag and self._drag[0] == "questlog":
+            self._drag = None
+
     def _close_window(self, key: str) -> None:
         """关闭按钮：只关对应窗口（背包/装备栏互不牵连）。"""
         if key == "inv":
@@ -135,6 +149,8 @@ class Panels:
             self.equip_visible = False
         elif key == "skill":
             self.skill_visible = False
+        elif key == "questlog":
+            self.questlog_visible = False
         if self._drag and self._drag[0] == key:
             self._drag = None
 
@@ -234,6 +250,9 @@ class Panels:
                     return True
             if self._skill_rect.collidepoint(pos):
                 return True
+        if self.questlog_visible:
+            if self._questlog_rect.collidepoint(pos):
+                return True
         return False
 
     def _click_cell(self, player, tab: str, idx: int) -> None:
@@ -278,6 +297,8 @@ class Panels:
             self._draw_equip(surface, player)
         if self.skill_visible:
             self._draw_skills(surface, player)
+        if self.questlog_visible:
+            self._draw_questlog(surface, player)
         if self._tooltip is not None:
             self._draw_tooltip(surface, mouse)
         # 顶部提示
@@ -617,6 +638,58 @@ class Panels:
                 surface.blit(f.render("+", True, (255, 255, 255)),
                              (btn.x + 7, btn.y + 1))
                 self._skill_rows.append((btn, sid))
+
+    # ── 任务日志窗口（UIWindow/Quest 底板）────────────────────────
+    def _draw_questlog(self, surface, player) -> None:
+        f, fs = self.ui.font, self.ui.font_small
+        vw, vh = surface.get_width(), surface.get_height()
+        bg = self._wz(QST_BG)
+        base = (vw - QST_W - 4, vh - QST_H - BAR_RESERVE - 2)
+        x, y = self._resolve_pos("questlog", base, (QST_W, QST_H), vw, vh)
+        rect = pygame.Rect(x, y, QST_W, QST_H)
+        self._questlog_rect = rect
+        if bg is not None:
+            surface.blit(bg, (x, y))
+        else:
+            _panel(surface, rect)
+        self._add_chrome(surface, "questlog", x, y, QST_W, 24)
+
+        quests = player.quests
+        # 收集进行中任务（保持接取顺序）
+        active = [qid for qid in quests.accepted_order
+                  if quests.is_accepted(qid)]
+
+        # 标题
+        surface.blit(f.render("任務日誌 (Q)", True, (235, 235, 240)),
+                     (x + 12, y + 4))
+        count = fs.render(f"進行中 {len(active)}", True, (150, 155, 165))
+        surface.blit(count, (x + QST_W - count.get_width() - 40, y + 7))
+
+        if not active:
+            empty = fs.render("目前沒有進行中的任務", True, (120, 125, 135))
+            surface.blit(empty, (x + 20, y + 60))
+            return
+
+        ty = y + 40
+        for qid in active:
+            d = quests.defs.get(qid)
+            if d is None:
+                continue
+            if ty + QST_ROW_H * 3 > y + QST_H - 10:
+                break
+            # 任务名
+            name = fs.render(d.name, True, (255, 220, 120))
+            surface.blit(name, (x + 18, ty))
+            ty += 20
+            # 目标行
+            if self._quest_goal_lines is not None:
+                for line in self._quest_goal_lines(qid):
+                    if ty > y + QST_H - 12:
+                        break
+                    surface.blit(fs.render(line, True, (225, 228, 235)),
+                                 (x + 30, ty))
+                    ty += 16
+            ty += 8
 
     # ── 快捷栏（UIWindow/ShortCut 竖条，常驻）──────────────────────
     def draw_quickslots(self, surface, player) -> None:

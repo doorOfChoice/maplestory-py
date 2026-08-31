@@ -59,6 +59,13 @@ class UI:
         self.death_visible = False
         # 上一帧对话框（气泡）占位矩形，供鼠标点击命中判断
         self.dialog_rect: Optional[pygame.Rect] = None
+        # ── 任务对话框（模块化，带选项按钮）────────────────────
+        self.quest_visible = False
+        self.quest_title = ""
+        self.quest_lines: List[str] = []            # 已渲染文本行
+        self.quest_rect: Optional[pygame.Rect] = None
+        self.quest_buttons: List[Tuple[pygame.Rect, str]] = []   # (rect, key)
+        self._quest_buttons_keys: List[str] = ["ok"]
         self._plate_cache: dict = {}
         self._balloon_cache: dict = {}
 
@@ -80,6 +87,36 @@ class UI:
     def dialog_hit(self, pos) -> bool:
         return (self.dialog_visible and self.dialog_rect is not None
                 and self.dialog_rect.collidepoint(pos))
+
+    # ── 任务对话框 ─────────────────────────────────────────────────
+    def show_quest(self, title: str, lines: List[str],
+                   buttons: Optional[List[str]] = None) -> None:
+        """显示任务对话框。buttons: ['yes','no'] / ['ok'] 等按钮键。"""
+        self.quest_visible = True
+        self.quest_title = title
+        self.quest_lines = list(lines)
+        self.quest_buttons = []
+        self._quest_buttons_keys = list(buttons or ["ok"])
+
+    def hide_quest(self) -> None:
+        self.quest_visible = False
+        self.quest_title = ""
+        self.quest_lines = []
+        self.quest_rect = None
+        self.quest_buttons = []
+
+    def quest_hit(self, pos) -> Optional[str]:
+        """命中任务对话框按钮 → 返回按钮键（yes/no/ok），否则 None。"""
+        if not self.quest_visible:
+            return None
+        for rect, key in self.quest_buttons:
+            if rect.collidepoint(pos):
+                return key
+        return None
+
+    def quest_dialog_hit(self, pos) -> bool:
+        return (self.quest_visible and self.quest_rect is not None
+                and self.quest_rect.collidepoint(pos))
 
     def show_death(self) -> None:
         self.death_visible = True
@@ -316,6 +353,50 @@ class UI:
         hint = self.font_small.render("Enter/Esc 或點擊關閉", True, (160, 165, 175))
         surface.blit(hint, (x + bw - hint.get_width() - 14,
                             y + h - hint.get_height() - 5))
+
+    # ── 任务对话框（UtilDlgEx + BtYes/BtNo/BtOK，非模态）─────────
+    def draw_quest(self, surface) -> None:
+        if not self.quest_visible:
+            return
+        vw, vh = surface.get_width(), surface.get_height()
+        text_w = DLG_TEXT_W + 40
+        wrapped: List[str] = []
+        for ln in self.quest_lines:
+            wrapped.extend(self._wrap(ln, text_w, self.font))
+        n = len(wrapped)
+        body_h = max(70, 26 + n * DLG_LINE_H)
+        h = DLG_TOP_H + body_h + DLG_BOTTOM_H
+        w = DLG_W + 40
+        x = (vw - w) // 2
+        y = vh - self._status_bar_h() - 8 - h
+        self.quest_rect = pygame.Rect(x, y, w, h)
+        self._dlg_frame(surface, x, y, w, body_h)
+
+        # 标题（任务名）
+        surface.blit(self.font_big.render(self.quest_title, True, (255, 216, 96)),
+                     (x + DLG_TEXT_X, y + 7))
+        # 正文
+        ty = y + DLG_TOP_H + 8
+        for ln in wrapped:
+            surface.blit(self.font.render(ln, True, (240, 240, 245)), (x + DLG_TEXT_X, ty))
+            ty += DLG_LINE_H
+
+        # 按钮：BtYes / BtNo / BtOK
+        keys = getattr(self, "_quest_buttons_keys", ["ok"])
+        btns = []
+        for key in reversed(keys):
+            img_name = {"yes": "BtYes", "no": "BtNo", "ok": "BtOK"}.get(key)
+            img = self._img("UIWindow.img", f"UtilDlgEx/{img_name}/normal/0")
+            if img is None:
+                continue
+            bw_ = img.get_width()
+            bx = x + w - bw_ - 14
+            by = y + h - img.get_height() - 14
+            surface.blit(img, (bx, by))
+            btns.append((pygame.Rect(bx, by, bw_, img.get_height()), key))
+            w -= bw_ + 10
+        # 恢复 w 供后续帧使用（本帧已计算完，无需恢复）
+        self.quest_buttons = btns
 
     def _draw_dialog_fallback(self, surface, title, wrapped) -> None:
         h, content_h = self._dlg_layout(len(wrapped))

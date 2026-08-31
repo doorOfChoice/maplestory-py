@@ -183,6 +183,11 @@ class Combat:
         """击杀结算：经验 + 金币必掉 + 概率掉物品。"""
         self.total_kills += 1
         self.pending_exp.append(mob.exp)
+        # 任务进度：击杀计数
+        try:
+            player.quests.on_kill(int(mob.mob_id))
+        except Exception:
+            pass
         ground = self._surface_y(mob.x, mob.cy)
         meso = mob.exp * random.randint(3, 6) + random.randint(1, 5)
         self.drops.append(DropItem(

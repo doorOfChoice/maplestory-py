@@ -49,6 +49,7 @@ class Assets:
             "UI": WzFile.open(str(settings.WZ_DIR / "UI.wz"), region=region),
             "Effect": WzFile.open(str(settings.WZ_DIR / "Effect.wz"), region=region),
             "Skill": WzFile.open(str(settings.WZ_DIR / "Skill.wz"), region=region),
+            "Quest": WzFile.open(str(settings.WZ_DIR / "Quest.wz"), region=region),
         }
 
         self.map_renderer = MapRenderer(
@@ -73,14 +74,17 @@ class Assets:
         self._item_wz_obj = None   # Item.wz 较大，首次取图标时再打开
 
         # 地图静态数据
+        self.load_map(map_id)
+
+    def load_map(self, map_id: str) -> None:
+        """切换到另一张地图：重新读取描述 + 整图 Surface（WZ 句柄保持打开）。"""
+        self.map_id = map_id
         self.map_desc = self.map_renderer.describe(map_id)
         self.bounds = self.map_desc["bounds"]
         self.footholds = self.map_desc["footholds"]
         self.ropes = self.map_desc["ropes"]
         self.portals = self.map_desc["portals"]
         self.life = self.map_desc["life"]
-
-        # 地图整图 Surface
         self.map_surface = self._render_map_surface()
         self.map_width = self.bounds["width"]
         self.map_height = self.bounds["height"]
@@ -323,6 +327,34 @@ class Assets:
     def map_name(self) -> str:
         return self.map_desc.get("name") or f"Map {self.map_id}"
 
+    def map_name_of(self, map_id) -> str:
+        """任意地圖 id → 名稱（String.wz Map.img）。"""
+        try:
+            image = self.wz["String"].root.get("Map.img")
+            if image is not None:
+                for category in image.parse().children():
+                    entry = category.get(str(int(map_id)))
+                    if entry is not None and entry.get("mapName") is not None:
+                        return str(entry.get("mapName").value)
+        except Exception:
+            pass
+        try:
+            root, _ = self.map_renderer._map_root(map_id)
+            node = root.get("info/mapName")
+            if node is not None:
+                return str(getattr(node, "value", "") or "")
+        except Exception:
+            pass
+        return f"地圖 {map_id}"
+
+    def mob_name_of(self, mob_id) -> str:
+        """任意怪物 id → 名稱。"""
+        try:
+            d = self.mob_renderer.describe(mob_id)
+            return d.get("name") or f"怪物 {mob_id}"
+        except Exception:
+            return f"怪物 {mob_id}"
+
     # ── UI.wz ───────────────────────────────────────────────────────
     def ui_surface(self, img: str, path: str):
         """从 UI.wz 取一张 canvas → (pygame.Surface, origin(x,y))。缓存。"""
@@ -366,6 +398,30 @@ class Assets:
     def levelup_frames(self) -> List:
         """升级特效 Effect.wz/BasicEff.img/LevelUp。"""
         return self.effect_frames("Effect", "BasicEff.img", "LevelUp")
+
+    def quest_icon_frames(self, index: int) -> List[Tuple[pygame.Surface, int]]:
+        """NPC 头顶任务指示灯（UIWindow/QuestIcon/<i> 动画帧）。"""
+        key = f"qicon:{index}"
+        hit = self._icon_cache.get(key)
+        if hit is not None:
+            return hit
+        frames: List[Tuple[pygame.Surface, int]] = []
+        node = None
+        try:
+            root = self.wz["UI"].root.images.get("UIWindow.img")
+            if root is not None:
+                node = root.parse().get(f"QuestIcon/{index}")
+        except Exception:
+            node = None
+        if node is not None:
+            for child in node.children():
+                real = _resolve_uol(child)
+                if isinstance(real, WzCanvasProperty):
+                    pil = _decode_canvas_prop(real, self.region, self.wz["UI"])
+                    if pil is not None:
+                        frames.append((pil_to_surface(pil), _canvas_delay(real)))
+        self._icon_cache[key] = frames
+        return frames
 
     def _item_wz(self):
         if self._item_wz_obj is None:
@@ -533,7 +589,10 @@ class Assets:
             elif 4000000 <= iid < 5000000:
                 node = sz.root.images.get("Etc.img")
                 if node is not None:
-                    n = node.parse().get(str(iid))
+                    root = node.parse()
+                    n = root.get(str(iid))
+                    if n is None:
+                        n = root.get(f"Etc/{iid}")   # 部分 WZ 有 Etc 包裹层
                     if n is not None:
                         nm = n.get("name")
                         result = str(nm.value) if nm is not None else None
