@@ -6,11 +6,21 @@ MapleStory 的可行走面是一组带 prev/next 链接的线段（foothold）�
   · 站在平台上时跟随坡度（每次更新都找脚下最近的支撑面）
   · 下跳（↓+跳）在一段时间内忽略当前平台的 layer
   · 梯子（ladderRope.l=True）：靠近时按 ↑/↓ 爬升/下降
+  · 竖直墙：初始化时把同 x 相连的竖直 foothold 合并成墙链（区间），
+    x 有序索引，阻挡判定只在被穿过的墙链上跑（O(log n)）
+
+墙判定 = 原版规则（纯脚底相对，不做语义猜测、不用身体盒）：
+  · 墙顶不高于脚底（ytop >= feet - EPS）：平台边缘 stub，可走出坠落
+  · 墙底在脚底上方（ybottom < feet - EPS）：上层平台悬挂边缘，横向穿过
+  · 其余（底扎在脚平面、顶高出脚）：落地实墙/台阶立面，挡住
+行走续命只认 foothold prev/next 链接（linked_continuation / walk_surface）：
+前景坡、悬垂平台等无链接的邻近面不参与贴坡，从根上消除"最近面吸附"闪烁。
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import bisect
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import settings
 
@@ -57,15 +67,75 @@ class Foothold:
         return float(max(self.y1, self.y2))
 
 
+class WallChain:
+    """同一 (layer, x) 处相连（间隙 ≤2px）竖直 foothold 合并成的一整面墙。
+
+    layer 是关键：MapleStory 每一层是独立平面，玩家只与所站 layer 的墙
+    发生横向碰撞；其它 layer 的竖直边只是前后景深，永不阻挡。
+    """
+
+    __slots__ = ("layer", "x", "ytop", "ybottom")
+
+    def __init__(self, layer: int, x: float, ytop: float, ybottom: float):
+        self.layer = layer
+        self.x = x
+        self.ytop = ytop
+        self.ybottom = ybottom
+
+
 class Physics:
     def __init__(self, foothold_data: List[Dict[str, int]],
-                 rope_data: List[Dict[str, Any]]):
+                 rope_data: List[Dict[str, Any]],
+                 bounds: Optional[Dict[str, int]] = None):
         self.footholds: List[Foothold] = [Foothold(d) for d in foothold_data]
         self.by_id: Dict[int, Foothold] = {f.fid: f for f in self.footholds}
         self.ropes = rope_data
-        # 竖直墙（x1==x2）：不可站立/落点，只用于水平阻挡
-        self.walls: List[Foothold] = [f for f in self.footholds
-                                      if f.x1 == f.x2]
+        # VR 边界硬钳制（出图兜底），不再让"墙外无地面"兼职边界判定
+        r = settings.PLAYER_BODY_HALF_W
+        if bounds is not None:
+            self.vr_left: Optional[float] = float(bounds["left"]) + r
+            self.vr_right: Optional[float] = float(bounds["right"]) - r
+        else:
+            self.vr_left = self.vr_right = None
+        # 竖直墙（x1==x2）：不可站立/落点，只用于水平阻挡。
+        # 按 (layer, x) 分组合并成墙链，每层各自按 x 排序供二分查询。
+        self.chains: List[WallChain] = self._build_chains()
+        self.chains_by_layer: Dict[int, List[WallChain]] = {}
+        for w in self.chains:
+            self.chains_by_layer.setdefault(w.layer, []).append(w)
+        self.wall_xs_by_layer: Dict[int, List[float]] = {
+            lay: [w.x for w in ws] for lay, ws in self.chains_by_layer.items()
+        }
+        # 未指定所属层的查询（外部工具/测试）退回全层链，逐层各自不合并
+        self.chains.sort(key=lambda w: w.x)
+        self.wall_xs: List[float] = [w.x for w in self.chains]
+
+    def _layer_chains(self, layer: Optional[int]
+                      ) -> Tuple[List[WallChain], List[float]]:
+        if layer is not None and layer in self.chains_by_layer:
+            return self.chains_by_layer[layer], self.wall_xs_by_layer[layer]
+        if layer is not None:
+            return [], []          # 该层没有墙
+        return self.chains, self.wall_xs
+
+    def _build_chains(self) -> List[WallChain]:
+        groups: Dict[Tuple[int, int], List[Tuple[float, float]]] = {}
+        for f in self.footholds:
+            if f.x1 == f.x2:
+                groups.setdefault((f.layer, f.x1), []).append((f.ymin, f.ymax))
+        chains: List[WallChain] = []
+        for (layer, x), spans in groups.items():
+            spans.sort()
+            top, bottom = spans[0]
+            for a, b in spans[1:]:
+                if a <= bottom + 2.0:
+                    bottom = max(bottom, b)
+                else:
+                    chains.append(WallChain(layer, float(x), top, bottom))
+                    top, bottom = a, b
+            chains.append(WallChain(layer, float(x), top, bottom))
+        chains.sort(key=lambda w: (w.layer, w.x))
+        return chains
 
     # ── 支撑面查询 ────────────────────────────────────────────────
     def landing_candidate(self, x: float, prev_feet: float, now_feet: float,
@@ -129,123 +199,181 @@ class Physics:
                 best, best_d = f, d
         return best
 
+    # ── 链接续段（行走拓扑）────────────────────────────────────────
+    def linked_continuation(self, f: Foothold,
+                            moving_right: bool) -> Optional[Foothold]:
+        """从 f 的行进方向端点沿 prev/next 链接（可穿过连续竖直段，
+        即"墙链=梯级侧影"）走到首个水平续段。没有链接则 None。
+
+        链接是作者写下的通行说明书：相连 = 允许步过/走落；
+        不相连的邻近面（如前景坡道横跨路面）与此查询完全无关。
+        """
+        d = f.next if moving_right else f.prev
+        came_from = f.fid
+        for _ in range(8):
+            if not d or d < 0:
+                return None
+            nxt = self.by_id.get(d)
+            if nxt is None or nxt.fid == came_from:
+                return None
+            if nxt.x1 != nxt.x2:
+                return nxt
+            # 竖直段：从 came_from 那端进入，从另一端穿出
+            if nxt.prev == came_from:
+                came_from, d = nxt.fid, nxt.next
+            elif nxt.next == came_from:
+                came_from, d = nxt.fid, nxt.prev
+            else:
+                return None
+        return None
+
+    def walk_surface(self, cur: Optional[Foothold], x: float,
+                     direction: int,
+                     ignore_layers=None) -> Optional[Foothold]:
+        """行走帧的"脚下是谁"：只认当前链，不做最近面吸附。
+
+        1) cur 仍覆盖 x → 就是它（坡面 y_at 插值自然抬/降脚）；
+        2) 已越过端点 → 仅当存在链接续段、且高差在一级台阶内 → 续段
+           （方向 0 时两端链接都可作为落点，避免原地/垂直降落悬空）；
+        3) 其余（开放边缘 / 无链接的高差 / 被下跳忽略的层）→ None=坠落。
+        """
+        if cur is None:
+            return None
+        ignore = ignore_layers or set()
+        if cur.layer in ignore:
+            return None
+        if cur.covers(x):
+            return cur
+        dirs = [direction] if direction else [1, -1]
+        for d in dirs:
+            cont = self.linked_continuation(cur, d > 0)
+            if cont is None or cont.layer in ignore or not cont.covers(x):
+                continue
+            edge_x = cur.xmax if d > 0 else cur.xmin
+            dy = cont.y_at(x) - cur.y_at(edge_x)
+            if abs(dy) > settings.PLAYER_STEP_UP:
+                continue  # 高落差不自动走下/上：交给重力+落地检测
+            return cont
+        return None
+
     # ── 水平阻挡（竖直墙）──────────────────────────────────────────
-    def wall_block(self, old_x: float, new_x: float, feet_y: float) -> float:
+    def wall_block(self, old_x: float, new_x: float,
+                   prev_feet: float, now_feet: float,
+                   cur_fh: Optional[Foothold] = None,
+                   layer: Optional[int] = None) -> float:
         """本帧水平移动撞到竖直墙时，把 x 钳在墙面外。
 
-        竖直墙是地形侧壁（ymin=上沿，ymax=下沿），默认一律阻挡——不许穿透：
-          · 墙外任何深度都没有落脚点（地图边界墙）→ 任何高度都挡，防出图
-          · 墙脚以下（墙在身体上方，从墙下走过）→ 放行
-          · 两侧有同层地面（走道从地形前方/中间穿过）→ 放行
-          · 开放边缘：墙链底没有延伸到落点平台之下（开放台阶/浮空岛草沿）
-            → 放行走出边缘坠落 / 跳跃越过
-          · 其余（实心崖壁：墙链延伸到落点平台之下）→ 挡住，不许穿透
+        只查询"玩家所在 layer"的墙链（二分定位）——别的层是前后景，
+        永不横向阻挡。判定用的是"x 到达墙面那一刻"插值出的脚底高度，
+        高速下落贴墙也不漏判。同帧穿过多个阻挡墙时取最先碰到的那面。
+
+        cur_fh（当前所站 foothold）传入时，"链接续段在一级台阶内"的
+        梯级 riser 被豁免：放行，由 walk_surface 把脚底抬上去。
+        layer 缺省取 cur_fh.layer；两者皆无（外部查询）→ 退回全层链。
         """
+        if layer is None and cur_fh is not None:
+            layer = cur_fh.layer
+        chains, xs = self._layer_chains(layer)
+        if not chains:
+            return self._vr_clamp(new_x)
         r = settings.PLAYER_BODY_HALF_W
-        for w in self.walls:
-            moving_right = new_x > old_x
-            if moving_right:
-                crossed = old_x <= w.x1 and new_x > w.x1 - r
-            else:
-                crossed = old_x >= w.x1 and new_x < w.x1 + r
-            if not crossed:
-                continue
-            clamped = w.x1 - r if moving_right else w.x1 + r
-            # 边界墙：墙外任何高度都没有落脚点
-            if not self._support_beyond(w.x1, moving_right, feet_y):
-                return clamped
-            # 墙顶上方（跳跃越过边缘；该墙属于更低的层）：放行
-            if feet_y < w.ymin - 6.0:
-                continue
-            # 墙脚以下：墙在身体上方
-            if feet_y > w.ymax + 2.0:
-                continue
-            # 同层地面贯穿墙的两侧
-            if self._surface_spans(w.x1, moving_right, feet_y):
-                continue
-            # 开放台阶：走出坠落 / 跳跃越过都放行
-            if self._is_open_step(w, moving_right, feet_y):
-                continue
-            # 实心崖面：挡住
-            return clamped
-        return new_x
+        if new_x > old_x:
+            lo = bisect.bisect_left(xs, old_x - 1.0)
+            hi = bisect.bisect_right(xs, new_x + r + 1.0)
+            hit: Optional[WallChain] = None
+            for w in chains[lo:hi]:
+                if not (old_x <= w.x and new_x > w.x - r):
+                    continue
+                feet = self._feet_at_cross(old_x, new_x, prev_feet, now_feet,
+                                           w.x - r)
+                if not self._blocks(w, feet) or \
+                        self._step_exempt(cur_fh, w, feet, True):
+                    continue
+                if hit is None or w.x < hit.x:
+                    hit = w
+            return self._vr_clamp(hit.x - r if hit is not None else new_x)
+        if new_x < old_x:
+            lo = bisect.bisect_left(xs, new_x - r - 1.0)
+            hi = bisect.bisect_right(xs, old_x + 1.0)
+            hit = None
+            for w in chains[lo:hi]:
+                if not (old_x >= w.x and new_x < w.x + r):
+                    continue
+                feet = self._feet_at_cross(old_x, new_x, prev_feet, now_feet,
+                                           w.x + r)
+                if not self._blocks(w, feet) or \
+                        self._step_exempt(cur_fh, w, feet, False):
+                    continue
+                if hit is None or w.x > hit.x:
+                    hit = w
+            return self._vr_clamp(hit.x + r if hit is not None else new_x)
+        return self._vr_clamp(new_x)
 
-    def _chain_bottom(self, wall) -> float:
-        """从该墙段向下收集同 x 相邻的墙段，返回链底 y。"""
-        bottom = wall.ymax
-        cur = wall
-        while True:
-            nxt = next((o for o in self.walls
-                        if o is not cur and abs(o.x1 - cur.x1) < 1.0
-                        and abs(o.ymin - bottom) < 2.0), None)
-            if nxt is None:
-                return bottom
-            cur = nxt
-            bottom = cur.ymax
-
-    def _is_open_step(self, wall, moving_right: bool, feet_y: float) -> bool:
-        """开放边缘：墙链底没有延伸到落点平台之下（落点周围无岩体）。
-
-        · 台阶：墙链底 == 下一级平台面（如 305→365）→ 走出坠落
-        · 浮空岛草沿：墙只是平台边缘的一小段唇沿，下方是开阔空气
-          （如浮空岛 245→455 水面路面）→ 走出坠落
-        · 实心崖壁：墙链延伸到落点平台之下（如 365→455 但墙到 510）
-          → 不是开放边缘，调用方应阻挡
-        """
-        drop = self._walk_off_drop(wall.x1, moving_right, feet_y)
-        if drop == float("inf"):
+    def _step_exempt(self, cur: Optional[Foothold], w: WallChain,
+                     feet: float, moving_right: bool) -> bool:
+        """被挡的墙链恰是当前段的链接梯级 riser、续段高差在一步内 → 放行。"""
+        if cur is None:
             return False
-        return self._chain_bottom(wall) <= feet_y + drop + 8.0
+        cont = self.linked_continuation(cur, moving_right)
+        if cont is None:
+            return False
+        edge_x = cur.xmax if moving_right else cur.xmin
+        if abs(w.x - edge_x) > 2.0:
+            return False
+        rise = feet - cont.y_at(w.x + (settings.PLAYER_BODY_HALF_W
+                                       if moving_right
+                                       else -settings.PLAYER_BODY_HALF_W))
+        return 0.0 <= rise <= settings.PLAYER_STEP_UP
 
-    def _support_beyond(self, wall_x: float, moving_right: bool,
-                        feet_y: float) -> bool:
-        """墙外侧紧邻处、脚底同高或更低是否存在落脚点（识别地图边界墙）。"""
-        px = wall_x + (2.0 if moving_right else -2.0)
-        for f in self.footholds:
-            if f.x1 == f.x2 or not f.covers(px):
-                continue
-            if f.y_at(px) >= feet_y - 12.0:
-                return True
-        return False
+    def _vr_clamp(self, x: float) -> float:
+        if self.vr_left is None:
+            return x
+        return min(max(x, self.vr_left), self.vr_right)
 
-    def _walk_off_drop(self, wall_x: float, moving_right: bool,
-                       feet_y: float, ahead: float = 50.0) -> float:
-        """墙外侧 ahead 范围内、低于脚底的最近支撑面落差；没有则返回 inf。"""
-        best = float("inf")
-        px = wall_x + (2.0 if moving_right else -2.0)
-        for f in self.footholds:
-            if f.x1 == f.x2:
-                continue
-            if moving_right:
-                if f.xmax < wall_x or f.xmin > wall_x + ahead:
-                    continue
-            else:
-                if f.xmin > wall_x or f.xmax < wall_x - ahead:
-                    continue
-            y = f.y_at(min(max(px, f.xmin), f.xmax))
-            if y > feet_y + 2.0 and y - feet_y < best:
-                best = y - feet_y
-        return best
+    def touching_wall(self, x: float, feet_y: float, direction: int,
+                      layer: Optional[int] = None) -> Optional[float]:
+        """身体半宽前沿是否抵着一面会阻挡的墙（贴墙下滑/蹬墙跳判用）。
 
-    def _surface_spans(self, wall_x: float, moving_right: bool,
-                       feet_y: float) -> bool:
-        """墙两侧、脚底同层（±容差）是否都有支撑面。
-
-        地面常由多段 foothold 拼接，不能要求单条线段跨过墙的 x，
-        只需两侧各自存在同层支撑（走道从地形前方/中间穿过）。
+        同样只在玩家所属 layer 的墙链里找。返回墙面 x；没有则 None。
         """
-        back = wall_x - 14.0 if moving_right else wall_x + 14.0
-        ahead = wall_x + 4.0 if moving_right else wall_x - 4.0
-        return self._ground_at(back, feet_y) and self._ground_at(ahead, feet_y)
+        chains, xs = self._layer_chains(layer)
+        if not chains:
+            return None
+        r = settings.PLAYER_BODY_HALF_W
+        px = x + direction * r
+        lo = bisect.bisect_left(xs, px - 3.0)
+        hi = bisect.bisect_right(xs, px + 3.0)
+        for w in chains[lo:hi]:
+            if self._blocks(w, feet_y):
+                return w.x
+        return None
 
-    def _ground_at(self, x: float, feet_y: float, tol: float = 12.0) -> bool:
-        """x 处脚底同层（±tol）是否存在支撑面。"""
-        for f in self.footholds:
-            if f.x1 == f.x2 or not f.covers(x):
-                continue
-            if abs(f.y_at(x) - feet_y) <= tol:
-                return True
-        return False
+    @staticmethod
+    def _feet_at_cross(old_x: float, new_x: float, prev_feet: float,
+                       now_feet: float, edge: float) -> float:
+        """脚底高度按"x 位移到墙面边缘那一刻"在帧间线性插值。"""
+        if new_x == old_x:
+            return now_feet
+        t = (edge - old_x) / (new_x - old_x)
+        t = min(1.0, max(0.0, t))
+        return prev_feet + (now_feet - prev_feet) * t
+
+    def _blocks(self, w: WallChain, feet_y: float) -> bool:
+        """墙链在给定脚底高度上是否阻挡水平移动（纯脚底相对，无身体盒）。
+
+        只挡"扎在你所站地面层"的实体墙，一条高度判据即可：
+          · 墙顶 >= 脚底-EPS → 顶面不高于脚：这是你正站着的平台边缘 stub，
+            可走出坠落（ytop≈feet 或整面墙在脚下）。
+          · 墙底 < 脚底-EPS → 整面墙悬挂在脚上方：上层平台的边缘 riser，
+            MS 无下蹲、上层地面永远可从下方横向穿过，放行。
+          · 其余（顶高于脚 且 底落在脚平面或以下）→ 落地实墙 / 台阶立面，挡。
+        """
+        eps = settings.WALL_FEET_EPS
+        if w.ytop >= feet_y - eps:
+            return False
+        if w.ybottom < feet_y - eps:
+            return False
+        return True
 
     # ── 梯子 / 绳索 ───────────────────────────────────────────────
     def rope_at(self, x: float, y: float) -> Optional[Dict[str, Any]]:

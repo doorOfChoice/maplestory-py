@@ -32,6 +32,10 @@ MAX_FALL_SPEED = 1600.0
 LADDER_SPEED = 130.0             # 爬梯速度
 CLIMB_TOP_OVERSHOOT = 40.0       # 爬出绳/梯顶端的最大越出距离（用于落到顶部平台）
 DROP_THROUGH_TIME = 0.30         # 下跳穿过平台的无碰撞秒数
+# 贴墙互动（原版没有、类 MS 平台跳跃的通用增强，可按手感关改这里）
+WALL_SLIDE_SPEED = 140.0         # 空中贴着墙按住方向键下落时的限速
+WALL_JUMP_VX = 260.0             # 蹬墙跳水平弹开速度
+WALL_JUMP_LOCK = 0.15            # 蹬墙跳后朝原墙方向输入的失控时长
 
 # 角色 navel → 脚底偏移（像素，实测 stand1 约 20px）
 FEET_OFFSET = 20.0
@@ -40,6 +44,11 @@ PLAYER_HIT_W = 26.0
 PLAYER_HIT_H = 48.0
 # 角色身体半宽（用于竖直墙的水平阻挡）
 PLAYER_BODY_HALF_W = 10.0
+# 墙顶/底相对脚底的容差：ytop∈[feet-EPS,feet] 视为平台边缘 stub 放行；
+# ybottom 高于 feet-EPS 视为上层平台悬挂边缘放行
+WALL_FEET_EPS = 3.0
+# 链接续段的最大自动上/下步高差（≥原版一级台阶 25~35px；更高需跳跃）
+PLAYER_STEP_UP = 36.0
 
 # ── 战斗 ─────────────────────────────────────────────────────────────
 ATTACK_RANGE = 58.0              # 攻击命中框向前延伸距离

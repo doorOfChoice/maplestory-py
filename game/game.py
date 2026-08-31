@@ -50,7 +50,8 @@ class Game:
 
         # 资源
         self.assets = Assets(settings.MAP_ID, settings.REGION)
-        self.physics = Physics(self.assets.footholds, self.assets.ropes)
+        self.physics = Physics(self.assets.footholds, self.assets.ropes,
+                               bounds=self.assets.bounds)
         self.camera = Camera(self.assets.map_width, self.assets.map_height,
                              self.assets.bounds["left"], self.assets.bounds["top"])
         self.audio = Audio(self.assets, self.assets.map_bgm_path())
@@ -208,6 +209,8 @@ class Game:
         if fh is not None:
             p.y = fh.y_at(p.x) - settings.FEET_OFFSET
             p.on_ground = True
+            p.cur_fh = fh
+            p.ground_layer = fh.layer
 
     def respawn(self) -> None:
         self.dead = False

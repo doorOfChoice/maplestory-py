@@ -34,6 +34,8 @@ class Player:
         self.vy = 0.0
         self.on_ground = False
         self.cur_fh = None
+        # 生效 layer：站立平台的层；空中沿用最后所站层（墙阻挡/贴墙用）
+        self.ground_layer: Optional[int] = None
 
         self.facing_right = True
         self.pose = POSE_IDLE
@@ -49,6 +51,9 @@ class Player:
         self.attack_timer = 0.0       # 攻击状态超时保险，防止动画状态卡死
         self.climbing = False
         self.detach_cooldown = 0.0    # 从绳上跳下后的短暂时间，防止立刻重新吸附
+        self.wall_dir = 0             # 本帧贴着的墙方向（-1 左墙 / +1 右墙 / 0 无）
+        self.wall_lock = 0.0          # 蹬墙跳后短暂失控计时
+        self.wall_side = 0            # 蹬开的那面墙方向（失控期内仍按它屏蔽输入）
         self.anim_flip = self.facing_right
         self.drop_layers = set()      # 下跳要忽略的 layer
         self.drop_timer = 0.0
@@ -148,6 +153,15 @@ class Player:
         if self.on_ground:
             self.vy = settings.JUMP_VELOCITY
             self.on_ground = False
+        elif self.wall_dir and not self.attacking and self.hurt_timer <= 0:
+            # 蹬墙跳：反向弹开 + 向上，短暂失控期内屏蔽朝原墙方向的输入
+            d = self.wall_dir
+            self.vy = settings.JUMP_VELOCITY
+            self.vx = -d * settings.WALL_JUMP_VX
+            self.facing_right = d < 0
+            self.wall_dir = 0
+            self.wall_side = d
+            self.wall_lock = settings.WALL_JUMP_LOCK
 
     def drop_through(self, physics: Optional[Physics] = None) -> None:
         if self.on_ground and self.cur_fh is not None:
@@ -248,11 +262,20 @@ class Player:
             self._tick_frame(dt, loop=True)
 
         # 水平移动输入（攻击/受击硬直过程中不能主动移动）
+        if self.wall_lock > 0:
+            self.wall_lock -= dt
+            if self.wall_lock <= 0:
+                self.wall_side = 0
+        push_back_to_wall = self.wall_side != 0 and self.wall_lock > 0 and (
+            (self.wall_side > 0 and keys.right and not keys.left)
+            or (self.wall_side < 0 and keys.left and not keys.right))
         if self.attacking:
             self.stop_move()
         elif self.hurt_timer > 0:
             # 击退滑行，按距离衰减
             self.vx *= max(0.0, 1 - 6.0 * dt)
+        elif push_back_to_wall:
+            pass    # 蹬墙跳失控期：保持弹开速度，方向输入先不抵消
         elif keys.left and not keys.right:
             self.move_left()
         elif keys.right and not keys.left:
@@ -321,13 +344,24 @@ class Player:
         # 物理：重力 + 位移
         prev_feet = self.y + settings.FEET_OFFSET
         prev_x = self.x
+        if self.cur_fh is not None:
+            self.ground_layer = self.cur_fh.layer
+        # 贴墙下滑：空中压着贴着墙那一侧的方向键下落 → 限速（蹬墙跳的窗口）
+        sliding = (self.wall_dir != 0 and not self.on_ground
+                   and not self.climbing and self.vy > 0
+                   and ((self.wall_dir > 0 and keys.right and not keys.left)
+                        or (self.wall_dir < 0 and keys.left and not keys.right)))
         self.vy += settings.GRAVITY * dt
-        if self.vy > settings.MAX_FALL_SPEED:
-            self.vy = settings.MAX_FALL_SPEED
+        cap = settings.WALL_SLIDE_SPEED if sliding else settings.MAX_FALL_SPEED
+        if self.vy > cap:
+            self.vy = cap
         self.x += self.vx * dt
         self.y += self.vy * dt
-        # 竖直墙水平阻挡（防止穿过台阶/地形侧面掉进地里）
-        self.x = physics.wall_block(prev_x, self.x, prev_feet)
+        # 竖直墙水平阻挡：只挡"自己 layer"的墙（他层为前后景，可穿行）；
+        # 传入当前链使"链接的一级台阶"可以走上去而非被拦
+        self.x = physics.wall_block(prev_x, self.x, prev_feet,
+                                    self.y + settings.FEET_OFFSET,
+                                    self.cur_fh, layer=self.ground_layer)
         now_feet = self.y + settings.FEET_OFFSET
 
         # 落地检测（下落时穿过某条线段）
@@ -340,8 +374,15 @@ class Player:
                 self.cur_fh = fh
                 self.drop_layers.discard(fh.layer)
         elif self.on_ground:
-            # 贴坡：找脚下支撑
-            surf = physics.grounded_surface(self.x, now_feet)
+            # 贴坡只认"当前链"：cur_fh 覆盖脚下 → 跟坡插值；越过端点 →
+            # 仅接受 prev/next 链接的一级台阶续段。前景坡/悬垂平台等
+            # 无链接的邻近面不参与贴坡（原版行走=沿 foothold 链游走）。
+            direction = (1 if self.vx > 0.5
+                         else -1 if self.vx < -0.5 else 0)
+            surf = physics.walk_surface(self.cur_fh, self.x, direction,
+                                        self.drop_layers)
+            if surf is None and self.cur_fh is None:
+                surf = physics.grounded_surface(self.x, now_feet)
             if surf is None:
                 # 大步长（如切窗回来 dt 尖峰）会瞬时沉到容差之外：
                 # 同帧用穿线检测兜底找回地面，避免误判成坠落而穿透
@@ -355,6 +396,20 @@ class Player:
             else:
                 self.on_ground = False
                 self.cur_fh = None
+
+        # 贴墙状态刷新（供下一帧的贴墙下滑 / 蹬墙跳使用）
+        self.wall_dir = 0
+        if (not self.on_ground and not self.climbing and self.wall_lock <= 0
+                and not self.attacking and self.hurt_timer <= 0):
+            if keys.right and not keys.left:
+                press = 1
+            elif keys.left and not keys.right:
+                press = -1
+            else:
+                press = 0
+            if press and physics.touching_wall(self.x, now_feet, press,
+                                               layer=self.ground_layer) is not None:
+                self.wall_dir = press
 
         # 姿态选择（非攻击时）
         if not self.attacking:
