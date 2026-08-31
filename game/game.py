@@ -92,6 +92,7 @@ class Game:
         self._talk_npc: Optional[NPC] = None
         self._quest_flow = None          # 任务对话框状态机（见 _begin_quest_flow）
         self._portal_cooldown = 0.0      # 传送冷却，防止一帧多次切图
+        self._portal_pulse = 0.0         # 传送门脉冲动画相位
         self.spawn_grace = settings.SPAWN_GRACE
 
         self.audio.play_bgm()
@@ -99,7 +100,7 @@ class Game:
                                      "A/D(或←→) 移動  空格 跳躍  S+空格 下跳",
                                      "W(或↑) 爬繩/梯  J 攻擊  1/2 技能  F 喝藥",
                                      "I 道具欄  K 技能欄  Q 任務日誌  Enter 對話  R 復活",
-                                     "走到發光傳送門可切換地圖；NPC 頭頂燈泡表示有任務。"
+                                     "走到發光傳送門前按 ↑ 可切換地圖；NPC 頭頂燈泡表示有任務。"
                                      "（對話不影響行動，Enter/Esc 或點擊關閉）"])
 
     # ── 生成 ───────────────────────────────────────────────────────
@@ -190,7 +191,10 @@ class Game:
                     # W 只用于上绳/梯（长按逻辑在 Player.update 中处理），不触发跳跃
                     pass
                 elif event.key in (pygame.K_SPACE, pygame.K_UP):
-                    if self.keys.down:
+                    if (event.key == pygame.K_UP and not self.keys.down
+                            and self._portal_at_feet() is not None):
+                        pass  # 站在传送门上按 ↑ → 交给 _check_portal 切图，不跳跃
+                    elif self.keys.down:
                         self.player.drop_through(self.physics)
                     elif self.player.climbing:
                         # 只有空格从绳上跳下；↑ 在绳上继续爬
@@ -399,11 +403,8 @@ class Game:
         self.combat.effects.clear()
 
     # ── 传送门 / 地图切换 ──────────────────────────────────────────
-    def _check_portal(self) -> bool:
-        """玩家踩到 type-2 传送门（目标在白名单内）→ 切图。返回是否切图。"""
-        if self._portal_cooldown > 0:
-            self._portal_cooldown -= 1 / 60
-            return False
+    def _portal_at_feet(self) -> Optional[dict]:
+        """回传玩家脚底重叠的白名单 type-2 传送门（供绘制提示 / 触发判断）。"""
         feet = self.player.y + settings.FEET_OFFSET
         pr = pygame.Rect(int(self.player.x - 12), int(feet - 12), 24, 24)
         for p in self.assets.portals:
@@ -414,8 +415,20 @@ class Game:
                 continue
             prt = pygame.Rect(int(p["x"]) - 14, int(p["y"]) - 14, 28, 28)
             if pr.colliderect(prt):
-                self._enter_map(tm, p.get("targetName"))
-                return True
+                return p
+        return None
+
+    def _check_portal(self) -> bool:
+        """玩家站在 type-2 传送门上按住 ↑ 键才切图（与原版一致）。返回是否切图。"""
+        if self._portal_cooldown > 0:
+            self._portal_cooldown -= 1 / 60
+            return False
+        if not self.keys.up:
+            return False
+        p = self._portal_at_feet()
+        if p is not None:
+            self._enter_map(str(p["targetMap"]), p.get("targetName"))
+            return True
         return False
 
     def _enter_map(self, map_id: str, portal_name: Optional[str]) -> None:
@@ -461,6 +474,7 @@ class Game:
 
     # ── 更新 ───────────────────────────────────────────────────────
     def _update(self, dt: float) -> None:
+        self._portal_pulse += dt
         if self.dead:
             return
 
@@ -573,8 +587,22 @@ class Game:
         self.screen.blit(scaled, (0, 0))
         pygame.display.flip()
 
+    def _portal_frame_index(self, frames, t: float) -> int:
+        """依累积秒数定位动画帧：每帧显示其 delay 毫秒时长（循环播放）。"""
+        total = sum(d for _, _, d in frames)
+        ms = (t * 1000.0) % total
+        for i, (_, _, delay) in enumerate(frames):
+            if ms < delay:
+                return i
+            ms -= delay
+        return 0
+
     def _draw_portals(self, surface) -> None:
-        """画传送门：白名单内的 type-2 门画成发光小圆柱（玩家可走入切图）。"""
+        """画传送门：白名单内的 type-2 门用 WZ 原版 8 帧动画。"""
+        frames = self.assets.portal_frames()
+        if not frames:
+            return
+        idx = self._portal_frame_index(frames, self._portal_pulse)
         for p in self.assets.portals:
             if p.get("type") != 2:
                 continue
@@ -582,13 +610,15 @@ class Game:
             if tm not in settings.TRAVEL_MAPS:
                 continue
             sx, sy = self.camera.to_screen(p["x"], p["y"])
-            rect = pygame.Rect(int(sx - 9), int(sy - 34), 18, 34)
-            glow = pygame.Surface((rect.w, rect.h), pygame.SRCALPHA)
-            color = (120, 200, 255, 140)
-            pygame.draw.ellipse(glow, color, glow.get_rect())
-            surface.blit(glow, rect.topleft)
-            pygame.draw.ellipse(surface, (220, 245, 255),
-                                (rect.x + 2, rect.y + 6, rect.w - 4, rect.h - 14), 1)
+            surf, origin, _ = frames[idx]
+            rect = surf.get_rect()
+            rect.centerx = int(sx)
+            rect.bottom = int(sy) + 2
+            surface.blit(surf, rect.topleft)
+            # 玩家站在传送门上时画金色高亮光环
+            if self._portal_at_feet() is p:
+                pygame.draw.ellipse(surface, (255, 255, 140, 220),
+                                    (rect.centerx - 18, rect.bottom - 10, 36, 14), 3)
 
     def _npc_marker(self, npc) -> int:
         """NPC 任务灯泡：2=可交付 / 0=可接取 / 1=进行中 / -1=无任务。"""

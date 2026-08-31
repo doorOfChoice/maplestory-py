@@ -458,7 +458,30 @@ class Assets:
         self._icon_cache[key] = result
         return result
 
-    # ── 装备 / 消耗品 / 技能数据（Character.wz + Item.wz + String.wz）──
+    # ── 传送门特效（Map.wz MapHelper.img portal/game/pv）────────────
+    def portal_frames(self) -> List[Tuple[pygame.Surface, Tuple[int, int], int]]:
+        """Map.wz/MapHelper.img/portal/game/pv 的 8 帧动画序列。"""
+        key = "portal:pv"
+        hit = self._effect_cache.get(key)
+        if hit is not None:
+            return hit
+        result: List[Tuple[pygame.Surface, Tuple[int, int], int]] = []
+        image = self.wz["Map"].root.images.get("MapHelper.img")
+        if image is not None:
+            node = image.parse().get("portal/game/pv")
+            if node is not None:
+                for child in node.children():
+                    real = _resolve_uol(child)
+                    if isinstance(real, WzCanvasProperty):
+                        pil = _decode_canvas_prop(real, self.region, self.wz["Map"])
+                        if pil is not None:
+                            result.append((pil_to_surface(pil),
+                                           _canvas_origin(real), _canvas_delay(real)))
+        if not result:
+            result = [(pygame.Surface((1, 1), pygame.SRCALPHA), (0, 0), 100)]
+        self._effect_cache[key] = result
+        return result
+
     def equip_subdir(self, item_id: str) -> Optional[str]:
         """装备 id → Character.wz 子目录名（按 id 前缀分类）。"""
         try:
