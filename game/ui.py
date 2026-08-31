@@ -378,7 +378,7 @@ class UI:
         # 正文
         ty = y + DLG_TOP_H + 8
         for ln in wrapped:
-            surface.blit(self.font.render(ln, True, (240, 240, 245)), (x + DLG_TEXT_X, ty))
+            surface.blit(self.font.render(ln, True, (60, 52, 44)), (x + DLG_TEXT_X, ty))
             ty += DLG_LINE_H
 
         # 按钮：BtYes / BtNo / BtOK

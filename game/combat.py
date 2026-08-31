@@ -15,6 +15,7 @@ from typing import List, Optional
 import pygame
 
 from . import settings
+from .animation import Animation
 from .assets import Assets
 from .effects import Effect
 from .inventory import make_item
@@ -95,8 +96,8 @@ class DropItem:
         if self.is_meso:
             frames = self.assets.meso_frames() if self.assets else []
             if frames:
-                img, _ = frames[int(self._age * 1000 / 130) % len(frames)]
-                return img
+                idx = Animation.frame_at(frames, self._age * 1000)
+                return frames[idx][0]
             return None
         if self.item is not None and self.assets is not None:
             iid = self.item.get("id")

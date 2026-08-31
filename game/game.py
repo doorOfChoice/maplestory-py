@@ -12,6 +12,7 @@ from typing import List, Optional, Tuple
 import pygame
 
 from . import settings
+from .animation import Animation
 from .assets import Assets
 from .physics import Physics
 from .camera import Camera
@@ -25,6 +26,7 @@ from .effects import Effect
 from .ui import UI
 from .panels import Panels
 from .quests import load_quest_defs, render_markup
+from .save_manager import SaveManager
 
 # 输入对象（把 pygame 按键抽象成 Player.update 需要的形状）
 class _Keys:
@@ -52,8 +54,15 @@ class Game:
         self.clock = pygame.time.Clock()
         self.running = True
 
+        # 存档：读本地 save.json；存在则继续，否则新游戏
+        self.save_manager = SaveManager(settings.SAVE_FILE)
+        self.save_data = self.save_manager.load()
+        self._save_timer = 0.0
+        start_map = (self.save_data["player"]["map_id"]
+                     if self.save_data else settings.MAP_ID)
+
         # 资源
-        self.assets = Assets(settings.MAP_ID, settings.REGION)
+        self.assets = Assets(start_map, settings.REGION)
         self.physics = Physics(self.assets.footholds, self.assets.ropes,
                                bounds=self.assets.bounds)
         self.camera = Camera(self.assets.map_width, self.assets.map_height,
@@ -69,14 +78,20 @@ class Game:
         self.quest_defs = {qid: d for qid, d in self.quest_defs.items()
                            if qid in settings.ENABLED_QUESTS}
 
-        # 出生点：入口 portal（sp，type 0）
+        # 出生点：入口 portal（sp，type 0）；读档时用存档位置
         spawn = self._find_spawn()
         self.spawn_x = spawn[0]
         self.spawn_y = spawn[1]
+        if self.save_data:
+            pd = self.save_data["player"]
+            self.spawn_x = float(pd["x"])
+            self.spawn_y = float(pd["y"]) + settings.FEET_OFFSET
 
         self.player = Player(self.assets, self.spawn_x, self.spawn_y,
-                             quest_defs=self.quest_defs)
-        self.player.facing_right = True
+                             quest_defs=self.quest_defs,
+                             save_data=self.save_data)
+        if not self.save_data:
+            self.player.facing_right = True
         # 落地吸附到出生点的 foothold
         self._place_player_at_spawn()
 
@@ -101,12 +116,18 @@ class Game:
         self._loading_timer = 0.0
 
         self.audio.play_bgm()
-        self.ui.show_dialog("歡迎", ["冒險島 v113 · 弓箭手村東部小山",
-                                     "A/D(或←→) 移動  空格 跳躍  S+空格 下跳",
-                                     "W(或↑) 爬繩/梯  J 攻擊  1/2 技能  F 喝藥",
-                                     "I 道具欄  K 技能欄  Q 任務日誌  Enter 對話  R 復活",
-                                     "走到發光傳送門前按 ↑ 可切換地圖；NPC 頭頂燈泡表示有任務。"
-                                     "（對話不影響行動，Enter/Esc 或點擊關閉）"])
+        if self.save_data:
+            self.ui.show_dialog("讀取存檔", [
+                f"歡迎回來，Lv.{self.player.level} 冒險者！",
+                "已從本地存檔載入你的進度。",
+                "（對話不影響行動，Enter/Esc 或點擊關閉）"])
+        else:
+            self.ui.show_dialog("歡迎", ["冒險島 v113 · 弓箭手村東部小山",
+                                         "A/D(或←→) 移動  空格 跳躍  S+空格 下跳",
+                                         "W(或↑) 爬繩/梯  J 攻擊  1/2 技能  F 喝藥",
+                                         "I 道具欄  K 技能欄  Q 任務日誌  Enter 對話  R 復活",
+                                         "走到發光傳送門前按 ↑ 可切換地圖；NPC 頭頂燈泡表示有任務。"
+                                         "（對話不影響行動，Enter/Esc 或點擊關閉）"])
 
     # ── 生成 ───────────────────────────────────────────────────────
     def _find_spawn(self):
@@ -356,7 +377,7 @@ class Game:
             self._quest_flow = None
 
     def _quest_extra_goal_lines(self, qid: str) -> List[str]:
-        """任务日志：生成当前进行中任务的目标行（击杀 / 收集）。"""
+        """任务日志：生成当前进行中任务的目标行（击杀 / 收集 / 描述）。"""
         d = self.quest_defs.get(qid)
         if d is None:
             return []
@@ -368,6 +389,8 @@ class Game:
         for iid, count in d.end_items:
             cur = q.item_progress(self.player, qid, iid)
             lines.append(f"收集 {self.assets.item_name(str(iid)) or f'#{iid}'}  {cur}/{count}")
+        if not lines and d.desc1:
+            lines.append(d.desc1)
         if d.reward_exp:
             lines.append(f"獎勵：經驗 {d.reward_exp}")
         if d.reward_money:
@@ -493,9 +516,23 @@ class Game:
                 return float(p["x"]), float(p["y"])
         return float(self.assets.bounds["left"]), float(self.assets.bounds["top"])
 
+    # ── 存档 ─────────────────────────────────────────────────────────
+    def _save_game(self) -> None:
+        """收集當前遊戲狀態，非同步寫入本地存檔（不阻塞主循環）。"""
+        try:
+            self.save_manager.request_save(SaveManager.collect_data(
+                self.player, self.combat, self.assets.map_id))
+        except Exception:
+            pass
+
     # ── 更新 ───────────────────────────────────────────────────────
     def _update(self, dt: float) -> None:
         self._portal_pulse += dt
+        # 定时自动存档
+        self._save_timer += dt
+        if self._save_timer >= settings.SAVE_INTERVAL:
+            self._save_timer = 0.0
+            self._save_game()
         # 地图切换加载中：等待后台线程，恢复后继续游戏逻辑
         if self._loading:
             self._loading_timer += dt
@@ -634,14 +671,8 @@ class Game:
         pygame.display.flip()
 
     def _portal_frame_index(self, frames, t: float) -> int:
-        """依累积秒数定位动画帧：每帧显示其 delay 毫秒时长（循环播放）。"""
-        total = sum(d for _, _, d in frames)
-        ms = (t * 1000.0) % total
-        for i, (_, _, delay) in enumerate(frames):
-            if ms < delay:
-                return i
-            ms -= delay
-        return 0
+        """依累積秒數定位動畫幀：每幀顯示其 delay 毫秒時長（循環播放）。"""
+        return Animation.frame_at(frames, t * 1000.0)
 
     def _draw_portals(self, surface) -> None:
         """画传送门：白名单内的 type-2 门用 WZ 原版 8 帧动画。"""
@@ -699,6 +730,11 @@ class Game:
         self._shutdown()
 
     def _shutdown(self) -> None:
+        try:
+            self.save_manager.flush(SaveManager.collect_data(
+                self.player, self.combat, self.assets.map_id))
+        except Exception:
+            pass
         self.audio.close()
         self.assets.close()
         pygame.quit()

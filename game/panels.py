@@ -659,14 +659,14 @@ class Panels:
         active = [qid for qid in quests.accepted_order
                   if quests.is_accepted(qid)]
 
-        # 标题
-        surface.blit(f.render("任務日誌 (Q)", True, (235, 235, 240)),
+        # 标题（backgrnd2 为浅底，文字用深色）
+        surface.blit(f.render("任務日誌 (Q)", True, (60, 52, 44)),
                      (x + 12, y + 4))
-        count = fs.render(f"進行中 {len(active)}", True, (150, 155, 165))
+        count = fs.render(f"進行中 {len(active)}", True, (120, 108, 92))
         surface.blit(count, (x + QST_W - count.get_width() - 40, y + 7))
 
         if not active:
-            empty = fs.render("目前沒有進行中的任務", True, (120, 125, 135))
+            empty = fs.render("目前沒有進行中的任務", True, (120, 108, 92))
             surface.blit(empty, (x + 20, y + 60))
             return
 
@@ -678,15 +678,22 @@ class Panels:
             if ty + QST_ROW_H * 3 > y + QST_H - 10:
                 break
             # 任务名
-            name = fs.render(d.name, True, (255, 220, 120))
+            name = fs.render(d.name, True, (60, 52, 44))
             surface.blit(name, (x + 18, ty))
             ty += 20
+            # 目标 NPC（优先交付 NPC，无则用接取 NPC）
+            npc_id = d.end_npc if d.end_npc is not None else d.start_npc
+            if npc_id is not None:
+                npc_txt = fs.render(f"目標 NPC：{self.assets.npc_name(str(npc_id))}",
+                                    True, (140, 110, 60))
+                surface.blit(npc_txt, (x + 30, ty))
+                ty += 16
             # 目标行
             if self._quest_goal_lines is not None:
                 for line in self._quest_goal_lines(qid):
                     if ty > y + QST_H - 12:
                         break
-                    surface.blit(fs.render(line, True, (225, 228, 235)),
+                    surface.blit(fs.render(line, True, (90, 82, 70)),
                                  (x + 30, ty))
                     ty += 16
             ty += 8

@@ -458,3 +458,19 @@ class QuestLog:
             if item.count <= 0:
                 del table[key]
             break
+
+    # ── 序列化 ───────────────────────────────────────────────────
+    def to_dict(self) -> dict:
+        kills = {qid: {str(mid): cnt for mid, cnt in mobs.items()}
+                 for qid, mobs in self.kills.items()}
+        return {
+            "status": dict(self.status),
+            "kills": kills,
+            "accepted_order": list(self.accepted_order),
+        }
+
+    def from_dict(self, data: dict) -> None:
+        self.status = dict(data.get("status", {}))
+        self.kills = {qid: {int(mid): cnt for mid, cnt in mobs.items()}
+                      for qid, mobs in data.get("kills", {}).items()}
+        self.accepted_order = list(data.get("accepted_order", []))

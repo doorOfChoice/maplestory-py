@@ -155,3 +155,12 @@ class SkillBook:
             self.cooldowns[sid] -= dt
             if self.cooldowns[sid] <= 0:
                 del self.cooldowns[sid]
+
+    # ── 序列化 ───────────────────────────────────────────────────
+    def to_dict(self) -> dict:
+        return {"sp": self.sp, "levels": dict(self.levels)}
+
+    def from_dict(self, data: dict) -> None:
+        self.sp = data.get("sp", 0)
+        self.levels = dict(data.get("levels", {}))
+        self.cooldowns.clear()

@@ -11,6 +11,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WZ_DIR = PROJECT_ROOT / "113"
 REGION = "EMS"
 
+SAVE_DIR = PROJECT_ROOT / "saves"
+SAVE_FILE = SAVE_DIR / "save.json"
+SAVE_INTERVAL = 60.0          # 定时自动存档秒数
+
 MAP_ID = "100010000"            # 弓箭手村東部小山（49 怪 + 2 NPC）
 # MAP_ID = "100000000"          # 弓箭手村（城镇，无怪）
 

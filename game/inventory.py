@@ -215,3 +215,34 @@ class Inventory:
         return (sum(i.count for i in self.consumes.values())
                 + sum(i.count for i in self.etcs.values())
                 + len(self.equips))
+
+    # ── 序列化 ───────────────────────────────────────────────────
+    def to_dict(self) -> dict:
+        return {
+            "consumes": {k: v.count for k, v in self.consumes.items()},
+            "etcs": {k: v.count for k, v in self.etcs.items()},
+            "equips": [i.id for i in self.equips],
+            "equipped": {k: v.id for k, v in self.equipped.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict, assets=None) -> Inventory:
+        inv = cls()
+        for id_, count in data.get("consumes", {}).items():
+            item = (make_item(id_, assets, count) if assets
+                    else Item(id=id_, count=count, kind="consume"))
+            inv.consumes[id_] = item
+        for id_, count in data.get("etcs", {}).items():
+            item = (make_item(id_, assets, count) if assets
+                    else Item(id=id_, count=count, kind="etc"))
+            inv.etcs[id_] = item
+        for eid in data.get("equips", []):
+            item = make_item(eid, assets) if assets else Item(id=eid, kind="equip")
+            inv.equips.append(item)
+        for slot, eid in data.get("equipped", {}).items():
+            item = make_item(eid, assets) if assets else Item(id=eid, kind="equip")
+            if assets and item.slot is not None:
+                inv.equipped[item.slot] = item
+            elif not assets:
+                inv.equipped[slot] = item
+        return inv

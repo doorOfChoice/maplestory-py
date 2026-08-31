@@ -6,11 +6,12 @@
 from __future__ import annotations
 
 import random
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import pygame
 
 from . import settings
+from .animation import Animation
 from .assets import Assets
 
 
@@ -48,9 +49,7 @@ class Monster:
 
         # 动作缓存
         self.action = "stand"
-        self.frames: List[Tuple[pygame.Surface, int]] = []
-        self.frame = 0
-        self.accum = 0.0
+        self.anim = Animation([], loop=True)
         self.origin = (0, 0)
         self.dir = -1 if self.flip else 1   # 朝向：+1 右
 
@@ -71,13 +70,13 @@ class Monster:
             return False
 
     def _load_action(self, action: str) -> None:
-        if action == self.action and self.frames:
+        if action == self.action and self.anim.frames:
             return
         self.action = action
-        self.frames = self.assets.mob_frames(self.mob_id, action)
+        self.anim.frames = self.assets.mob_frames(self.mob_id, action)
+        self.anim.loop = True
+        self.anim.restart()
         self.origin = self.assets.mob_origin(self.mob_id, action) or (0, 0)
-        self.frame = 0
-        self.accum = 0.0
 
     # ── 受击 / 死亡 ────────────────────────────────────────────────
     def take_hit(self, damage: int, from_x: Optional[float] = None) -> bool:
@@ -111,7 +110,7 @@ class Monster:
                mobs, audio=None, no_aggro: bool = False) -> None:
         if self.dead:
             self.remove_after -= dt
-            self._tick_frame(dt)
+            self.anim.advance(dt)
             return
 
         if self.hit_flash > 0:
@@ -130,7 +129,7 @@ class Monster:
         # 状态机
         if self.state == "hit":
             self.state_timer -= dt
-            self._tick_frame(dt)
+            self.anim.advance(dt)
             if self.state_timer <= 0:
                 self.state = "patrol"
             return
@@ -169,7 +168,7 @@ class Monster:
             self._follow_ground()
             self._load_action("move" if self._has("move") else "stand")
 
-        self._tick_frame(dt)
+        self.anim.advance(dt)
 
         # 接触伤害（近身且冷却完毕；出生保护期内不攻击；不同层不攻击）
         if ((not no_aggro) and dist <= settings.MOB_ATTACK_RANGE
@@ -190,19 +189,11 @@ class Monster:
         if self.fh is not None:
             self.cy = self.fh.y_at(self.x)
 
-    def _tick_frame(self, dt: float) -> None:
-        if not self.frames:
-            return
-        delay = self.frames[self.frame][1]
-        self.accum += dt * 1000.0
-        while self.accum >= delay:
-            self.accum -= delay
-            self.frame = (self.frame + 1) % len(self.frames)
-
     # ── 碰撞盒 ─────────────────────────────────────────────────────
     def rect(self) -> pygame.Rect:
-        if self.frames:
-            w, h = self.frames[self.frame][0].get_size()
+        img = self.anim.surface
+        if img is not None:
+            w, h = img.get_size()
         else:
             w, h = 30, 34
         ox, oy = self.origin
@@ -219,9 +210,9 @@ class Monster:
 
     # ── 绘制 ───────────────────────────────────────────────────────
     def draw(self, surface: pygame.Surface, camera) -> None:
-        if not self.frames:
+        frame_surf = self.anim.surface
+        if frame_surf is None:
             return
-        frame_surf, _ = self.frames[self.frame]
         if self.hit_flash > 0 and int(self.hit_flash * 60) % 2 == 0:
             return
         # 朝向：美术默认朝左（未翻转），向右移动时水平翻转
@@ -234,8 +225,10 @@ class Monster:
 
     @property
     def sprite_w(self) -> int:
-        return self.frames[self.frame][0].get_width() if self.frames else 30
+        img = self.anim.surface
+        return img.get_width() if img is not None else 30
 
     @property
     def sprite_h(self) -> int:
-        return self.frames[self.frame][0].get_height() if self.frames else 34
+        img = self.anim.surface
+        return img.get_height() if img is not None else 34

@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional, Tuple
+from typing import Optional
 
 import pygame
 
 from . import settings
+from .animation import Animation
 from .assets import Assets
 from .physics import Physics
 from .inventory import Inventory, make_item
@@ -26,7 +27,8 @@ POSE_ROPE = "rope"
 
 class Player:
     def __init__(self, assets: Assets, spawn_x: float, spawn_y: float,
-                 equips: Optional[List[str]] = None, quest_defs=None):
+                 equips: Optional[List[str]] = None, quest_defs=None,
+                 save_data: Optional[dict] = None):
         self.assets = assets
         self.equips = equips or settings.DEFAULT_EQUIPS
         self.x = float(spawn_x)
@@ -35,60 +37,76 @@ class Player:
         self.vy = 0.0
         self.on_ground = False
         self.cur_fh = None
-        # 生效 layer：站立平台的层；空中沿用最后所站层（墙阻挡/贴墙用）
         self.ground_layer: Optional[int] = None
 
         self.facing_right = True
         self.pose = POSE_IDLE
-        self.frame = 0
-        self.accum = 0.0
-        self.frames: List[Tuple[pygame.Surface, int]] = []
+        self.anim = Animation([], loop=True)
         self.navel_px = (0, 0)
 
-        # 职业（初心者=0；本作单角色演示）
         self.job = 0
-
-        # 状态
         self.attacking = False
         self.attack_pose = ""
         self.attack_hit_applied = False
-        self.attack_timer = 0.0       # 攻击状态超时保险，防止动画状态卡死
+        self.attack_timer = 0.0
         self.climbing = False
-        self.detach_cooldown = 0.0    # 从绳上跳下后的短暂时间，防止立刻重新吸附
-        self.wall_dir = 0             # 本帧贴着的墙方向（-1 左墙 / +1 右墙 / 0 无）
-        self.wall_lock = 0.0          # 蹬墙跳后短暂失控计时
-        self.wall_side = 0            # 蹬开的那面墙方向（失控期内仍按它屏蔽输入）
+        self.detach_cooldown = 0.0
+        self.wall_dir = 0
+        self.wall_lock = 0.0
+        self.wall_side = 0
         self.anim_flip = self.facing_right
-        self.drop_layers = set()      # 下跳要忽略的 layer
+        self.drop_layers = set()
         self.drop_timer = 0.0
-        self.hurt_timer = 0.0         # 受击硬直：期间锁移动/攻击，击退自然衰减
-        self.invuln_timer = 0.0       # 受击无敌：期间闪烁且不再吃伤害
+        self.hurt_timer = 0.0
+        self.invuln_timer = 0.0
 
-        # 属性
+        if save_data is not None:
+            self._apply_save_data(save_data, assets, quest_defs)
+        else:
+            self._init_new_game(assets, quest_defs)
+
+        self._load_anim(POSE_IDLE)
+
+    def _init_new_game(self, assets: Assets, quest_defs) -> None:
+        """新遊戲初始化：預設屬性、初始藥水、預設裝備、技能初始贈送。"""
         self.hp = settings.PLAYER_MAX_HP
         self.max_hp = settings.PLAYER_MAX_HP
         self.mp = settings.PLAYER_MAX_MP
         self.max_mp = settings.PLAYER_MAX_MP
         self.level = 1
         self.exp = 0
-
-        # 背包 / 装备 / 技能
         self.inventory = Inventory()
         for item_id, count in settings.START_CONSUMES.items():
             self.inventory.add(make_item(item_id, assets, count))
-        # 初始穿戴：默认外观里的装备（武器/衣/裤/鞋）进装备栏
         for eid in settings.DEFAULT_EQUIPS[4:]:
             item = make_item(eid, assets)
             if item.slot is not None:
                 self.inventory.equipped[item.slot] = item
         self.skills = SkillBook(assets)
-        self.pending_skill: Optional[dict] = None   # 本次攻击使用的技能数据
+        self.pending_skill: Optional[dict] = None
         self.refresh_equips()
-
-        # 任务状态机
         self.quests = QuestLog(quest_defs or {})
 
-        self._load_anim(POSE_IDLE)
+    def _apply_save_data(self, data: dict, assets: Assets, quest_defs) -> None:
+        """從存檔 dict 恢復玩家狀態。"""
+        pd = data["player"]
+        self.level = pd["level"]
+        self.exp = pd["exp"]
+        self.hp = pd["hp"]
+        self.max_hp = pd["max_hp"]
+        self.mp = pd["mp"]
+        self.max_mp = pd["max_mp"]
+        self.job = pd.get("job", 0)
+        self.facing_right = pd.get("facing_right", True)
+        self.anim_flip = self.facing_right
+
+        self.inventory = Inventory.from_dict(data.get("inventory", {}), assets)
+        self.skills = SkillBook(assets)
+        self.skills.from_dict(data.get("skills", {}))
+        self.pending_skill = None
+        self.refresh_equips()
+        self.quests = QuestLog(quest_defs or {})
+        self.quests.from_dict(data.get("quests", {}))
 
     # ── 动画 ───────────────────────────────────────────────────────
     def _load_anim(self, pose: str, flip: Optional[bool] = None) -> None:
@@ -96,10 +114,9 @@ class Player:
             flip = self.facing_right
         self.pose = pose
         self.anim_flip = flip
-        self.frames = self.assets.character_frames(self.equips, pose, flip)
+        frames = self.assets.character_frames(self.equips, pose, flip)
+        self.anim = Animation(frames, loop=True)
         self.navel_px = self.assets.character_navel_px(self.equips, pose, flip)
-        self.frame = 0
-        self.accum = 0.0
 
     def exp_to_next(self) -> int:
         return int(settings.BASE_EXP_NEED * (settings.EXP_GROWTH ** (self.level - 1)))
@@ -339,7 +356,7 @@ class Player:
                     if not self.attacking:
                         climb_pose = (POSE_LADDER if ladder.get("ladder")
                                       else POSE_ROPE)
-                        if not self.frames or self.pose not in (POSE_LADDER, POSE_ROPE) \
+                        if not self.anim.frames or self.pose not in (POSE_LADDER, POSE_ROPE) \
                                 or self.pose != climb_pose:
                             try:
                                 self._load_anim(climb_pose)
@@ -433,20 +450,8 @@ class Player:
 
     def _tick_frame(self, dt: float, loop: bool) -> bool:
         """推进动画帧。非循环姿态播完返回 True（已回到首帧）。"""
-        if not self.frames:
-            return False
-        delay = self.frames[self.frame][1]
-        self.accum += dt * 1000.0
-        wrapped = False
-        while self.accum >= delay:
-            self.accum -= delay
-            if not loop and self.frame >= len(self.frames) - 1:
-                self.frame = 0
-                self.accum = 0.0
-                wrapped = True
-                break
-            self.frame = (self.frame + 1) % len(self.frames)
-        return wrapped
+        self.anim.loop = loop
+        return self.anim.advance(dt)
 
     @property
     def _animation_done(self) -> bool:
@@ -474,12 +479,12 @@ class Player:
 
     # ── 绘制 ───────────────────────────────────────────────────────
     def draw(self, surface: pygame.Surface, camera) -> None:
-        if not self.frames:
+        frame_surf = self.anim.surface
+        if frame_surf is None:
             return
         # 无敌期间闪烁（原版受击后的半透明忽隐忽现）
         if self.invuln_timer > 0 and int(self.invuln_timer * 12) % 2 == 0:
             return
-        frame_surf, _ = self.frames[self.frame]
         sx, sy = camera.to_screen(self.x, self.y)
         top_left = (sx - self.navel_px[0], sy - self.navel_px[1])
         surface.blit(frame_surf, (int(top_left[0]), int(top_left[1])))
