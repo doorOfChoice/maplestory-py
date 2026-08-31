@@ -407,8 +407,13 @@ class Player:
         down = keys.down and (not keys.up)
         if self.detach_cooldown > 0:
             self.detach_cooldown -= dt
-        if ladder is not None and up and not self.climbing \
-                and self.detach_cooldown <= 0:
+        # 站上/经过绳梯即按 ↑ 或 ↓ 都可开始攀爬（原版：顶端按↓直接下滑）。
+        # 但已站上绳顶平台时按↑不重新挂绳（避免顶上来回振荡），↓ 随时可下。
+        at_rope_top = (self.on_ground and self.cur_fh is not None
+                       and ladder is not None
+                       and self.feet_y <= float(ladder["y1"]) + 6.0)
+        if ladder is not None and (up or down) and not self.climbing \
+                and self.detach_cooldown <= 0 and not (up and at_rope_top):
             self.climbing = True
         if self.climbing:
             if ladder is None:

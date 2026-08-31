@@ -747,17 +747,21 @@ class Assets:
         self._icon_cache[key] = result
         return result
 
-    # ── 传送门特效（Map.wz MapHelper.img portal/game/pv）────────────
-    def portal_frames(self) -> List[Tuple[pygame.Surface, Tuple[int, int], int]]:
-        """Map.wz/MapHelper.img/portal/game/pv 的 8 帧动画序列。"""
-        key = "portal:pv"
+    # ── 传送门特效（Map.wz MapHelper.img portal/game/…）────────────
+    def portal_frames(self, node_name: str = "pv") -> List[Tuple[pygame.Surface, Tuple[int, int], int]]:
+        """Map.wz/MapHelper.img/portal/game/{pv|psh} 的动画帧序列。
+
+        原版 portal/game 提供 pv（普通门 8 帧）与 psh（同图瞬移门，缩小动画）。
+        隐藏门 ph 与原版一致不绘制。首帧带 portalStart，其余帧为 portalContinue。
+        """
+        key = f"portal:{node_name}"
         hit = self._effect_cache.get(key)
         if hit is not None:
             return hit
         result: List[Tuple[pygame.Surface, Tuple[int, int], int]] = []
         image = self.wz["Map"].root.images.get("MapHelper.img")
         if image is not None:
-            node = image.parse().get("portal/game/pv")
+            node = image.parse().get(f"portal/game/{node_name}")
             if node is not None:
                 for child in node.children():
                     real = _resolve_uol(child)
@@ -768,6 +772,33 @@ class Assets:
                                            _canvas_origin(real), _canvas_delay(real)))
         if not result:
             result = [(pygame.Surface((1, 1), pygame.SRCALPHA), (0, 0), 100)]
+        self._effect_cache[key] = result
+        return result
+
+    def portal_shrink_frames(self) -> List[Tuple[pygame.Surface, Tuple[int, int], int]]:
+        """同图瞬移门（psh）的待机动画帧。
+
+        psh 顶层为 default/1/2/3/4 五帧，每帧内含 portalStart/portalContinue/portalExit
+        子动画；地图上待机显示 default/portalContinue 的循环帧。
+        """
+        key = "portal:psh:idle"
+        hit = self._effect_cache.get(key)
+        if hit is not None:
+            return hit
+        result: List[Tuple[pygame.Surface, Tuple[int, int], int]] = []
+        image = self.wz["Map"].root.images.get("MapHelper.img")
+        if image is not None:
+            node = image.parse().get("portal/game/psh/default/portalContinue")
+            if node is not None:
+                for child in node.children():
+                    real = _resolve_uol(child)
+                    if isinstance(real, WzCanvasProperty):
+                        pil = _decode_canvas_prop(real, self.region, self.wz["Map"])
+                        if pil is not None:
+                            result.append((pil_to_surface(pil),
+                                           _canvas_origin(real), _canvas_delay(real)))
+        if len(result) < 2:
+            result = self.portal_frames("pv")          # 结构异常时回退普通门
         self._effect_cache[key] = result
         return result
 

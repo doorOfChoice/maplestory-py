@@ -563,9 +563,10 @@ class Game:
 
     # ── 传送门 / 地图切换 ──────────────────────────────────────────
     def _usable_portals(self) -> List[dict]:
-        """当前地图可通行的传送门（WZ 数据驱动，含 trigger / target_id）。"""
+        """当前地图可通行的传送门（WZ 数据驱动，含 trigger / target_id / same_map）。"""
         return travel.usable_portals(self.assets.portals,
-                                     self.assets.map_renderer.has_map)
+                                     self.assets.map_renderer.has_map,
+                                     self.assets.map_id)
 
     def _portal_at_feet(self) -> Optional[dict]:
         """回传玩家脚底重叠、且此刻可触发的传送门（按↑门需 up 键，碰撞门即时）。"""
@@ -587,8 +588,19 @@ class Game:
             return False
         if p["trigger"] == "up" and not self.keys.up:
             return False
+        if p.get("same_map"):
+            self._enter_same_map(p)
+            return True
         self._enter_map(p["target_id"], p.get("targetName"))
         return True
+
+    def _enter_same_map(self, p: dict) -> None:
+        """同图瞬移门：不重载地图，直接落地到目标门位置（原版 psh 行为）。"""
+        self._portal_cooldown = 0.8
+        sx, sy = self._portal_position(p.get("targetName"))
+        self.spawn_x, self.spawn_y = sx, sy
+        self._place_player_at_spawn()
+        self.fade = 1.0                # 黑场淡入，掩盖瞬移
 
     def _enter_map(self, map_id: str, portal_name: Optional[str]) -> None:
         """切换到目标地图：后台渲染地图，主线程显示加载画面。"""
@@ -892,17 +904,19 @@ class Game:
         return Animation.frame_at(frames, t * 1000.0)
 
     def _draw_portals(self, surface) -> None:
-        """画传送门：可通行的按↑门用 WZ 原版 8 帧动画；碰撞门不画（与原版一致）。"""
+        """画传送门：普通↑门用 pv 动画，同图瞬移门用 psh 缩小动画；隐藏门不画。"""
         frames = self.assets.portal_frames()
+        shrink = self.assets.portal_shrink_frames()
         if not frames:
             return
         idx = self._portal_frame_index(frames, self._portal_pulse)
+        sidx = self._portal_frame_index(shrink, self._portal_pulse)
         standing = self._portal_at_feet()
         for p in self._usable_portals():
-            if p.get("trigger") != "up":
+            if p.get("trigger") != "up" or p.get("hidden"):
                 continue
             sx, sy = self.camera.to_screen(p["x"], p["y"])
-            surf, origin, _ = frames[idx]
+            surf, origin, _ = (shrink[sidx] if p.get("same_map") else frames[idx])
             rect = surf.get_rect()
             rect.centerx = int(sx)
             rect.bottom = int(sy) + 2

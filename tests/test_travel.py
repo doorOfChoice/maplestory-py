@@ -1,7 +1,7 @@
 """地图通行纯函数：传送门目标解析、触发方式分类、可用性过滤（合成数据，不依赖 WZ）。"""
 from __future__ import annotations
 
-from game.travel import portal_target, portal_trigger, usable_portals
+from game.travel import portal_target, portal_trigger, portal_hidden, usable_portals
 
 
 def portal(ptype, tm=999999999, name="p"):
@@ -21,13 +21,21 @@ def test_portal_target_rejects_sentinel_and_missing():
 
 
 def test_portal_trigger_by_type():
-    """type 2 按↑；10/11 碰撞即传；脚本门 1 有 tm 降级为按↑；sp 出生点不可用。"""
+    """type 2 与隐藏门 10/11 都按↑（隐藏门仅不可见）；脚本门 1 有 tm 降级为按↑；sp 出生点不可用。"""
     assert portal_trigger(portal(2)) == "up"
-    assert portal_trigger(portal(10)) == "contact"
-    assert portal_trigger(portal(11)) == "contact"
+    assert portal_trigger(portal(10)) == "up"
+    assert portal_trigger(portal(11)) == "up"
     assert portal_trigger(portal(1, tm=100000000)) == "up"
     assert portal_trigger(portal(3, tm=100000000)) is None   # 命令门不开放
     assert portal_trigger(portal(0, name="sp")) is None
+
+
+def test_portal_hidden_flag():
+    """10/11 标记 hidden=True，普通门 / 脚本门为 False。"""
+    assert portal_hidden(portal(10)) is True
+    assert portal_hidden(portal(11)) is True
+    assert portal_hidden(portal(2)) is False
+    assert portal_hidden(portal(1)) is False
 
 
 def test_usable_portals_filters_unreachable_target():
@@ -45,9 +53,22 @@ def test_usable_portals_filters_unreachable_target():
 
 
 def test_usable_portals_keeps_contact_and_script_gates():
-    """隐藏门（10）与有 tm 的脚本门（1）都保留，并带正确 trigger。"""
+    """隐藏门（10）与有 tm 的脚本门（1）都保留：trigger 均为 up，隐藏门带 hidden 标记。"""
     portals = [portal(10, tm=100000000, name="hidden"),
                portal(1, tm=100000000, name="script")]
     result = usable_portals(portals, lambda mid: True)
-    triggers = {p["name"]: p["trigger"] for p in result}
-    assert triggers == {"hidden": "contact", "script": "up"}
+    by_name = {p["name"]: p for p in result}
+    assert by_name["hidden"]["trigger"] == "up"
+    assert by_name["hidden"]["hidden"] is True
+    assert by_name["script"]["trigger"] == "up"
+    assert by_name["script"]["hidden"] is False
+
+
+def test_same_map_flag_marks_self_target():
+    """目标地图 == 当前地图时 same_map=True，否则为 False（同图瞬移门）。"""
+    portals = [portal(2, tm=100000000, name="loop"),
+               portal(2, tm=100000001, name="out")]
+    result = usable_portals(portals, lambda mid: True, current_map="100000000")
+    by_name = {p["name"]: p for p in result}
+    assert by_name["loop"]["same_map"] is True
+    assert by_name["out"]["same_map"] is False

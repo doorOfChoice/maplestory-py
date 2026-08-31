@@ -377,15 +377,22 @@ class Physics:
 
     # ── 梯子 / 绳索 ───────────────────────────────────────────────
     def rope_at(self, x: float, y: float) -> Optional[Dict[str, Any]]:
-        """靠近任意绳/梯（含细绳 l=0）时返回其数据，可按 ↑/↓ 攀爬。"""
+        """靠近任意绳/梯（含细绳 l=0）时返回其数据，可按 ↑/↓ 攀爬。
+
+        y 为角色 navel。检测范围在绳端基础上外扩 FEET_OFFSET + CLIMB_TOP_OVERSHOOT：
+        站在绳底/绳顶地面时（脚底在端点上，navel 距绳端约一个 FEET_OFFSET），
+        navel 也能命中绳身，顶端平台可略高于绳顶也覆盖到。
+        """
         best: Optional[Dict[str, Any]] = None
         best_dx: float = 20.0
+        reach = settings.FEET_OFFSET + settings.CLIMB_TOP_OVERSHOOT
         for r in self.ropes:
             rx = float(r["x"])
             # 细绳的攀爬线略偏图像左缘右侧
             cx = rx + (6.0 if not r.get("ladder") else 0.0)
             dx = abs(cx - x)
-            if dx < best_dx and float(r["y1"]) - 12.0 <= y <= float(r["y2"]) + 12.0:
+            if (dx < best_dx
+                    and float(r["y1"]) - reach <= y <= float(r["y2"]) + reach):
                 best, best_dx = r, dx
         return best
 

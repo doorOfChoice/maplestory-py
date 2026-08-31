@@ -24,7 +24,7 @@ class FakeAssets:
         self._surf = pygame.Surface((12, 12))
 
     def mob_info(self, mob_id):
-        return {"name": "Test", "stats": {"maxHP": 50, "exp": 5,
+        return {"name": "Test", "stats": {"hp": 50, "exp": 5,
                                           "weaponAttack": 10, "speed": 0},
                 "drops": []}
 
@@ -41,6 +41,14 @@ CHAIN = [fh(1, 0, 0, 0, 90, 0, next=2),
          fh(3, 0, 180, 0, 270, 0, prev=2, next=4),
          fh(4, 0, 270, 0, 360, 0, prev=3, next=5),
          fh(5, 0, 360, 0, 450, 0, prev=4)]
+
+
+def test_mob_max_hp_comes_from_stats_hp():
+    """怪物生命上限应读取 stats 的 hp 字段（wzpy 输出契约），而非默认 10 兜底。"""
+    ph = make(CHAIN)
+    mob = Monster(FakeAssets(), {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                                 "rx0": 0, "rx1": 450}, 0, ph)
+    assert mob.max_hp == 50
 
 
 def test_patrol_roams_across_chained_platform():
