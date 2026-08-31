@@ -24,6 +24,7 @@ from .combat import Combat
 from .combat import DamageNumber
 from .effects import Effect
 from .ui import UI
+from .minimap import MiniMap
 from .panels import Panels
 from .quests import load_quest_defs, render_markup
 from .save_manager import SaveManager
@@ -70,6 +71,12 @@ class Game:
         self.audio = Audio(self.assets, self.assets.map_bgm_path())
         self.combat = Combat(self.assets)
         self.ui = UI(self.assets)
+        self.minimap = MiniMap(
+            self.assets.footholds, self.assets.ropes, self.assets.portals,
+            self.assets.bounds, self.assets.map_width, self.assets.map_height,
+            mag=(self.assets.map_desc.get("minimap") or {}).get("mag"),
+            canvas=self.assets.minimap_surface(),
+            map_surface=self.assets.map_surface)
         self.panels = Panels(self.ui, self.assets)
         self.panels._quest_goal_lines = self._quest_extra_goal_lines
 
@@ -201,6 +208,8 @@ class Game:
                     self.panels.toggle_skill()
                 elif event.key == pygame.K_q:
                     self.panels.toggle_quest_log()
+                elif event.key == pygame.K_m:
+                    self.minimap.toggle()
                 elif event.key == pygame.K_f:
                     if self.player.use_potion():
                         self.audio.play("PickUpItem", 0.4)
@@ -493,6 +502,12 @@ class Game:
 
         sx, sy = self._portal_position(portal_name)
         self.spawn_x, self.spawn_y = sx, sy
+        self.minimap.set_map(
+            self.assets.footholds, self.assets.ropes, self.assets.portals,
+            self.assets.bounds, self.assets.map_width, self.assets.map_height,
+            mag=(self.assets.map_desc.get("minimap") or {}).get("mag"),
+            canvas=self.assets.minimap_surface(),
+            map_surface=self.assets.map_surface)
         self._place_player_at_spawn()
         self._spawn_life()
         self.combat.drops.clear()
@@ -642,6 +657,12 @@ class Game:
         self.combat.draw_effects(self.canvas, self.camera)
         # HUD / 面板 / 对话框 / 死亡
         self.ui.draw_hud(self.canvas, self.player, self.combat)
+        self.minimap.draw(self.canvas, self.player.x, self.player.y,
+                          self.player.facing_right, self.monsters, self.npcs)
+        # 地图名名牌：小地图可见时下移避让，否则右上角 8px
+        name_y = (settings.MINIMAP_MARGIN + settings.MINIMAP_H + 8
+                  if self.minimap.visible else 8)
+        self.ui.draw_map_name(self.canvas, self.assets.map_name(), name_y)
         self.panels.draw_quickslots(self.canvas, self.player)
         self.panels.draw(self.canvas, self.player, self.combat.meso)
         self.ui.draw_dialog(self.canvas)

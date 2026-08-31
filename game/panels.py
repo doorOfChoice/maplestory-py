@@ -548,6 +548,7 @@ class Panels:
     def _draw_skills(self, surface, player) -> None:
         book = player.skills
         f, fs = self.ui.font, self.ui.font_small
+        ft = self.ui.font_tiny
         vw, vh = surface.get_width(), surface.get_height()
         sids = sorted(set(book.known()) | set(book.unlocked_for(player.level)),
                       key=lambda s: settings.SKILL_UNLOCK_LEVEL.get(s, 99))
@@ -562,14 +563,19 @@ class Panels:
         surface.blit(bg, (x, y))
         self._add_chrome(surface, "skill", x, y, SKL_W, 44)
         # SP（浅色标题条右侧 → 深字）
-        sp = fs.render(f"SP {book.sp}", True,
+        sp = ft.render(f"SP {book.sp}", True,
                        (150, 90, 20) if book.sp > 0 else (110, 112, 124))
         surface.blit(sp, (x + 100, y + 7))
 
         sp_btn = self._wz("Skill/BtSpUp/normal/0")
 
-        row_h = 48
-        top = y + 52
+        # 技能列表：逐行使用 Skill/skill0(已知)/skill1(未学) 原版行背景，
+        # 全宽铺开以盖住 backgrnd 里烤死的深色高亮条，避免文字与底色重叠。
+        row_h = 40
+        row_w = SKL_W - 12
+        row_x = x + 6
+        row_img_h = 38
+        top = y + 49
         mouse = pygame.mouse.get_pos()
         for i, sid in enumerate(sids[:4]):
             d = book.defs.get(sid)
@@ -577,26 +583,33 @@ class Panels:
                 continue
             lv = book.levels.get(sid, 0)
             ry = top + i * row_h
+            locked = lv == 0
+            row_img = self._wz("Skill/skill1" if locked else "Skill/skill0")
+            if row_img is not None:
+                surface.blit(pygame.transform.scale(row_img, (row_w, row_img_h)),
+                             (row_x, ry))
             icon = self.assets.skill_icon(sid)
             if icon is not None:
-                surface.blit(pygame.transform.scale(icon, (40, 40)), (x + 8, ry + 4))
-            locked = lv == 0
-            color = (98, 92, 86) if locked else (46, 38, 32)
-            name_txt = f"{d.name} Lv{lv}/{d.max_level}"
-            surface.blit(fs.render(name_txt, True, color), (x + 52, ry + 6))
+                surface.blit(pygame.transform.scale(icon, (28, 28)),
+                             (row_x + 3, ry + 3))
+            color = (150, 156, 172) if locked else (46, 38, 32)
+            tx = row_x + 46
+            name_w = row_x + row_w - tx - 8
+            name_txt = _ellipsize(f"{d.name} Lv{lv}/{d.max_level}", ft, name_w)
+            surface.blit(ft.render(name_txt, True, color), (tx, ry + 5))
             if lv > 0:
                 dmg = d.stat(lv, "damage", 100)
                 mp = d.stat(lv, "mpCon", 0)
-                surface.blit(fs.render(f"{dmg}%  MP{mp}", True, (40, 90, 46)),
-                             (x + 52, ry + 26))
+                surface.blit(ft.render(f"{dmg}%  MP{mp}", True, (40, 90, 46)),
+                             (tx, ry + 20))
             else:
                 need = settings.SKILL_UNLOCK_LEVEL.get(sid, 1)
-                surface.blit(fs.render(f"Lv{need} 可学习", True, color),
-                             (x + 52, ry + 26))
-            self._skill_tip(d, lv, mouse, pygame.Rect(x + 4, ry, SKL_W - 8, row_h))
+                surface.blit(ft.render(f"Lv{need} 可学习", True, color),
+                             (tx, ry + 20))
+            self._skill_tip(d, lv, mouse, pygame.Rect(row_x, ry, row_w, row_img_h))
             # 升级按钮（原版 BtSpUp）
             if book.sp > 0 and lv < d.max_level:
-                btn = pygame.Rect(x + SKL_W - 20, ry + 4,
+                btn = pygame.Rect(row_x + row_w - 20, ry + 3,
                                   sp_btn.get_width() if sp_btn else 12,
                                   sp_btn.get_height() if sp_btn else 12)
                 if sp_btn is not None:
@@ -640,16 +653,17 @@ class Panels:
             color = (140, 146, 160) if locked else (235, 235, 240)
             key = settings.SKILL_HOTKEYS.get(sid)
             keytxt = f"  [{key}]" if key and lv > 0 else ""
-            name_txt = f"{d.name} Lv{lv}/{d.max_level}{keytxt}"
-            surface.blit(f.render(name_txt, True, color), (row.x + 46, ry + 6))
+            name_txt = _ellipsize(f"{d.name} Lv{lv}/{d.max_level}{keytxt}", f,
+                                  row.right - (row.x + 52) - 6)
+            surface.blit(f.render(name_txt, True, color), (row.x + 52, ry + 6))
             if lv > 0:
                 dmg = d.stat(lv, "damage", 100)
                 mp = d.stat(lv, "mpCon", 0)
                 info = fs.render(f"{dmg}% MP{mp}", True, (150, 210, 160))
-                surface.blit(info, (row.x + 46, ry + 28))
+                surface.blit(info, (row.x + 52, ry + 28))
             else:
                 surface.blit(fs.render(f"Lv{settings.SKILL_UNLOCK_LEVEL.get(sid)} 可学习",
-                                       True, (150, 156, 170)), (row.x + 46, ry + 28))
+                                       True, (150, 156, 170)), (row.x + 52, ry + 28))
             self._skill_tip(d, lv, mouse, row)
             if book.sp > 0 and lv < d.max_level:
                 btn = pygame.Rect(row.right - 26, ry + 4, 22, 22)
@@ -826,23 +840,44 @@ class Panels:
         fs = self.ui.font_small
         f = self.ui.font
         lines = self._tooltip.split("\n")
-        w = max(f.size(lines[0])[0],
-                max((fs.size(l)[0] for l in lines[1:]), default=0)) + 18
-        h = 26 + (len(lines) - 1) * 16 + 8
-        x, y = mouse_pos[0] + 14, mouse_pos[1] + 14
-        rect = pygame.Rect(x, y, w, h)
-        if rect.right > surface.get_width():
-            rect.right = surface.get_width()
+        # □ 先定框：标题（粗行）用 f，正文用 fs，左右各留 9px 内边距。
+        text_pad = 9
+        inner = max(f.size(lines[0])[0],
+                    max((fs.size(l)[0] for l in lines[1:]), default=0))
+        # 先按屏幕可用宽度收紧框宽，再据此换行，避免文字溢出边界。
+        avail_w = min(inner + text_pad * 2, surface.get_width() - 20)
+        x = min(mouse_pos[0] + 14, surface.get_width() - avail_w - 20)
+        y = mouse_pos[1] + 14
+        rect = pygame.Rect(x, y, avail_w, 26 + 16 + 8)
         if rect.bottom > surface.get_height():
             rect.bottom = surface.get_height()
+        body_w = rect.w - text_pad * 2
+        # 正文超宽则自动换行，标题也按需换行，避免文字溢出框边。
+        wrapped = [self.ui._wrap(lines[0], body_w, f)]
+        for ln in lines[1:]:
+            wrapped.append(self.ui._wrap(ln, body_w, fs))
+        n_lines = sum(len(l) for l in wrapped)
+        rect.h = 26 + (n_lines - 1) * 16 + 8
         if not draw_menu_bg(surface, self.assets, rect):
             _panel(surface, rect, (120, 126, 140))
-        surface.blit(f.render(lines[0], True, (245, 220, 140)),
-                     (rect.x + 9, rect.y + 5))
+        surface.blit(f.render(wrapped[0][0], True, (245, 220, 140)),
+                     (rect.x + text_pad, rect.y + 5))
         ty = rect.y + 27
-        for ln in lines[1:]:
-            surface.blit(fs.render(ln, True, (215, 220, 230)), (rect.x + 9, ty))
-            ty += 16
+        for group in wrapped[1:]:
+            for ln in group:
+                surface.blit(fs.render(ln, True, (215, 220, 230)),
+                             (rect.x + text_pad, ty))
+                ty += 16
+
+
+def _ellipsize(text: str, font: pygame.font.Font, max_w: int) -> str:
+    """把文字用省略号截断到 max_w 宽度内，确保不溢出控件边界。"""
+    if font.size(text)[0] <= max_w:
+        return text
+    ell = "..."
+    while text and font.size(text + ell)[0] > max_w:
+        text = text[:-1]
+    return text + ell
 
 
 def draw_menu_bg(surface, assets, rect: pygame.Rect) -> bool:

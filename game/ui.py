@@ -54,6 +54,7 @@ class UI:
         self.font = _load_font(13)
         self.font_big = _load_font(16)
         self.font_small = _load_font(12)
+        self.font_tiny = _load_font(10)
         self.dialog_lines: List[str] = []
         self.dialog_visible = False
         self.death_visible = False
@@ -208,8 +209,7 @@ class UI:
             True, (90, 96, 110))
         surface.blit(info, (bx + bar.get_width() - 238 - info.get_width(), by + 4))
 
-        # 地图名（右上）
-        self._draw_map_name(surface, self.assets.map_name())
+        # 地图名：由 game 层按小地图面板位置调用 draw_map_name（右上避让）
 
         # 操作提示（左上）
         hint = self.font_small.render(
@@ -220,7 +220,8 @@ class UI:
         plate.blit(hint, (8, 3))
         surface.blit(plate, (8, 8))
 
-    def _draw_map_name(self, surface, name: str) -> None:
+    def draw_map_name(self, surface, name: str, y: int) -> None:
+        """右上角地图名名牌。y 由调用方给出（小地图可见时下移避让）。"""
         hit = self._plate_cache.get(name)
         if hit is None:
             txt = self.font_small.render(name, True, (255, 255, 255))
@@ -230,7 +231,7 @@ class UI:
             plate.blit(txt, (10, (h - txt.get_height()) // 2))
             hit = plate
             self._plate_cache[name] = hit
-        surface.blit(hit, (surface.get_width() - hit.get_width() - 8, 8))
+        surface.blit(hit, (surface.get_width() - hit.get_width() - 8, y))
 
     # ── UtilDlgEx 内嵌窗体（it/ic/is）──────────────────────────────
     def _dlg_frame(self, surface, x: int, y: int, w: int, content_h: int) -> None:

@@ -106,6 +106,19 @@ SKILL_MAX_LEVEL = 20             # 技能最高等级（裁剪 WZ level 表）
 SKILL_HOTKEYS = {"1001004": 1, "1001005": 2}
 HOTKEY_SKILLS = {1: "1001004", 2: "1001005"}        # 反向映射：键 → 技能
 
+# ── 小地图 ─────────────────────────────────────────────────────────
+MINIMAP_W = 178                # 小地图窗口宽
+MINIMAP_H = 120                # 小地图窗口高
+MINIMAP_MARGIN = 8             # 右上角留白
+MINIMAP_MAG_FALLBACK = 4       # 无 WZ miniMap.mag 时的缩放倍率
+MINIMAP_BG_ALPHA = 150         # 底半透明深色透明度
+MINIMAP_PLATFORM_COLOR = (170, 190, 210)   # 平台线
+MINIMAP_ROPE_COLOR = (120, 140, 160)       # 绳/梯竖线
+MINIMAP_PLAYER_COLOR = (255, 205, 60)      # 玩家箭头
+MINIMAP_MOB_COLOR = (230, 70, 60)          # 怪物
+MINIMAP_NPC_COLOR = (245, 215, 60)         # NPC
+MINIMAP_PORTAL_COLOR = (90, 220, 100)      # 传送门
+
 # ── 任务系统 ─────────────────────────────────────────────────────────
 # 启用的精选任务（Quest.wz 内真实任务 id）。引擎可解析全部任务，
 # 这里只开放能在 弓箭手村 区域完整游玩的任务。

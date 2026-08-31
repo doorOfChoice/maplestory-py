@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Tools for MapleStory character export and WZ debugging"
 requires-python = ">=3.12"
 dependencies = [
-    "PySide6",
     "numpy",
     "opencc-python-reimplemented>=0.1.7",
     "pillow",

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import random
-from typing import Optional
+from typing import Optional, Tuple
 
 import pygame
 
@@ -23,16 +23,19 @@ class Monster:
         self.index = index
         self.x = float(data["x"])
         self.cy = float(data.get("cy") or data["y"])   # 地面接触 y
-        self.rx0 = float(data.get("rx0") or data["x"])
-        self.rx1 = float(data.get("rx1") or data["x"])
+        self.rx0 = float(data["rx0"]) if data.get("rx0") is not None else float(data["x"])
+        self.rx1 = float(data["rx1"]) if data.get("rx1") is not None else float(data["x"])
         self.flip = bool(data.get("flip"))
 
-        # 脚下 foothold：巡逻/追击范围钳制到平台内，坡道上跟随高度，
-        # 防止按地图 life 的 rx 范围走出平台边缘后悬空
+        # 脚底 foothold：巡逻/追击范围钳制到"出生段可沿链走到的同层平台"
+        # 两端；怪物走到断口/高落差（超过一级台阶）时应在边界折返，
+        # 而不是走出平台悬空或坠落。链内沿 prev/next 续段行走（跨台阶/坡道）。
+        self.physics = physics
         self.fh = physics.surface_under(self.x, self.cy) if physics else None
         if self.fh is not None:
-            self.rx0 = max(self.rx0, self.fh.xmin + 6.0)
-            self.rx1 = min(self.rx1, self.fh.xmax - 6.0)
+            roam_min, roam_max = self._reachable_bounds(self.fh)
+            self.rx0 = max(self.rx0, roam_min + 6.0)
+            self.rx1 = min(self.rx1, roam_max - 6.0)
             if self.rx0 > self.rx1:
                 mid = (self.rx0 + self.rx1) / 2
                 self.rx0 = self.rx1 = mid
@@ -90,7 +93,7 @@ class Monster:
             # 原版受击小击退（钳在巡逻平台内）
             away = 1 if self.x < from_x else -1
             self.x = min(max(self.x + away * 10.0, self.rx0), self.rx1)
-            self._follow_ground()
+            self._resnap_ground()
         if self.hp <= 0:
             self.die()
             return True
@@ -129,6 +132,7 @@ class Monster:
         # 状态机
         if self.state == "hit":
             self.state_timer -= dt
+            self._step_move()          # 受击硬直期间仍贴地（击退后在平台上）
             self.anim.advance(dt)
             if self.state_timer <= 0:
                 self.state = "patrol"
@@ -150,11 +154,12 @@ class Monster:
                 self.dir = -1
             # 不追出自己的巡逻平台（否则会悬空在平台外）
             self.x = min(max(self.x, self.rx0), self.rx1)
-            self._follow_ground()
+            self._step_move()
             self._load_action("move" if self._has("move") else "stand")
         elif chasing and dist <= settings.MOB_ATTACK_RANGE:
             self.state = "attack"
             self._load_action("stand")
+            self._step_move()
         else:
             self.state = "patrol"
             # 在 rx0..rx1 之间巡逻
@@ -165,7 +170,7 @@ class Monster:
             elif self.x >= self.rx1:
                 self.x = self.rx1
                 self.dir = -1
-            self._follow_ground()
+            self._step_move()
             self._load_action("move" if self._has("move") else "stand")
 
         self.anim.advance(dt)
@@ -184,10 +189,68 @@ class Monster:
             })
             self.attack_cooldown = 0.8
 
-    def _follow_ground(self) -> None:
-        """沿脚下 foothold 的高度走（坡道跟随，平台内不会悬空）。"""
-        if self.fh is not None:
+    def _step_move(self) -> None:
+        """沿脚下相连平台走：越过当前段端点时续接下一段，并跟随坡面高度。
+
+        rx0/rx1 已被钳制在可步行平台内，故这里只会遇到"一级台阶内"的
+        续段（自动走上走下）；若仍走到断口，则保持当前段高度，交由巡逻
+        边界折返，绝不悬空或坠落。
+        """
+        if self.fh is None:
+            return
+        if not self.fh.covers(self.x):
+            nxt = self.physics.walk_surface(self.fh, self.x, 0)
+            if nxt is not None and nxt.covers(self.x):
+                self.fh = nxt
+            else:
+                return
+        self.cy = self.fh.y_at(self.x)
+
+    def _resnap_ground(self) -> None:
+        """受击击退后快速回到脚下段地面；只有确有支撑时才吸附，避免悬空。"""
+        if self.fh is None:
+            return
+        if not self.fh.covers(self.x):
+            nxt = self.physics.walk_surface(self.fh, self.x, 0)
+            if nxt is not None and nxt.covers(self.x):
+                self.fh = nxt
+        if self.fh.covers(self.x):
             self.cy = self.fh.y_at(self.x)
+
+    def _reachable_bounds(self, fh) -> Tuple[float, float]:
+        """从出生段沿链向两端延伸，返回怪物可步行的同层平台水平范围。
+
+        只接受"当前段边缘 → 下一水平段"高差在一级台阶内（可自动走上/
+        走下）的连通段；遇到断口、高落差或开放边缘即停。如此把巡逻范围
+        钳在怪物真正能站立的那块平台上，边界处折返而不是走出平台。
+
+        :param fh: 出生时脚下的 foothold。
+        """
+        ph = self.physics
+        xmin, xmax = fh.xmin, fh.xmax
+        # 向右延伸
+        f = fh
+        while True:
+            nxt = ph.linked_continuation(f, True)
+            if nxt is None:
+                break
+            edge_x = f.xmax
+            if abs(nxt.y_at(edge_x) - f.y_at(edge_x)) > settings.PLAYER_STEP_UP:
+                break
+            xmax = max(xmax, nxt.xmax)
+            f = nxt
+        # 向左延伸
+        f = fh
+        while True:
+            nxt = ph.linked_continuation(f, False)
+            if nxt is None:
+                break
+            edge_x = f.xmin
+            if abs(nxt.y_at(edge_x) - f.y_at(edge_x)) > settings.PLAYER_STEP_UP:
+                break
+            xmin = min(xmin, nxt.xmin)
+            f = nxt
+        return xmin, xmax
 
     # ── 碰撞盒 ─────────────────────────────────────────────────────
     def rect(self) -> pygame.Rect:

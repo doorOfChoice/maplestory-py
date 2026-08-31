@@ -472,6 +472,26 @@ class Assets:
     def map_name(self) -> str:
         return to_simplified(self.map_desc.get("name") or f"Map {self.map_id}")
 
+    def minimap_surface(self) -> Optional[pygame.Surface]:
+        """官方小地图 canvas（整图缩略图），无则返回 None。缓存。"""
+        key = f"minimap:{self.map_id}"
+        hit = self._icon_cache.get(key)
+        if hit is not None:
+            return hit
+        result = None
+        try:
+            root, _src = self.map_renderer._map_root(self.map_id)
+            mm = root.get("miniMap")
+            cv = mm.get("canvas") if mm is not None else None
+            if isinstance(cv, WzCanvasProperty):
+                pil = _decode_canvas_prop(cv, self.region, self.wz["Map"])
+                if pil is not None:
+                    result = pil_to_surface(pil)
+        except Exception:
+            result = None
+        self._icon_cache[key] = result
+        return result
+
     def map_name_of(self, map_id) -> str:
         """任意地图 id → 名称（String.wz Map.img）。"""
         try:
