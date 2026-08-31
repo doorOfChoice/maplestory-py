@@ -110,7 +110,7 @@ def test_spawn_arrows_normal_attack():
             return 50
     combat.spawn_arrows(P(), None)
     assert len(combat.arrows) == 1
-    assert combat.arrows[0].dmg == 50
+    assert 47 <= combat.arrows[0].dmg <= 53      # 普攻伤害带 ±5% 浮动
     assert combat.arrows[0].frames == [sentinel]
 
 

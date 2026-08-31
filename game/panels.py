@@ -1,9 +1,11 @@
-"""交互面板：背包 / 装备栏 / 技能窗口 / 快捷栏 —— 全部使用 UI.wz 原版素材。
+"""交互面板：背包 / 装备栏 / 状态窗 / 技能窗口 / 快捷栏 —— 全部使用 UI.wz 原版素材。
 
 · 背包窗口：UIWindow/Item/backgrnd（标题/格子底纹已烤死在图内），
   页签用 Item/Tab/enabled|disabled 0..4（0=装备 1=消耗 3=其他，带原版汉字），
   底部页脚画 Item/BtCoin + 金币数。
 · 装备栏窗口：UIWindow/Equip/backgrnd 纸娃娃底板，按原版凹槽位置放装备图标。
+· 状态窗（B 键）：UIWindow/Stat/backgrnd，四维行右端嵌 BtApUp「+」按钮，
+  底部 BtAuto 一键分配；穿戴需求（reqLevel/四维）在点击装备时门控。
 · 技能窗口：UIWindow/Skill/backgrnd，升级按钮用 Skill/BtSpUp。
 · 快捷栏：UIWindow/ShortCut/backgrnd 竖条，技能图标嵌在格内。
 · Tooltip：UIWindow/ContextMenu 三段（t/c/s）官方深色底。
@@ -20,8 +22,9 @@ from typing import List, Optional, Tuple
 import pygame
 
 from . import settings
-from .jobs import JOBS
 from .inventory import SLOT_ORDER, islot_to_slot
+from .jobs import JOBS
+from .stats import STAT_LABELS, wear_block
 
 SLOT_NAMES = {
     "cap": "帽子", "face": "脸饰", "earr": "耳环", "top": "上衣",
@@ -72,6 +75,18 @@ QST_W, QST_H = 305, 396
 QST_HEAD_Y = 24          # 标题条下沿（可拖拽区）
 QST_ROW_H = 26           # 每行任务条目高度
 
+# 状态窗：UIWindow/Stat/backgrnd（175×337），标签全部烤死在底图内，
+# 数值槽 x∈[58,170]；四维绿行右侧 12×12 为 BtApUp「+」按钮位。
+STAT_BG = "Stat/backgrnd"
+STAT_W, STAT_H = 175, 337
+STAT_TEXT_X = 60                     # 数值文字左缘
+STAT_ROW_Y = {"name": 33, "job": 52, "level": 69, "guild": 87,
+              "hp": 105, "mp": 123, "exp": 141, "honor": 163}
+STAT_AP_BOX = (63, 206, 25, 13)      # 「升级点数」白框
+STAT_ROW = {"str": 235, "dex": 253, "int": 271, "luk": 289}
+STAT_BT_X = 158                      # BtApUp x
+STAT_AUTO_POS = (96, 300)            # BtAuto（73×35）左上角
+
 # 页签（带原版汉字，宽 26~27 高 16）：游戏内 3 页 → 原版 装备/消耗/其他
 TAB_INDEX = {"equip": 0, "consume": 1, "etc": 3}
 TAB_LABEL = {"consume": "消耗", "equip": "装备", "etc": "其他"}
@@ -100,6 +115,7 @@ class Panels:
         self.equip_visible = False
         self.skill_visible = False
         self.questlog_visible = False
+        self.stat_visible = False
         self.inv_tab = "consume"          # consume | equip | etc
         self._tooltip: Optional[str] = None
         self._toast: Optional[Tuple[str, float]] = None   # (文本, 剩余秒)
@@ -107,6 +123,10 @@ class Panels:
         self._equip_rect = pygame.Rect(0, 0, 0, 0)
         self._skill_rect = pygame.Rect(0, 0, 0, 0)
         self._questlog_rect = pygame.Rect(0, 0, 0, 0)
+        self._stat_rect = pygame.Rect(0, 0, 0, 0)
+        self._ap_rects: List[tuple] = []     # (Rect, stat)
+        self._auto_rect: Optional[pygame.Rect] = None
+        self._num_cache: dict = {}           # (ch, color) → 染色后的像素数字
         self._quest_goal_lines = None    # Game 注入：qid → 目标行列表
         self._cell_rects: List[tuple] = []   # (Rect, tab, index)
         self._slot_rects: List[tuple] = []   # (Rect, slot)
@@ -142,6 +162,11 @@ class Panels:
         if not self.questlog_visible and self._drag and self._drag[0] == "questlog":
             self._drag = None
 
+    def toggle_stat(self) -> None:
+        self.stat_visible = not self.stat_visible
+        if not self.stat_visible and self._drag and self._drag[0] == "stat":
+            self._drag = None
+
     def _close_window(self, key: str) -> None:
         """关闭按钮：只关对应窗口（背包/装备栏互不牵连）。"""
         if key == "inv":
@@ -152,6 +177,8 @@ class Panels:
             self.skill_visible = False
         elif key == "questlog":
             self.questlog_visible = False
+        elif key == "stat":
+            self.stat_visible = False
         if self._drag and self._drag[0] == key:
             self._drag = None
 
@@ -254,6 +281,18 @@ class Panels:
         if self.questlog_visible:
             if self._questlog_rect.collidepoint(pos):
                 return True
+        if self.stat_visible:
+            for rect, st in self._ap_rects:
+                if rect.collidepoint(pos):
+                    if not player.allocate_ap(st):
+                        self.flash("没有可分配的属性点")
+                    return True
+            if self._auto_rect is not None and self._auto_rect.collidepoint(pos):
+                if not player.auto_allocate_ap():
+                    self.flash("没有可分配的属性点")
+                return True
+            if self._stat_rect.collidepoint(pos):
+                return True
         return False
 
     def _click_cell(self, player, tab: str, idx: int) -> None:
@@ -273,10 +312,15 @@ class Panels:
             items = list(inv.equips)
             if idx < len(items) and items[idx].slot is None:
                 self.flash(f"无法穿戴 {items[idx].name}")
-            elif idx < len(items) and inv.equip(idx):
-                player.refresh_equips()
             elif idx < len(items):
-                self.flash("装备栏已满")
+                block = wear_block(items[idx].info, player.level,
+                                   player.total_stats())
+                if block is not None:
+                    self.flash(f"无法穿戴：{block}")
+                elif inv.equip(idx):
+                    player.refresh_equips()
+                else:
+                    self.flash("装备栏已满")
 
     def flash(self, text: str, duration: float = 1.6) -> None:
         """顶部居中短暂提示（如无法穿戴 / 背包已满）。"""
@@ -291,6 +335,8 @@ class Panels:
         self._tab_rects.clear()
         self._close_rects.clear()
         self._title_rects.clear()
+        self._ap_rects.clear()
+        self._auto_rect = None
         mouse = pygame.mouse.get_pos()
         if self.inv_visible:
             self._draw_inventory(surface, player, meso)
@@ -300,6 +346,8 @@ class Panels:
             self._draw_skills(surface, player)
         if self.questlog_visible:
             self._draw_questlog(surface, player)
+        if self.stat_visible:
+            self._draw_stat(surface, player)
         if self._tooltip is not None:
             self._draw_tooltip(surface, mouse)
         # 顶部提示
@@ -734,6 +782,157 @@ class Panels:
                                  (x + 30, ty))
                     ty += 16
             ty += 8
+
+    # ── 状态窗（UIWindow/Stat/backgrnd，B 键）────────────────────────
+    def _num_glyph(self, ch: str, color) -> Optional[pygame.Surface]:
+        """StatusBar/number 像素数字（白字 → 染色），缓存。"""
+        key = (ch, color)
+        hit = self._num_cache.get(key)
+        if hit is not None:
+            return hit
+        path = "number/slash" if ch == "/" else f"number/{ch}"
+        src = self._wz(path, img="StatusBar.img")
+        if src is None:
+            return None
+        tinted = src.copy()
+        tinted.fill((*color, 255), special_flags=pygame.BLEND_RGBA_MULT)
+        self._num_cache[key] = tinted
+        return tinted
+
+    def _num_width(self, text: str, color) -> Optional[int]:
+        """像素数字串总宽；含不可绘制字符时返回 None（调用方回退字体）。"""
+        w = 0
+        for ch in text:
+            img = self._num_glyph(ch, color) if (ch.isdigit() or ch == "/") else None
+            if img is None:
+                return None
+            w += img.get_width() + 1
+        return w
+
+    def _draw_numline(self, surface, text: str, x: int, y_mid: int,
+                      color=(60, 60, 60)) -> Optional[int]:
+        """用原版像素数字画一串数字（垂直居中于 y_mid），返回结束 x。"""
+        w = self._num_width(text, color)
+        if w is None:
+            return None
+        for ch in text:
+            img = self._num_glyph(ch, color)
+            surface.blit(img, (x, y_mid - img.get_height() // 2))
+            x += img.get_width() + 1
+        return x
+
+    def _stat_value(self, surface, fs, text: str, x: int, y_band: int) -> None:
+        """数值槽文本：纯数字串用原版像素数字，否则回退小字体。"""
+        end = self._draw_numline(surface, text, x, y_band + 7)
+        if end is None:
+            surface.blit(fs.render(text, True, (40, 40, 40)), (x, y_band + 2))
+
+    def _draw_stat(self, surface, player) -> None:
+        fs = self.ui.font_small
+        vw, vh = surface.get_width(), surface.get_height()
+        bg = self._wz(STAT_BG)
+        base = (vw - STAT_W - 4, 140)
+        if bg is None:
+            self._draw_stat_fallback(surface, player)
+            return
+        x, y = self._resolve_pos("stat", base, (STAT_W, STAT_H), vw, vh)
+        self._stat_rect = pygame.Rect(x, y, STAT_W, STAT_H)
+        surface.blit(bg, (x, y))
+        self._add_chrome(surface, "stat", x, y, STAT_W, 20)
+        mouse = pygame.mouse.get_pos()
+        total = player.total_stats()
+        jobdef = JOBS.get(player.job) or JOBS[0]
+
+        def row(key: str, text: str) -> None:
+            surface.blit(fs.render(text, True, (40, 40, 40)),
+                         (x + STAT_TEXT_X, y + STAT_ROW_Y[key] + 2))
+
+        def num(key: str, text: str) -> None:
+            self._stat_value(surface, fs, text, x + STAT_TEXT_X,
+                             y + STAT_ROW_Y[key])
+
+        row("name", "玩家")
+        row("job", jobdef.name)
+        num("level", str(player.level))
+        num("hp", f"{int(player.hp)}/{player.max_hp}")
+        num("mp", f"{int(player.mp)}/{player.max_mp}")
+        num("exp", f"{player.exp}/{player.exp_to_next()}")
+        bx, by, bw, bh = STAT_AP_BOX
+        ap_txt = str(player.ap)
+        ap_w = self._num_width(ap_txt, (60, 60, 60))
+        if ap_w is not None:
+            self._draw_numline(surface, ap_txt, x + bx + (bw - ap_w) // 2,
+                               y + by + bh // 2)
+        else:
+            t = fs.render(ap_txt, True, (40, 40, 40))
+            surface.blit(t, (x + bx + (bw - t.get_width()) // 2,
+                             y + by + (bh - t.get_height()) // 2))
+        for st, ry in STAT_ROW.items():
+            bonus = player.inventory.bonus(st)
+            end = self._draw_numline(surface, str(total[st]),
+                                     x + STAT_TEXT_X, y + ry + 7)
+            if end is None:
+                surface.blit(fs.render(str(total[st]), True, (40, 40, 40)),
+                             (x + STAT_TEXT_X, y + ry + 2))
+                end = x + STAT_TEXT_X + fs.size(str(total[st]))[0]
+            if bonus:
+                surface.blit(fs.render(f" (+{bonus})", True, (46, 120, 40)),
+                             (end + 2, y + ry + 2))
+            rect = pygame.Rect(x + STAT_BT_X, y + ry, 12, 12)
+            self._ap_rects.append((rect, st))
+            state = ("disabled" if player.ap <= 0 else
+                     "mouseOver" if rect.collidepoint(mouse) else "normal")
+            img = self._wz(f"Stat/BtApUp/{state}/0")
+            if img is not None:
+                surface.blit(img, rect.topleft)
+        rect = pygame.Rect(x + STAT_AUTO_POS[0], y + STAT_AUTO_POS[1], 73, 35)
+        self._auto_rect = rect
+        state = "mouseOver" if rect.collidepoint(mouse) else "normal"
+        img = self._wz(f"Stat/BtAuto/{state}/0")
+        if img is not None:
+            surface.blit(img, rect.topleft)
+
+    def _draw_stat_fallback(self, surface, player) -> None:
+        """素材缺失时的自绘状态窗（含加点按钮热区）。"""
+        fs = self.ui.font_small
+        vw, vh = surface.get_width(), surface.get_height()
+        w, h = 210, 250
+        x, y = self._resolve_pos("stat", (vw - w - 8, 60), (w, h), vw, vh)
+        rect = pygame.Rect(x, y, w, h)
+        self._stat_rect = rect
+        _panel(surface, rect)
+        self._add_chrome(surface, "stat", x, y, w, 24)
+        mouse = pygame.mouse.get_pos()
+        total = player.total_stats()
+        jobdef = JOBS.get(player.job) or JOBS[0]
+        lines = [f"职业：{jobdef.name}    等级：{player.level}",
+                 f"HP {int(player.hp)}/{player.max_hp}   "
+                 f"MP {int(player.mp)}/{player.max_mp}",
+                 f"经验 {player.exp}/{player.exp_to_next()}",
+                 f"属性点：{player.ap}"]
+        ty = y + 30
+        for line in lines:
+            surface.blit(fs.render(line, True, (230, 225, 210)), (x + 10, ty))
+            ty += 20
+        for st in ("str", "dex", "int", "luk"):
+            bonus = player.inventory.bonus(st)
+            txt = f"{STAT_LABELS[st]} {total[st]}" + (f" (+{bonus})" if bonus else "")
+            surface.blit(fs.render(txt, True, (230, 225, 210)), (x + 10, ty))
+            btn = pygame.Rect(x + w - 26, ty - 2, 16, 16)
+            self._ap_rects.append((btn, st))
+            color = (90, 96, 110) if player.ap <= 0 else (150, 190, 150)
+            pygame.draw.rect(surface, color, btn, border_radius=3)
+            pygame.draw.line(surface, (250, 250, 250),
+                             (btn.x + 8, btn.y + 3), (btn.x + 8, btn.y + 13), 2)
+            pygame.draw.line(surface, (250, 250, 250),
+                             (btn.x + 3, btn.y + 8), (btn.x + 13, btn.y + 8), 2)
+            ty += 24
+        abtn = pygame.Rect(x + w - 70, y + h - 30, 60, 22)
+        self._auto_rect = abtn
+        pygame.draw.rect(surface, (110, 130, 160), abtn, border_radius=4)
+        at = fs.render("自动", True, (240, 240, 240))
+        surface.blit(at, (abtn.x + (abtn.w - at.get_width()) // 2,
+                          abtn.y + (abtn.h - at.get_height()) // 2))
 
     # ── 快捷栏（UIWindow/ShortCut 竖条，常驻）──────────────────────
     def draw_quickslots(self, surface, player) -> None:

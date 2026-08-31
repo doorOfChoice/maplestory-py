@@ -94,7 +94,9 @@ def test_questlog_to_from_dict_roundtrip():
 
 def test_save_manager_write_read_roundtrip():
     """SaveManager.flush + load 檔案內容一致。"""
-    data = {"version": 2, "player": {"level": 5, "hp": 80, "job": 0}}
+    data = {"version": 3, "player": {"level": 5, "hp": 80, "job": 0,
+                                     "stats": {"str": 4, "dex": 4, "int": 4, "luk": 4},
+                                     "ap": 0}}
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "save.json"
         sm = SaveManager(path)
@@ -106,13 +108,26 @@ def test_save_manager_write_read_roundtrip():
 
 def test_save_manager_request_save_eventually_persists():
     """request_save 非同步提交後，後台線程最終寫入磁碟。"""
-    data = {"version": 2, "player": {"level": 7, "hp": 60, "job": 0}}
+    data = {"version": 3, "player": {"level": 7, "hp": 60, "job": 0,
+                                     "stats": {"str": 4, "dex": 4, "int": 4, "luk": 4},
+                                     "ap": 0}}
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "save.json"
         sm = SaveManager(path)
         sm.request_save(data)
         sm.flush()
         assert sm.load() == data
+
+
+def test_migrate_v2_adds_stats_by_job():
+    """v2 旧档迁移：Lv12 弓箭手按职业权重把 (12-1)×5=55 AP 全进 DEX。"""
+    v2 = {"version": 2, "player": {"level": 12, "exp": 0, "hp": 100,
+                                   "max_hp": 120, "mp": 30, "max_mp": 40,
+                                   "job": 3000}}
+    migrated = SaveManager.migrate(v2)
+    assert migrated["version"] == 3
+    assert migrated["player"]["stats"]["dex"] == 4 + 55
+    assert migrated["player"]["ap"] == 0
 
 
 def test_save_manager_load_missing():

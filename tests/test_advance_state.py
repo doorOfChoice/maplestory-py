@@ -20,7 +20,8 @@ def fake_player(job: int = 3000) -> SimpleNamespace:
     book.hotkeys[1] = "3001004"
     return SimpleNamespace(
         level=12, exp=30, hp=100, max_hp=120, mp=30, max_mp=40,
-        job=job, x=100.0, y=200.0, facing_right=True,
+        job=job, stats={"str": 4, "dex": 54, "int": 4, "luk": 4}, ap=4,
+        x=100.0, y=200.0, facing_right=True,
         inventory=SimpleNamespace(to_dict=lambda: {"consumes": {}, "etcs": {},
                                                    "equips": [], "equipped": {}}),
         skills=book,
@@ -29,13 +30,15 @@ def fake_player(job: int = 3000) -> SimpleNamespace:
     )
 
 
-def test_save_v2_roundtrip():
-    """collect_data 含 job 与 hotkeys；load 后一致。"""
+def test_save_v3_roundtrip():
+    """collect_data 含 job/四维/AP；load 后一致。"""
     player = fake_player()
     combat = SimpleNamespace(meso=50, total_kills=3)
     data = SaveManager.collect_data(player, combat, "100000000")
-    assert data["version"] == 2
+    assert data["version"] == 3
     assert data["player"]["job"] == 3000
+    assert data["player"]["stats"]["dex"] == 54
+    assert data["player"]["ap"] == 4
     assert data["skills"]["hotkeys"] == {"1": "3001004"}
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -51,7 +54,7 @@ def test_save_v2_roundtrip():
 
 
 def test_migrate_v1_defaults():
-    """v1 旧档（无 job/hotkeys）载入时迁移为 job=0、不崩。"""
+    """v1 旧档（无 job/hotkeys/四维）载入时逐级迁移到 v3，不崩。"""
     v1 = {
         "version": 1,
         "player": {"level": 5, "exp": 0, "hp": 50, "max_hp": 100,
@@ -66,6 +69,9 @@ def test_migrate_v1_defaults():
         path = Path(tmp) / "save.json"
         path.write_text(json.dumps(v1), encoding="utf-8")
         loaded = SaveManager(path).load()
-    assert loaded["version"] == 2
+    assert loaded["version"] == 3
     assert loaded["player"]["job"] == 0
     assert loaded["skills"]["hotkeys"] == {}
+    # Lv5 新手：(5-1)×5=20 AP 按权重全进力量
+    assert loaded["player"]["stats"]["str"] == 24
+    assert loaded["player"]["ap"] == 0

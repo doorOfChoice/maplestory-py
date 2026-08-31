@@ -37,16 +37,22 @@ class JobDef:
     prejob: int = 0                                       # 转职前置职业（新手）
     trainer_npc: Optional[int] = None
     starter_weapon: Optional[str] = None
+    hp_gain: int = 15                                     # 每级 HP 成长
+    mp_gain: int = 10                                     # 每级 MP 成长
+    auto_ap: Dict[str, int] = field(                      # 一键自动加点权重
+        default_factory=lambda: {"str": 1})
 
 
 JOBS: Dict[int, JobDef] = {
     0: JobDef(code=0, name="新手"),
     # 弓箭手 1 转：Skill.wz/300.img；被动 精準強化/霸王箭/百步穿楊；
-    # 导师赫麗娜(1012100)；转职附赠短弓(1452000)
+    # 导师赫麗娜(1012100)；转职附赠木弓(1452002，需求 Lv10 无属性要求，
+    # 短弓 1452000 需求 Lv25/DEX80 转职时穿不上)
     3000: JobDef(
         code=3000, name="弓箭手", tree_imgs=["300.img"],
         passive_ids=[3000000, 3000001, 3000002],
-        advance_lv=10, trainer_npc=1012100, starter_weapon="1452000",
+        advance_lv=10, trainer_npc=1012100, starter_weapon="1452002",
+        hp_gain=20, mp_gain=12, auto_ap={"dex": 1},
     ),
 }
 
