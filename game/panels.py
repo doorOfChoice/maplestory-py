@@ -126,6 +126,7 @@ class Panels:
         self._stat_rect = pygame.Rect(0, 0, 0, 0)
         self._ap_rects: List[tuple] = []     # (Rect, stat)
         self._auto_rect: Optional[pygame.Rect] = None
+        self._num_cache: dict = {}           # (ch, color) → 染色后的像素数字
         self._quest_goal_lines = None    # Game 注入：qid → 目标行列表
         self._cell_rects: List[tuple] = []   # (Rect, tab, index)
         self._slot_rects: List[tuple] = []   # (Rect, slot)
@@ -783,6 +784,49 @@ class Panels:
             ty += 8
 
     # ── 状态窗（UIWindow/Stat/backgrnd，B 键）────────────────────────
+    def _num_glyph(self, ch: str, color) -> Optional[pygame.Surface]:
+        """StatusBar/number 像素数字（白字 → 染色），缓存。"""
+        key = (ch, color)
+        hit = self._num_cache.get(key)
+        if hit is not None:
+            return hit
+        path = "number/slash" if ch == "/" else f"number/{ch}"
+        src = self._wz(path, img="StatusBar.img")
+        if src is None:
+            return None
+        tinted = src.copy()
+        tinted.fill((*color, 255), special_flags=pygame.BLEND_RGBA_MULT)
+        self._num_cache[key] = tinted
+        return tinted
+
+    def _num_width(self, text: str, color) -> Optional[int]:
+        """像素数字串总宽；含不可绘制字符时返回 None（调用方回退字体）。"""
+        w = 0
+        for ch in text:
+            img = self._num_glyph(ch, color) if (ch.isdigit() or ch == "/") else None
+            if img is None:
+                return None
+            w += img.get_width() + 1
+        return w
+
+    def _draw_numline(self, surface, text: str, x: int, y_mid: int,
+                      color=(60, 60, 60)) -> Optional[int]:
+        """用原版像素数字画一串数字（垂直居中于 y_mid），返回结束 x。"""
+        w = self._num_width(text, color)
+        if w is None:
+            return None
+        for ch in text:
+            img = self._num_glyph(ch, color)
+            surface.blit(img, (x, y_mid - img.get_height() // 2))
+            x += img.get_width() + 1
+        return x
+
+    def _stat_value(self, surface, fs, text: str, x: int, y_band: int) -> None:
+        """数值槽文本：纯数字串用原版像素数字，否则回退小字体。"""
+        end = self._draw_numline(surface, text, x, y_band + 7)
+        if end is None:
+            surface.blit(fs.render(text, True, (40, 40, 40)), (x, y_band + 2))
+
     def _draw_stat(self, surface, player) -> None:
         fs = self.ui.font_small
         vw, vh = surface.get_width(), surface.get_height()
@@ -803,21 +847,37 @@ class Panels:
             surface.blit(fs.render(text, True, (40, 40, 40)),
                          (x + STAT_TEXT_X, y + STAT_ROW_Y[key] + 2))
 
+        def num(key: str, text: str) -> None:
+            self._stat_value(surface, fs, text, x + STAT_TEXT_X,
+                             y + STAT_ROW_Y[key])
+
         row("name", "玩家")
         row("job", jobdef.name)
-        row("level", str(player.level))
-        row("hp", f"{int(player.hp)}/{player.max_hp}")
-        row("mp", f"{int(player.mp)}/{player.max_mp}")
-        row("exp", f"{player.exp}/{player.exp_to_next()}")
-        ap_txt = fs.render(str(player.ap), True, (40, 40, 40))
+        num("level", str(player.level))
+        num("hp", f"{int(player.hp)}/{player.max_hp}")
+        num("mp", f"{int(player.mp)}/{player.max_mp}")
+        num("exp", f"{player.exp}/{player.exp_to_next()}")
         bx, by, bw, bh = STAT_AP_BOX
-        surface.blit(ap_txt, (x + bx + (bw - ap_txt.get_width()) // 2,
-                              y + by + (bh - ap_txt.get_height()) // 2))
+        ap_txt = str(player.ap)
+        ap_w = self._num_width(ap_txt, (60, 60, 60))
+        if ap_w is not None:
+            self._draw_numline(surface, ap_txt, x + bx + (bw - ap_w) // 2,
+                               y + by + bh // 2)
+        else:
+            t = fs.render(ap_txt, True, (40, 40, 40))
+            surface.blit(t, (x + bx + (bw - t.get_width()) // 2,
+                             y + by + (bh - t.get_height()) // 2))
         for st, ry in STAT_ROW.items():
             bonus = player.inventory.bonus(st)
-            txt = str(total[st]) + (f" (+{bonus})" if bonus else "")
-            surface.blit(fs.render(txt, True, (40, 40, 40)),
-                         (x + STAT_TEXT_X, y + ry + 2))
+            end = self._draw_numline(surface, str(total[st]),
+                                     x + STAT_TEXT_X, y + ry + 7)
+            if end is None:
+                surface.blit(fs.render(str(total[st]), True, (40, 40, 40)),
+                             (x + STAT_TEXT_X, y + ry + 2))
+                end = x + STAT_TEXT_X + fs.size(str(total[st]))[0]
+            if bonus:
+                surface.blit(fs.render(f" (+{bonus})", True, (46, 120, 40)),
+                             (end + 2, y + ry + 2))
             rect = pygame.Rect(x + STAT_BT_X, y + ry, 12, 12)
             self._ap_rects.append((rect, st))
             state = ("disabled" if player.ap <= 0 else
