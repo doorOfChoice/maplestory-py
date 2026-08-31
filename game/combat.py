@@ -15,6 +15,7 @@ from typing import List, Optional, Tuple
 import pygame
 
 from . import settings
+from . import stats as stats_mod
 from .animation import Animation
 from .assets import Assets
 from .effects import Effect
@@ -216,12 +217,14 @@ class Arrow:
             if not self.rect().colliderect(mob.rect()):
                 continue
             self.hit_ids.add(id(mob))
+            luk = getattr(player, "luk", 0)
+            dmg = max(1, self.dmg - int(getattr(mob, "pd", 0) * (1 - luk / 100.0)))
             combat.numbers.append(DamageNumber(
-                mob.x, mob.cy - mob.sprite_h, self.dmg, self.kind))
+                mob.x, mob.cy - mob.sprite_h, dmg, self.kind))
             if self.hit_frames:
                 combat.effects.append(Effect(
                     self.hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45))
-            died = mob.take_hit(self.dmg, from_x=self.x)
+            died = mob.take_hit(dmg, from_x=self.x)
             if died and player is not None:
                 combat._on_kill(player, mob)
             if len(self.hit_ids) >= self.mob_count:
@@ -294,11 +297,15 @@ class Combat:
             max_targets = max(1, skill["mob_count"])
             targets.sort(key=lambda m: (m.x - cx) ** 2 + (m.cy - cy) ** 2)
             targets = targets[:max_targets]
-            dmg = int(player.attack_value() * skill["damage"])
+            mult = skill["damage"]
         else:
-            dmg = player.attack_value()
+            mult = 1.0
+        atk = player.attack_value()
+        luk = getattr(player, "luk", 0)
 
         for mob in targets:
+            dmg = stats_mod.roll_damage(atk, mult, getattr(mob, "pd", 0),
+                                        luk, random)
             self.numbers.append(DamageNumber(
                 mob.x, mob.cy - mob.sprite_h, dmg,
                 "violet" if skill else "red"))
@@ -317,14 +324,15 @@ class Combat:
         弹道贴图用箭矢物品的 bullet 节点（原版同款）。
         """
         if skill_data is None:
-            dmg = player.attack_value()
+            dmg = stats_mod.roll_damage(player.attack_value(), 1.0, 0, 0, random)
             n, mob_count = 1, 1
             kind = "red"
             frames = self.assets.normal_arrow_frames() if self.assets else []
             hit_frames: List = []
         else:
             sid = skill_data["id"]
-            dmg = int(player.attack_value() * skill_data["damage"])
+            dmg = stats_mod.roll_damage(player.attack_value(),
+                                        skill_data["damage"], 0, 0, random)
             n = max(1, int(skill_data.get("bullet_count", 1)))
             mob_count = max(1, skill_data["mob_count"])
             kind = "violet"

@@ -62,11 +62,16 @@ PLAYER_STEP_UP = 36.0
 ATTACK_RANGE = 58.0              # 攻击命中框向前延伸距离
 ATTACK_HEIGHT = 30.0
 BASE_DAMAGE = 25                 # 基础攻击力
-PLAYER_MAX_HP = 100
-PLAYER_MAX_MP = 50
 BASE_EXP_NEED = 15               # 1 级所需经验
 EXP_GROWTH = 1.35                # 每级经验需求增长倍率
 RESPAWN_FULL = True
+
+# ── 数值系统（四维 / AP / HP·MP 成长，公式见 game/stats.py）─────────
+BASE_STATS = {"str": 4, "dex": 4, "int": 4, "luk": 4}
+AP_PER_LEVEL = 5                 # 每级获得属性点
+HP_BASE = 50                     # HP 基础值（Lv0 截距）
+MP_BASE = 30                     # MP 基础值
+BASE_WEAPON_PAD = 25             # 空手面板攻击（未穿武器时）
 
 # ── 玩家受击（原版行为：击退小跳 + 短暂无敌闪烁）───────────────────
 HURT_STUN = 0.30                 # 受击硬直秒数（期间锁移动/攻击）
@@ -108,7 +113,7 @@ SKILL_MAX_LEVEL = 20             # 技能最高等级（裁剪 WZ level 表）
 
 # ── 职业 / 转职 ──────────────────────────────────────────────────────
 BOWMAN_JOB = 3000                # 弓箭手 1 转职业码
-BOWMAN_STARTER_BOW = "1452000"   # 转职附赠短弓
+BOWMAN_STARTER_BOW = "1452002"   # 转职附赠木弓（需求 Lv10；短弓 1452000 需 Lv25/DEX80）
 BOWMAN_TRAINER_NPC = "1012100"   # 导师赫麗娜
 TRAINER_SPAWN_MAP = "100010000"  # 导师注入的地图（出生图：弓箭手村东部小山）
 TRAINER_SPAWN = (-520.0, 455.0)  # 导师站立点（出生 portal 旁地面 foothold，脚底坐标）

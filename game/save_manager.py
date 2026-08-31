@@ -12,6 +12,10 @@ import threading
 from pathlib import Path
 from typing import Any, Optional
 
+from . import settings
+from . import stats as stats_mod
+from .jobs import JOBS
+
 
 class SaveManager:
     """非同步存档管理：request_save 提交快照，后台线程写盘。"""
@@ -23,7 +27,7 @@ class SaveManager:
         self._thread: Optional[threading.Thread] = None
 
     def load(self) -> Optional[dict]:
-        """读取存档。不存在或损坏时回传 None；v1 旧档自动迁移为 v2。"""
+        """读取存档。不存在或损坏时回传 None；旧档自动迁移到当前版本。"""
         if not self.path.exists():
             return None
         try:
@@ -33,14 +37,22 @@ class SaveManager:
 
     @staticmethod
     def migrate(data: dict) -> dict:
-        """把 v1 旧档迁移为 v2：补 job 缺省 0、快捷键缺省空表。"""
-        if data.get("version", 1) >= 2:
-            return data
-        player = data.setdefault("player", {})
-        player.setdefault("job", 0)
-        skills = data.setdefault("skills", {})
-        skills.setdefault("hotkeys", {})
-        data["version"] = 2
+        """逐级迁移旧档：v1→v2 补 job/快捷键；v2→v3 补四维与 AP。"""
+        if data.get("version", 1) < 2:
+            player = data.setdefault("player", {})
+            player.setdefault("job", 0)
+            skills = data.setdefault("skills", {})
+            skills.setdefault("hotkeys", {})
+            data["version"] = 2
+        if data.get("version") < 3:
+            player = data.setdefault("player", {})
+            jobdef = JOBS.get(player.get("job", 0)) or JOBS[0]
+            total_ap = max(0, int(player.get("level", 1)) - 1) * settings.AP_PER_LEVEL
+            stats, ap = stats_mod.auto_allocate(
+                stats_mod.base_stats(), total_ap, jobdef.auto_ap)
+            player["stats"] = stats
+            player["ap"] = ap
+            data["version"] = 3
         return data
 
     def request_save(self, data: dict) -> None:
@@ -91,7 +103,7 @@ class SaveManager:
     def collect_data(player, combat, map_id: str) -> dict:
         """收集所有需要存档的游戏状态为 dict。"""
         return {
-            "version": 2,
+            "version": 3,
             "player": {
                 "level": player.level,
                 "exp": player.exp,
@@ -100,6 +112,8 @@ class SaveManager:
                 "mp": player.mp,
                 "max_mp": player.max_mp,
                 "job": player.job,
+                "stats": dict(player.stats),
+                "ap": player.ap,
                 "map_id": map_id,
                 "x": player.x,
                 "y": player.y,

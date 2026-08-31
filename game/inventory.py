@@ -205,6 +205,10 @@ class Inventory:
     def stat_sum(self, key: str) -> int:
         return sum(i.stat(key) for i in self.equipped.values())
 
+    def bonus(self, key: str) -> int:
+        """装备词条（str/dex/int/luk/hp/mp 等直接键）求和。"""
+        return self.stat_sum(key)
+
     def attack(self) -> int:
         return self.stat_sum("incPAD")
 

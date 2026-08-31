@@ -186,7 +186,7 @@ class Game:
             self.ui.show_dialog("欢迎", ["冒险岛 v113 · 弓箭手村东部小山",
                                          "A/D(或←→) 移动  空格 跳跃  S+空格 下跳",
                                          "W(或↑) 爬绳/梯  J 攻击  数字键 技能  F 喝药",
-                                         "I 道具栏  K 技能栏  Q 任务日志  Enter 对话  R 复活",
+                                         "I 道具栏  K 技能栏  S 状态  Q 任务日志  Enter 对话  R 复活",
                                          "新手练到 Lv10 后，找出生点旁的赫麗娜转职弓箭手；"
                                          "走到发光传送门前按 ↑ 可切换地图。"
                                          "（对话不影响行动，Enter/Esc 或点击关闭）"])
@@ -300,6 +300,8 @@ class Game:
                     self.player.start_attack()
                 elif event.key in (pygame.K_DOWN, pygame.K_s) and self.keys.jump:
                     self.player.drop_through(self.physics)
+                elif event.key == pygame.K_s:
+                    self.panels.toggle_stat()
                 elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                     self._try_talk()
 

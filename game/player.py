@@ -11,12 +11,14 @@ from typing import List, Optional
 import pygame
 
 from . import settings
+from . import stats as stats_mod
 from .animation import Animation
 from .assets import Assets
 from .physics import Physics
 from .inventory import Inventory, make_item
 from .jobs import JOBS, is_ranged_weapon
 from .skills import SkillBook
+from .stats import base_stats
 from .quests import QuestLog
 from .motion import approach, JumpFeather
 
@@ -75,12 +77,11 @@ class Player:
 
     def _init_new_game(self, assets: Assets, quest_defs) -> None:
         """新游戏初始化：预设属性、初始药水、预设装备、技能初始赠送。"""
-        self.hp = settings.PLAYER_MAX_HP
-        self.max_hp = settings.PLAYER_MAX_HP
-        self.mp = settings.PLAYER_MAX_MP
-        self.max_mp = settings.PLAYER_MAX_MP
+        self.hp = self.mp = 0
         self.level = 1
         self.exp = 0
+        self.stats = base_stats()
+        self.ap = 0
         self.inventory = Inventory()
         for item_id, count in settings.START_CONSUMES.items():
             self.inventory.add(make_item(item_id, assets, count))
@@ -92,6 +93,9 @@ class Player:
         self.pending_skill: Optional[dict] = None
         self.refresh_equips()
         self.quests = QuestLog(quest_defs or {})
+        self.recalc_vitals()
+        self.hp = self.max_hp
+        self.mp = self.max_mp
 
     def _apply_save_data(self, data: dict, assets: Assets, quest_defs) -> None:
         """从存档 dict 恢复玩家状态。"""
@@ -103,6 +107,8 @@ class Player:
         self.mp = pd["mp"]
         self.max_mp = pd["max_mp"]
         self.job = pd.get("job", 0)
+        self.stats = dict(pd.get("stats") or base_stats())
+        self.ap = int(pd.get("ap") or 0)
         self.facing_right = pd.get("facing_right", True)
         self.anim_flip = self.facing_right
 
@@ -113,6 +119,7 @@ class Player:
         self.refresh_equips()
         self.quests = QuestLog(quest_defs or {})
         self.quests.from_dict(data.get("quests", {}))
+        self.recalc_vitals()
 
     # ── 动画 ───────────────────────────────────────────────────────
     def _load_anim(self, pose: str, flip: Optional[bool] = None) -> None:
@@ -149,17 +156,59 @@ class Player:
                 and is_ranged_weapon(weapon.id))
 
     def refresh_equips(self) -> None:
-        """装备栏变更后同步外观（equips 列表驱动角色渲染）。"""
+        """装备栏变更后同步外观与派生数值（equips 列表驱动角色渲染）。"""
         self.equips = self.inventory.equip_ids()
+        self.recalc_vitals()
         self._load_anim(POSE_IDLE if self.on_ground else POSE_JUMP)
 
     def attack_value(self) -> int:
-        """物理攻击力：基础成长 + 武器等装备 incPAD。"""
-        return 10 + self.level * 2 + self.inventory.attack() * 3
+        """物理攻击力：武器面板 × 主属性权重 + 副属性/10（见 stats.attack）。"""
+        pad = self.inventory.attack() or settings.BASE_WEAPON_PAD
+        return stats_mod.attack(self.total_stats(), pad, self.is_ranged())
 
     def defense_value(self) -> int:
-        """物理防御力：等级成长 + 防具 incPDD。"""
-        return self.level * 2 + self.inventory.defense()
+        """物理防御力：装备 PDD 总和 + DEX//10。"""
+        return stats_mod.defense(self.total_stats(), self.inventory.defense())
+
+    # ── 四维属性 ───────────────────────────────────────────────────
+    def total_stats(self) -> dict:
+        """四维合计 = 加点后的属性 + 装备词条（str/dex/int/luk）。"""
+        inv = self.inventory
+        return {k: self.stats.get(k, 0) + inv.bonus(k)
+                for k in stats_mod.STAT_KEYS}
+
+    @property
+    def luk(self) -> int:
+        return self.total_stats()["luk"]
+
+    def allocate_ap(self, stat: str, n: int = 1) -> bool:
+        """手动加点：成功返回 True 并刷新 HP/MP 上限。"""
+        new_stats, new_ap = stats_mod.allocate(self.stats, self.ap, stat, n)
+        if new_ap == self.ap and new_stats == self.stats:
+            return False
+        self.stats, self.ap = new_stats, new_ap
+        self.recalc_vitals()
+        return True
+
+    def auto_allocate_ap(self) -> bool:
+        """一键自动分配：按职业权重投完所有 AP。"""
+        jobdef = JOBS.get(self.job) or JOBS[0]
+        new_stats, new_ap = stats_mod.auto_allocate(
+            self.stats, self.ap, jobdef.auto_ap)
+        if new_ap == self.ap and new_stats == self.stats:
+            return False
+        self.stats, self.ap = new_stats, new_ap
+        self.recalc_vitals()
+        return True
+
+    def recalc_vitals(self) -> None:
+        """按 等级/职业/装备词条 重算 HP/MP 上限，并把当前值钳进上限。"""
+        jobdef = JOBS.get(self.job) or JOBS[0]
+        inv = self.inventory
+        self.max_hp = stats_mod.max_hp(self.level, jobdef.hp_gain, inv.bonus("hp"))
+        self.max_mp = stats_mod.max_mp(self.level, jobdef.mp_gain, inv.bonus("mp"))
+        self.hp = min(self.hp, self.max_hp)
+        self.mp = min(self.mp, self.max_mp)
 
     def use_potion(self) -> bool:
         """快捷喝药：优先 HP 药水，其次 MP 药水。返回是否使用成功。"""
@@ -262,8 +311,8 @@ class Player:
         while self.exp >= self.exp_to_next():
             self.exp -= self.exp_to_next()
             self.level += 1
-            self.max_hp += 12
-            self.max_mp += 6
+            self.ap += settings.AP_PER_LEVEL
+            self.recalc_vitals()
             self.hp = self.max_hp
             self.mp = self.max_mp
             self.skills.gain_sp(settings.SP_PER_LEVEL)
