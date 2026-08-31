@@ -1,12 +1,16 @@
-"""交互面板：背包 / 装备栏 / 技能窗口 / 快捷栏。
+"""交互面板：背包 / 装备栏 / 技能窗口 / 快捷栏 —— 全部使用 UI.wz 原版素材。
 
-自绘半透明面板（风格对齐 HUD 的圆角名牌）。窗口打开时由 Game 传入鼠标事件，
-点击行为：
-  · 背包-消耗页：点击图标使用（喝药）
-  · 背包-装备页：点击图标穿戴（同栏位旧装备自动换回）
-  · 装备栏：点击已装备栏位脱下
-  · 技能窗：点击 [+] 消耗 SP 升级技能
-快捷栏常驻 HUD 右下：技能图标 + 键位 + MP 消耗 + 冷却遮罩。
+· 背包窗口：UIWindow/Item/backgrnd（标题/格子底纹已烤死在图内），
+  页签用 Item/Tab/enabled|disabled 0..4（0=装备 1=消耗 3=其他，带原版汉字），
+  底部页脚画 Item/BtCoin + 金币数。
+· 装备栏窗口：UIWindow/Equip/backgrnd 纸娃娃底板，按原版凹槽位置放装备图标。
+· 技能窗口：UIWindow/Skill/backgrnd，升级按钮用 Skill/BtSpUp。
+· 快捷栏：UIWindow/ShortCut/backgrnd 竖条，技能图标嵌在格内。
+· Tooltip：UIWindow/ContextMenu 三段（t/c/s）官方深色底。
+
+任何素材缺失时自动退回旧版自绘面板，保证不闪退。
+点击行为与数据层保持不变：消耗页点击喝药、装备页点击穿戴、装备栏点击脱下、
+技能窗点击 BtSpUp 消耗 SP 升级。
 """
 
 from __future__ import annotations
@@ -25,12 +29,52 @@ SLOT_NAMES = {
     "shield": "盾牌", "weapon": "武器",
 }
 
-CELL = 38          # 物品格 + 间隙
+CELL = 38          # 旧自绘面板用（fallback）
 PAD = 10
+
+# ── 原版窗口几何（由 113/UI.wz 底图逐像素实测）─────────────────────
+# 背包：175×307，4 列 × 6 行 = 24 格（原版老式背包），格 36×34
+INV_BG = "Item/backgrnd"
+INV_W, INV_H = 175, 307
+INV_CELL_X = [4, 40, 76, 112]
+INV_CELL_Y = [50, 84, 118, 152, 186, 220]
+INV_CELL_W, INV_CELL_H = 36, 34
+INV_COLS = len(INV_CELL_X)
+INV_SLOTS = INV_COLS * len(INV_CELL_Y)          # 24
+
+# 装备：175×304 纸娃娃底板，5 列 × 7 行凹槽（仅 21 格有效）
+EQP_BG = "Equip/backgrnd"
+EQP_W, EQP_H = 175, 304
+EQP_CELL_X = [4, 38, 71, 104, 137]
+EQP_CELL_Y = [34, 68, 101, 134, 167, 200, 233]
+EQP_CELL_W, EQP_CELL_H = 33, 33
+EQP_SLOT_POS = {                                 # slot → (col, row)
+    "cap": (1, 0), "face": (2, 0),
+    "earr": (0, 1), "weapon": (1, 1), "cape": (3, 1), "ring": (4, 1),
+    "top": (2, 2), "shield": (3, 2),
+    "glove": (0, 3), "overall": (2, 3),
+    "pants": (2, 4), "shoes": (1, 4),
+}
+
+# 技能：175×289；快捷栏：93×244（2 列 × 6 行）
+SKL_BG = "Skill/backgrnd"
+SKL_W, SKL_H = 175, 289
+SHT_BG = "ShortCut/backgrnd"
+SHT_W, SHT_H = 93, 244
+SHT_CELL_X = [4, 48]
+SHT_CELL_Y = [24, 58, 93, 127, 162, 196]
+SHT_CELL_W, SHT_CELL_H = 41, 34
+
+# 页签（带原版汉字，宽 26~27 高 16）：游戏内 3 页 → 原版 装备/消耗/其他
+TAB_INDEX = {"equip": 0, "consume": 1, "etc": 3}
+TAB_LABEL = {"consume": "消耗", "equip": "装备", "etc": "其他"}
+
+BAR_RESERVE = 58     # 底部状态栏预留高度（无 StatusBar 素材时同值）
 
 
 def _panel(surface: pygame.Surface, rect: pygame.Rect,
            border=(90, 96, 110)) -> None:
+    """fallback 自绘面板（素材缺失时用）。"""
     pygame.draw.rect(surface, (18, 22, 30, 216), rect, border_radius=8)
     pygame.draw.rect(surface, border, rect, 1, border_radius=8)
 
@@ -46,6 +90,7 @@ class Panels:
         self.ui = ui
         self.assets = assets
         self.inv_visible = False
+        self.equip_visible = False
         self.skill_visible = False
         self.inv_tab = "consume"          # consume | equip | etc
         self._tooltip: Optional[str] = None
@@ -57,13 +102,104 @@ class Panels:
         self._slot_rects: List[tuple] = []   # (Rect, slot)
         self._skill_rows: List[tuple] = []   # (Rect, skill_id)
         self._tab_rects: List[tuple] = []    # (Rect, tab)
+        # ── 拖拽 / 关闭 ─────────────────────────────────────────────
+        self._win_pos: dict = {}             # key → (x, y) 用户拖动后的绝对位置
+        self._win_size: dict = {}            # key → (w, h) 当前帧窗口尺寸
+        self._view_size = (settings.VIEW_W, settings.VIEW_H)
+        self._drag: Optional[Tuple[str, Tuple[int, int]]] = None  # (key, 抓取偏移)
+        self._close_rects: List[tuple] = []  # (Rect, key)
+        self._title_rects: List[tuple] = []  # (Rect, key) 标题条=拖拽热区
+
+    # ── 素材取值 ───────────────────────────────────────────────────
+    def _wz(self, path: str, img: str = "UIWindow.img") -> Optional[pygame.Surface]:
+        hit = self.assets.ui_surface(img, path)
+        return hit[0] if hit else None
 
     # ── 开关 ───────────────────────────────────────────────────────
     def toggle_inventory(self) -> None:
         self.inv_visible = not self.inv_visible
+        self.equip_visible = self.inv_visible
+        if not self.inv_visible and self._drag and self._drag[0] in ("inv", "equip"):
+            self._drag = None
 
     def toggle_skill(self) -> None:
         self.skill_visible = not self.skill_visible
+        if not self.skill_visible and self._drag and self._drag[0] == "skill":
+            self._drag = None
+
+    def _close_window(self, key: str) -> None:
+        """关闭按钮：只关对应窗口（背包/装备栏互不牵连）。"""
+        if key == "inv":
+            self.inv_visible = False
+        elif key == "equip":
+            self.equip_visible = False
+        elif key == "skill":
+            self.skill_visible = False
+        if self._drag and self._drag[0] == key:
+            self._drag = None
+
+    # ── 窗口定位（默认锚点 + 用户拖拽偏移）─────────────────────────
+    def _resolve_pos(self, key: str, base: Tuple[int, int],
+                     size: Tuple[int, int],
+                     vw: int, vh: int) -> Tuple[int, int]:
+        self._view_size = (vw, vh)
+        self._win_size[key] = size
+        x, y = self._win_pos.get(key, base)
+        x = max(0, min(vw - size[0], int(x)))
+        y = max(0, min(vh - size[1], int(y)))
+        return x, y
+
+    def _add_chrome(self, surface, key: str, x: int, y: int,
+                    w: int, title_h: int) -> None:
+        """登记标题拖拽热区并画右上角原版关闭按钮（BtUIClose 32×15）。"""
+        self._title_rects.append((pygame.Rect(x, y, w, title_h), key))
+        rect = pygame.Rect(x + w - 34, y + 3, 32, 15)
+        img = None
+        if self._drag and self._drag[0] == key:
+            img = self._wz("BtUIClose/pressed/0")
+        elif rect.collidepoint(pygame.mouse.get_pos()):
+            img = self._wz("BtUIClose/mouseOver/0")
+        if img is None:
+            img = self._wz("BtUIClose/normal/0")
+        if img is not None:
+            surface.blit(img, rect.topleft)
+        else:                       # 素材缺失 → 自绘红 × 小钮
+            pygame.draw.rect(surface, (150, 52, 46), rect, border_radius=3)
+            pygame.draw.line(surface, (255, 235, 235),
+                             (rect.x + 11, rect.y + 4), (rect.x + 21, rect.y + 11), 2)
+            pygame.draw.line(surface, (255, 235, 235),
+                             (rect.x + 21, rect.y + 4), (rect.x + 11, rect.y + 11), 2)
+        self._close_rects.append((rect, key))
+
+    # ── 鼠标：按下 / 拖动 / 松开 ───────────────────────────────────
+    def is_dragging(self) -> bool:
+        return self._drag is not None
+
+    def handle_mouse_down(self, pos: Tuple[int, int], player) -> bool:
+        for rect, key in self._close_rects:
+            if rect.collidepoint(pos):
+                self._close_window(key)
+                return True
+        if self._drag is not None:
+            return True
+        for rect, key in self._title_rects:
+            if rect.collidepoint(pos):
+                self._drag = (key, (pos[0] - rect.x, pos[1] - rect.y))
+                return True
+        return self.handle_click(pos, player)
+
+    def handle_mouse_motion(self, pos: Tuple[int, int]) -> None:
+        if self._drag is None:
+            return
+        key, (gx, gy) = self._drag
+        w, h = self._win_size.get(key, (60, 40))
+        vw, vh = self._view_size
+        x = max(0, min(vw - w, pos[0] - gx))
+        y = max(0, min(vh - h, pos[1] - gy))
+        self._win_pos[key] = (x, y)
+
+    def handle_mouse_up(self) -> None:
+        self._drag = None
 
     # ── 图标 ───────────────────────────────────────────────────────
     def _icon(self, item_id: str, kind: str) -> Optional[pygame.Surface]:
@@ -73,7 +209,7 @@ class Panels:
 
     # ── 鼠标点击（返回 True 表示事件已消费）────────────────────────
     def handle_click(self, pos: Tuple[int, int], player) -> bool:
-        if self.inv_visible:
+        if self.inv_visible or self.equip_visible:
             for rect, key in self._tab_rects:
                 if rect.collidepoint(pos):
                     self.inv_tab = key
@@ -133,9 +269,12 @@ class Panels:
         self._slot_rects.clear()
         self._skill_rows.clear()
         self._tab_rects.clear()
+        self._close_rects.clear()
+        self._title_rects.clear()
         mouse = pygame.mouse.get_pos()
         if self.inv_visible:
             self._draw_inventory(surface, player, meso)
+        if self.equip_visible:
             self._draw_equip(surface, player)
         if self.skill_visible:
             self._draw_skills(surface, player)
@@ -162,12 +301,86 @@ class Panels:
         plate.blit(txt, (10, (h - txt.get_height()) // 2))
         surface.blit(plate, (x, 34))
 
-    # ── 背包窗口 ───────────────────────────────────────────────────
+    # ── 背包窗口（UIWindow/Item）───────────────────────────────────
     def _draw_inventory(self, surface, player, meso: int) -> None:
         inv = player.inventory
         f, fs = self.ui.font, self.ui.font_small
-        vh = surface.get_height()
+        vw, vh = surface.get_width(), surface.get_height()
+        bg = self._wz(INV_BG)
+        tab = self.inv_tab
+        base = (4, vh - INV_H - BAR_RESERVE - 2)
+        x, y = self._resolve_pos("inv", base, (INV_W, INV_H), vw, vh)
+        rect = pygame.Rect(x, y, INV_W, INV_H)
+        self._inv_rect = rect
 
+        items = (list(inv.consumes.values()) if tab == "consume"
+                 else list(inv.etcs.values()) if tab == "etc"
+                 else list(inv.equips))
+
+        if bg is None:      # 素材缺失 → 旧自绘
+            self._draw_inventory_fallback(surface, player, meso)
+            return
+        surface.blit(bg, (x, y))
+        self._add_chrome(surface, "inv", x, y, INV_W, 23)
+
+        # 页签条（底图 y23~42 空带；原版汉字烤死在图内）：选中=enabled
+        tx = x + 4
+        for key in ("consume", "equip", "etc"):
+            ti = TAB_INDEX[key]
+            state = "enabled" if key == tab else "disabled"
+            img = self._wz(f"Item/Tab/{state}/{ti}")
+            if img is not None:
+                surface.blit(img, (tx, y + 25))
+                self._tab_rects.append(
+                    (pygame.Rect(tx, y + 25, img.get_width(), img.get_height()), key))
+                tx += img.get_width() + 1
+            else:
+                tr = pygame.Rect(tx, y + 25, 30, 16)
+                pygame.draw.rect(surface, (60, 70, 88) if key == tab else (34, 40, 52),
+                                 tr, border_radius=4)
+                surface.blit(fs.render(TAB_LABEL[key], True, (255, 255, 255)),
+                             (tr.x + 2, tr.y + 2))
+                self._tab_rects.append((tr, key))
+                tx += 31
+
+        # 标题行右侧：当前页数量（浅色标题条 → 深字）
+        cap_txt = fs.render(f"{len(items)}/{INV_SLOTS}", True, (70, 72, 86))
+        surface.blit(cap_txt, (x + INV_W - cap_txt.get_width() - 40, y + 6))
+
+        # 物品格（底图已含格子，只叠图标 + 数量）
+        for i in range(INV_SLOTS):
+            cx = x + INV_CELL_X[i % INV_COLS]
+            cy = y + INV_CELL_Y[i // INV_COLS]
+            cell = pygame.Rect(cx, cy, INV_CELL_W, INV_CELL_H)
+            if i < len(items):
+                item = items[i]
+                icon = self._icon(item.id, item.kind)
+                if icon is not None:
+                    icon = _fit_icon(icon, 32)
+                    surface.blit(icon, (cx + (cell.w - icon.get_width()) // 2,
+                                        cy + (cell.h - icon.get_height()) // 2))
+                if item.count > 1:
+                    cnt = fs.render(str(item.count), True, (255, 255, 255))
+                    shadow = fs.render(str(item.count), True, (0, 0, 0))
+                    surface.blit(shadow, (cell.right - cnt.get_width() - 1,
+                                          cell.bottom - cnt.get_height() + 1))
+                    surface.blit(cnt, (cell.right - cnt.get_width() - 2,
+                                       cell.bottom - cnt.get_height()))
+                if cell.collidepoint(pygame.mouse.get_pos()):
+                    self._tooltip = self._item_tip(item)
+            self._cell_rects.append((cell, tab, i))
+
+        # 底部页脚：上行 = 金币图标 + 持有数（白底板 → 深棕字）
+        coin = self._wz("Item/BtCoin/normal/0")
+        if coin is not None:
+            surface.blit(coin, (x + 10, y + 266))
+        surface.blit(fs.render(f"金幣 {meso:,}", True, (110, 68, 18)),
+                     (x + 28, y + 265))
+
+    def _draw_inventory_fallback(self, surface, player, meso: int) -> None:
+        inv = player.inventory
+        f, fs = self.ui.font, self.ui.font_small
+        vh = surface.get_height()
         tab = self.inv_tab
         items = (list(inv.consumes.values()) if tab == "consume"
                  else list(inv.etcs.values()) if tab == "etc"
@@ -176,18 +389,15 @@ class Panels:
         rows = max(2, (max(len(items), 8) + cols - 1) // cols)
         w = PAD * 2 + cols * CELL
         h = 58 + rows * CELL
-        x = 12
-        y = vh - 150 - h
+        base = (12, vh - 150 - h)
+        x, y = self._resolve_pos("inv", base, (w, h), surface.get_width(), vh)
         rect = pygame.Rect(x, y, w, h)
         self._inv_rect = rect
         _panel(surface, rect)
-
-        # 标题 + 金币
         surface.blit(f.render("道具欄 (I)", True, (235, 235, 240)), (x + PAD, y + 8))
         meso_txt = f.render(f"{meso} 楓幣", True, (255, 220, 90))
-        surface.blit(meso_txt, (x + w - PAD - meso_txt.get_width(), y + 8))
-
-        # 页签
+        surface.blit(meso_txt, (x + w - PAD - 34 - meso_txt.get_width(), y + 8))
+        self._add_chrome(surface, "inv", x, y, w, 24)
         for i, (key, label) in enumerate((("consume", "消耗"), ("equip", "裝備"),
                                           ("etc", "其他"))):
             tr = pygame.Rect(x + PAD + i * 58, y + 28, 54, 18)
@@ -197,10 +407,6 @@ class Panels:
             surface.blit(fs.render(label, True, (255, 255, 255)),
                          (tr.x + (tr.w - fs.size(label)[0]) // 2, tr.y + 3))
             self._tab_rects.append((tr, key))
-
-        # 属性摘要（放装备栏窗口，见 _draw_equip）
-
-        # 物品格
         for i in range(cols * rows):
             cx = x + PAD + (i % cols) * CELL
             cy = y + 52 + (i // cols) * CELL
@@ -221,15 +427,57 @@ class Panels:
                     self._tooltip = self._item_tip(item)
             self._cell_rects.append((cell, tab, i))
 
-    # ── 装备栏窗口 ─────────────────────────────────────────────────
+    # ── 装备栏窗口（UIWindow/Equip 纸娃娃底板）─────────────────────
     def _draw_equip(self, surface, player) -> None:
+        inv = player.inventory
+        fs = self.ui.font_small
+        vw, vh = surface.get_width(), surface.get_height()
+        # 默认锚在背包默认位置右侧（不随背包拖动，两窗口各自独立）
+        base = (4 + INV_W + 2,
+                vh - INV_H - BAR_RESERVE - 2 + (INV_H - EQP_H) // 2)
+        x, y = self._resolve_pos("equip", base, (EQP_W, EQP_H), vw, vh)
+        rect = pygame.Rect(x, y, EQP_W, EQP_H)
+        self._equip_rect = rect
+        bg = self._wz(EQP_BG)
+        if bg is None:
+            self._draw_equip_fallback(surface, player)
+            return
+        surface.blit(bg, (x, y))
+        self._add_chrome(surface, "equip", x, y, EQP_W, 30)
+
+        for slot in SLOT_ORDER:
+            pos = EQP_SLOT_POS.get(slot)
+            if pos is None:
+                continue
+            cx = x + EQP_CELL_X[pos[0]]
+            cy = y + EQP_CELL_Y[pos[1]]
+            cell = pygame.Rect(cx, cy, EQP_CELL_W, EQP_CELL_H)
+            item = inv.equipped.get(slot)
+            if item is not None:
+                icon = self._icon(item.id, item.kind)
+                if icon is not None:
+                    icon = _fit_icon(icon, 32)
+                    surface.blit(icon, (cx + (cell.w - icon.get_width()) // 2,
+                                        cy + (cell.h - icon.get_height()) // 2))
+                if cell.collidepoint(pygame.mouse.get_pos()):
+                    self._tooltip = self._item_tip(item)
+            self._slot_rects.append((cell, slot))
+
+        # 标题条右侧：攻/防/SP 摘要（浅色条 → 深字）
+        stat = fs.render(
+            f"攻 {player.attack_value()} 防 {player.defense_value()}",
+            True, (70, 72, 86))
+        surface.blit(stat, (x + EQP_W - stat.get_width() - 40, y + 6))
+
+    def _draw_equip_fallback(self, surface, player) -> None:
         inv = player.inventory
         f, fs = self.ui.font, self.ui.font_small
         inv_rect = self._inv_rect
+        vw = surface.get_width()
         w = 158
         h = inv_rect.h
-        x = inv_rect.right + 10
-        y = inv_rect.y
+        base = (inv_rect.right + 10, inv_rect.y)
+        x, y = self._resolve_pos("equip", base, (w, h), vw, surface.get_height())
         rect = pygame.Rect(x, y, w, h)
         self._equip_rect = rect
         _panel(surface, rect)
@@ -237,8 +485,8 @@ class Panels:
         stat = fs.render(
             f"攻 {player.attack_value()} 防 {player.defense_value()} "
             f"SP {player.skills.sp}", True, (150, 210, 160))
-        surface.blit(stat, (x + w - PAD - stat.get_width(), y + 9))
-
+        surface.blit(stat, (x + w - PAD - 34 - stat.get_width(), y + 9))
+        self._add_chrome(surface, "equip", x, y, w, 24)
         for i, slot in enumerate(SLOT_ORDER):
             cx = x + PAD + (i % 2) * 70
             cy = y + 32 + (i // 2) * (CELL + 2)
@@ -259,25 +507,84 @@ class Panels:
                     self._tooltip = self._item_tip(item)
             self._slot_rects.append((cell, slot))
 
-    # ── 技能窗口 ───────────────────────────────────────────────────
+    # ── 技能窗口（UIWindow/Skill 底板）─────────────────────────────
     def _draw_skills(self, surface, player) -> None:
         book = player.skills
         f, fs = self.ui.font, self.ui.font_small
         vw, vh = surface.get_width(), surface.get_height()
         sids = sorted(set(book.known()) | set(book.unlocked_for(player.level)),
                       key=lambda s: settings.SKILL_UNLOCK_LEVEL.get(s, 99))
+        bg = self._wz(SKL_BG)
+        base = (vw - 4 - SHT_W - 6 - SKL_W, vh - SKL_H - BAR_RESERVE - 2)
+        x, y = self._resolve_pos("skill", base, (SKL_W, SKL_H), vw, vh)
+        rect = pygame.Rect(x, y, SKL_W, SKL_H)
+        self._skill_rect = rect
+        if bg is None:
+            self._draw_skills_fallback(surface, player, sids)
+            return
+        surface.blit(bg, (x, y))
+        self._add_chrome(surface, "skill", x, y, SKL_W, 44)
+        # SP（浅色标题条右侧 → 深字）
+        sp = fs.render(f"SP {book.sp}", True,
+                       (150, 90, 20) if book.sp > 0 else (110, 112, 124))
+        surface.blit(sp, (x + 100, y + 7))
+
+        sp_btn = self._wz("Skill/BtSpUp/normal/0")
+
+        row_h = 48
+        top = y + 52
+        for i, sid in enumerate(sids[:4]):
+            d = book.defs.get(sid)
+            if d is None:
+                continue
+            lv = book.levels.get(sid, 0)
+            ry = top + i * row_h
+            icon = self.assets.skill_icon(sid)
+            if icon is not None:
+                surface.blit(pygame.transform.scale(icon, (40, 40)), (x + 8, ry + 4))
+            locked = lv == 0
+            color = (150, 154, 165) if locked else (58, 50, 44)
+            key = settings.SKILL_HOTKEYS.get(sid)
+            keytxt = f"[{key}] " if key and lv > 0 else ""
+            name_txt = f"{keytxt}{d.name} Lv{lv}/{d.max_level}"
+            surface.blit(fs.render(name_txt, True, color), (x + 52, ry + 2))
+            desc = d.desc if not locked else f"Lv{settings.SKILL_UNLOCK_LEVEL.get(sid)} 可學習"
+            surface.blit(fs.render(desc[:14], True, (110, 104, 96)),
+                         (x + 52, ry + 18))
+            if lv > 0:
+                dmg = d.stat(lv, "damage", 100)
+                mp = d.stat(lv, "mpCon", 0)
+                surface.blit(fs.render(f"{dmg}% MP{mp}", True, (52, 108, 60)),
+                             (x + 52, ry + 32))
+            # 升级按钮（原版 BtSpUp）
+            if book.sp > 0 and lv < d.max_level:
+                btn = pygame.Rect(x + SKL_W - 20, ry + 4,
+                                  sp_btn.get_width() if sp_btn else 12,
+                                  sp_btn.get_height() if sp_btn else 12)
+                if sp_btn is not None:
+                    surface.blit(sp_btn, btn.topleft)
+                else:
+                    pygame.draw.rect(surface, (70, 130, 90), btn, border_radius=4)
+                    surface.blit(f.render("+", True, (255, 255, 255)),
+                                 (btn.x + 3, btn.y))
+                self._skill_rows.append((btn.inflate(6, 6), sid))
+
+    def _draw_skills_fallback(self, surface, player, sids) -> None:
+        book = player.skills
+        f, fs = self.ui.font, self.ui.font_small
+        vw, vh = surface.get_width(), surface.get_height()
         w = 330
         h = 46 + max(1, len(sids)) * 52 + 8
-        x = vw - w - 12
-        y = vh - 150 - h
+        base = (vw - w - 12, vh - 150 - h)
+        x, y = self._resolve_pos("skill", base, (w, h), vw, vh)
         rect = pygame.Rect(x, y, w, h)
         self._skill_rect = rect
         _panel(surface, rect)
         surface.blit(f.render("技能欄 (K)", True, (235, 235, 240)), (x + PAD, y + 8))
         sp = f.render(f"SP {book.sp}", True,
                       (255, 220, 90) if book.sp > 0 else (140, 146, 160))
-        surface.blit(sp, (x + w - PAD - sp.get_width(), y + 8))
-
+        surface.blit(sp, (x + w - PAD - 34 - sp.get_width(), y + 8))
+        self._add_chrome(surface, "skill", x, y, w, 24)
         for i, sid in enumerate(sids):
             d = book.defs.get(sid)
             if d is None:
@@ -304,7 +611,6 @@ class Panels:
                 mp = d.stat(lv, "mpCon", 0)
                 info = fs.render(f"{dmg}% MP{mp}", True, (150, 210, 160))
                 surface.blit(info, (row.right - info.get_width() - 8, ry + 28))
-            # 升级按钮
             if book.sp > 0 and lv < d.max_level:
                 btn = pygame.Rect(row.right - 26, ry + 4, 22, 22)
                 pygame.draw.rect(surface, (70, 130, 90), btn, border_radius=4)
@@ -312,8 +618,50 @@ class Panels:
                              (btn.x + 7, btn.y + 1))
                 self._skill_rows.append((btn, sid))
 
-    # ── 快捷栏（HUD 常驻）──────────────────────────────────────────
+    # ── 快捷栏（UIWindow/ShortCut 竖条，常驻）──────────────────────
     def draw_quickslots(self, surface, player) -> None:
+        fs = self.ui.font_small
+        vw, vh = surface.get_width(), surface.get_height()
+        bg = self._wz(SHT_BG)
+        if bg is None:
+            self._draw_quickslots_fallback(surface, player)
+            return
+        x = vw - SHT_W - 4
+        y = vh - SHT_H - BAR_RESERVE - 2
+        surface.blit(bg, (x, y))
+        # 键位 1..n 依次放进 2 列 × 6 行格子里
+        hotkeys = sorted(settings.HOTKEY_SKILLS)
+        for n, hk in enumerate(hotkeys):
+            sid = settings.HOTKEY_SKILLS[hk]
+            d = player.skills.defs.get(sid)
+            if d is None or player.skills.levels.get(sid, 0) <= 0:
+                continue
+            col, row_idx = n % len(SHT_CELL_X), n // len(SHT_CELL_X)
+            if row_idx >= len(SHT_CELL_Y):
+                break
+            cx = x + SHT_CELL_X[col]
+            cy = y + SHT_CELL_Y[row_idx]
+            cell = pygame.Rect(cx, cy, SHT_CELL_W, SHT_CELL_H)
+            icon = self.assets.skill_icon(sid)
+            if icon is not None:
+                surface.blit(pygame.transform.scale(icon, (30, 30)),
+                             (cx + (cell.w - 30) // 2, cy + (cell.h - 30) // 2))
+            cd = player.skills.cooldowns.get(sid, 0.0)
+            total = settings.SKILL_COOLDOWN.get(sid, 0.8)
+            if cd > 0:
+                frac = max(0.0, min(1.0, cd / total))
+                cover_h = max(1, int(cell.h * frac))
+                shade = pygame.Surface((cell.w, cover_h), pygame.SRCALPHA)
+                shade.fill((10, 10, 14, 150))
+                surface.blit(shade, (cell.x, cell.bottom - cover_h))
+            kb = fs.render(str(hk), True, (255, 220, 90))
+            surface.blit(kb, (cell.x + 3, cell.y + 1))
+            lv = player.skills.levels[sid]
+            mp = fs.render(f"{d.stat(lv, 'mpCon', 0)}", True, (140, 180, 240))
+            surface.blit(mp, (cell.right - mp.get_width() - 2,
+                              cell.bottom - mp.get_height() - 1))
+
+    def _draw_quickslots_fallback(self, surface, player) -> None:
         fs = self.ui.font_small
         vw, vh = surface.get_width(), surface.get_height()
         y = vh - 146
@@ -331,7 +679,6 @@ class Panels:
             if icon is not None:
                 surface.blit(pygame.transform.scale(icon, (34, 34)),
                              (slot.x + 6, slot.y + 6))
-            # 冷却遮罩（自下而上消退）
             cd = player.skills.cooldowns.get(sid, 0.0)
             total = settings.SKILL_COOLDOWN.get(sid, 0.8)
             if cd > 0:
@@ -347,7 +694,7 @@ class Panels:
                               slot.bottom - mp.get_height() - 2))
             y -= slot.h + 8
 
-    # ── 提示框 ─────────────────────────────────────────────────────
+    # ── 提示框（ContextMenu 官方三段底）───────────────────────────
     def _item_tip(self, item) -> str:
         lines = [item.name]
         if item.kind == "equip":
@@ -381,18 +728,39 @@ class Panels:
         f = self.ui.font
         lines = self._tooltip.split("\n")
         w = max(f.size(lines[0])[0],
-                max((fs.size(l)[0] for l in lines[1:]), default=0)) + 16
-        h = 24 + (len(lines) - 1) * 16 + 6
+                max((fs.size(l)[0] for l in lines[1:]), default=0)) + 18
+        h = 26 + (len(lines) - 1) * 16 + 8
         x, y = mouse_pos[0] + 14, mouse_pos[1] + 14
         rect = pygame.Rect(x, y, w, h)
         if rect.right > surface.get_width():
             rect.right = surface.get_width()
         if rect.bottom > surface.get_height():
             rect.bottom = surface.get_height()
-        _panel(surface, rect, (120, 126, 140))
+        if not draw_menu_bg(surface, self.assets, rect):
+            _panel(surface, rect, (120, 126, 140))
         surface.blit(f.render(lines[0], True, (245, 220, 140)),
-                     (rect.x + 8, rect.y + 4))
-        ty = rect.y + 26
+                     (rect.x + 9, rect.y + 5))
+        ty = rect.y + 27
         for ln in lines[1:]:
-            surface.blit(fs.render(ln, True, (200, 206, 218)), (rect.x + 8, ty))
+            surface.blit(fs.render(ln, True, (215, 220, 230)), (rect.x + 9, ty))
             ty += 16
+
+
+def draw_menu_bg(surface, assets, rect: pygame.Rect) -> bool:
+    """UIWindow/ContextMenu t/c/s 三段深色官方底（Tooltip 同款）。"""
+    t = assets.ui_surface("UIWindow.img", "ContextMenu/t")
+    c = assets.ui_surface("UIWindow.img", "ContextMenu/c")
+    s = assets.ui_surface("UIWindow.img", "ContextMenu/s")
+    if not (t and c and s):
+        return False
+    W, H = rect.size
+    th, sh = t[0].get_height(), s[0].get_height()
+    top = t[0] if W == t[0].get_width() else pygame.transform.smoothscale(t[0], (W, th))
+    bot = s[0] if W == s[0].get_width() else pygame.transform.smoothscale(s[0], (W, sh))
+    surface.blit(top, rect.topleft)
+    surface.blit(bot, (rect.x, rect.bottom - sh))
+    mid_h = max(0, H - th - sh)
+    if mid_h > 0:
+        mid = pygame.transform.smoothscale(c[0], (W, mid_h))
+        surface.blit(mid, (rect.x, rect.y + th))
+    return True

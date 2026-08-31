@@ -39,6 +39,9 @@ class _Keys:
 class Game:
     def __init__(self):
         os.environ.setdefault("SDL_VIDEO_CENTERED", "1")
+        # macOS：默认情况下“聚焦窗口的第一次点击”会被系统吞掉（表现为
+        # 要点两下才响应）。打开 SDL 该 hint 后，点击聚焦与点击响应合一。
+        os.environ.setdefault("SDL_MOUSE_FOCUS_CLICKTHROUGH", "1")
         pygame.init()
         self.screen = pygame.display.set_mode(
             (settings.WINDOW_W, settings.WINDOW_H))
@@ -78,6 +81,7 @@ class Game:
 
         self.keys = _Keys()
         self.dead = False
+        self._talk_npc: Optional[NPC] = None
         self.spawn_grace = settings.SPAWN_GRACE
 
         self.audio.play_bgm()
@@ -85,7 +89,8 @@ class Game:
                                      "A/D(或←→) 移動  空格 跳躍  S+空格 下跳",
                                      "W(或↑) 爬繩/梯  J 攻擊  1/2 技能  F 喝藥",
                                      "I 道具欄  K 技能欄  Enter 對話  R 復活",
-                                     "（Enter/空格/Esc 關閉對話框）"])
+                                     "（對話不影響行動，Enter/Esc 或點擊氣球關閉；"
+                                     "窗口可點 × 關閉、拖標題欄移動）"])
 
     # ── 生成 ───────────────────────────────────────────────────────
     def _find_spawn(self):
@@ -115,22 +120,34 @@ class Game:
             if event.type == pygame.QUIT:
                 self.running = False
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                # 对话框模态期间不响应面板点击
-                if not self.ui.dialog_visible and not self.dead:
+                if not self.dead:
                     cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
                     cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
-                    self.panels.handle_click((cx, cy), self.player)
+                    if self.ui.dialog_hit((cx, cy)):
+                        # 点击气泡本体 → 关闭对话（面板照常可点）
+                        self.ui.hide_dialog()
+                        self._talk_npc = None
+                    else:
+                        self.panels.handle_mouse_down((cx, cy), self.player)
+            elif event.type == pygame.MOUSEMOTION:
+                if self.panels.is_dragging():
+                    cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
+                    cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
+                    self.panels.handle_mouse_motion((cx, cy))
+            elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                self.panels.handle_mouse_up()
             elif event.type == pygame.KEYDOWN:
                 if self.dead:
                     if event.key == pygame.K_r:
                         self.respawn()
                     continue
-                # 对话框打开时：Enter/空格/Esc 关闭（模态）
+                # 对话框非模态：Enter/空格/Esc 关闭本次按键；其余按键照常
                 if self.ui.dialog_visible:
                     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER,
                                      pygame.K_SPACE, pygame.K_ESCAPE):
                         self.ui.hide_dialog()
-                    continue
+                        self._talk_npc = None
+                        continue
                 if event.key == pygame.K_i:
                     self.panels.toggle_inventory()
                 elif event.key == pygame.K_k:
@@ -190,7 +207,7 @@ class Game:
                     pygame.Rect(int(self.player.x - 20), int(self.player.y - 40), 40, 80)):
                 self.ui.show_dialog(npc.name, ["你好，冒險者！", "小心東邊山丘上的怪物。",
                                                "攻擊按 J，擊敗怪物可獲得經驗與掉落物。"])
-                self.ui.dialog_visible = True
+                self._talk_npc = npc
                 return
 
     # ── 重生 ───────────────────────────────────────────────────────
@@ -217,6 +234,7 @@ class Game:
         self.spawn_grace = settings.SPAWN_GRACE
         self.ui.hide_death()
         self.ui.hide_dialog()
+        self._talk_npc = None
         self.player.hp = self.player.max_hp
         self.player.attacking = False
         self.player.hurt_timer = 0.0
@@ -232,10 +250,12 @@ class Game:
         if self.dead:
             return
 
-        # 模态对话框：暂停世界。既防止玩家在弹窗背后被咬/乱状态，
-        # 也保证关闭对话框后攻击等输入恢复正常节奏
-        if self.ui.dialog_visible:
-            return
+        # 对话框不再暂停世界；走远 / 切图自动收起
+        if self.ui.dialog_visible and self._talk_npc is not None:
+            r = self._talk_npc.rect()
+            if abs(self.player.x - r.centerx) > 140:
+                self.ui.hide_dialog()
+                self._talk_npc = None
 
         # 出生保护计时
         if self.spawn_grace > 0:

@@ -4,9 +4,9 @@
   仪表板，自带 "Lv." 凹槽）+ gauge/bar、gauge/gray、gauge/graduation 三段
   （HP / MP / EXP）。HP、MP 数值用 StatusBar/number 像素数字，EXP 用百分比。
   右侧浅色区补上 BtShop/BtMenu/BtShort/BtNPT 四个官方菜单按钮。
-· NPC 对话 / 系统提示：UIWindow/UtilDlgEx 内嵌白纸窗体（it/ic/is），
-  文字只落在白纸区内并自动换行，BtOK 按钮落在底部蓝色页脚。
-· 死亡界面：红色帷幕 + 同款窗体。
+· NPC 对话 / 系统提示：ChatBalloon/npc 官方黑半透明九宫格气泡（含底部尖尾），
+  即原版冒险岛 NPC 谈话窗体；NPC 名为金色首行，正文白色自动换行。
+· 死亡界面：红色帷幕 + UIWindow/UtilDlgEx 内嵌白纸窗体（原版系统公告窗）。
 · 地图名：半透明黑色圆角名牌（UI.wz 的 MiniMap/title 自带"小地圖"字样，
   拉伸会花，故不用）。
 中文文本仍用系统 CJK 字体渲染。
@@ -57,7 +57,10 @@ class UI:
         self.dialog_lines: List[str] = []
         self.dialog_visible = False
         self.death_visible = False
+        # 上一帧对话框（气泡）占位矩形，供鼠标点击命中判断
+        self.dialog_rect: Optional[pygame.Rect] = None
         self._plate_cache: dict = {}
+        self._balloon_cache: dict = {}
 
     # ── UI.wz 取图 ──────────────────────────────────────────────────
     def _img(self, img: str, path: str) -> Optional[pygame.Surface]:
@@ -72,6 +75,11 @@ class UI:
     def hide_dialog(self) -> None:
         self.dialog_visible = False
         self.dialog_lines = []
+        self.dialog_rect = None
+
+    def dialog_hit(self, pos) -> bool:
+        return (self.dialog_visible and self.dialog_rect is not None
+                and self.dialog_rect.collidepoint(pos))
 
     def show_death(self) -> None:
         self.death_visible = True
@@ -214,37 +222,118 @@ class UI:
         content_h = max(60, 40 + n_lines * DLG_LINE_H)
         return DLG_TOP_H + content_h + DLG_BOTTOM_H, content_h
 
+    # ── ChatBalloon/npc 九宫格黑气泡（原版 NPC 谈话窗体）───────────
+    def _balloon(self, w: int, h: int) -> Optional[pygame.Surface]:
+        key = (w, h)
+        hit = self._balloon_cache.get(key)
+        if hit is not None:
+            return hit
+        parts = {}
+        for name in ("nw", "n", "ne", "w", "c", "e", "sw", "s", "se"):
+            s = self._img("ChatBalloon.img", f"npc/{name}")
+            if s is None:
+                self._balloon_cache[key] = None
+                return None
+            parts[name] = s
+        cw = parts["nw"].get_width() + parts["ne"].get_width()
+        chh = parts["nw"].get_height() + parts["sw"].get_height()
+        surf = pygame.Surface((w, h), pygame.SRCALPHA)
+        inner_w = max(1, w - cw)
+        inner_h = max(1, h - chh)
+        surf.blit(parts["nw"], (0, 0))
+        surf.blit(parts["ne"], (w - parts["ne"].get_width(), 0))
+        surf.blit(parts["sw"], (0, h - parts["sw"].get_height()))
+        surf.blit(parts["se"], (w - parts["se"].get_width(),
+                                h - parts["se"].get_height()))
+        surf.blit(pygame.transform.smoothscale(parts["n"], (inner_w, parts["n"].get_height())),
+                  (parts["nw"].get_width(), 0))
+        surf.blit(pygame.transform.smoothscale(parts["s"], (inner_w, parts["s"].get_height())),
+                  (parts["sw"].get_width(), h - parts["s"].get_height()))
+        surf.blit(pygame.transform.smoothscale(parts["w"], (parts["w"].get_width(), inner_h)),
+                  (0, parts["nw"].get_height()))
+        surf.blit(pygame.transform.smoothscale(parts["e"], (parts["e"].get_width(), inner_h)),
+                  (w - parts["e"].get_width(), parts["ne"].get_height()))
+        surf.blit(pygame.transform.smoothscale(parts["c"], (inner_w, inner_h)),
+                  (parts["nw"].get_width(), parts["nw"].get_height()))
+        # 原版运行时把白色九宫格乘上 ChatBalloon/npc/clr = 0x80000000（半透黑）
+        surf.fill((0, 0, 0, 128), special_flags=pygame.BLEND_RGBA_MULT)
+        self._balloon_cache[key] = surf
+        return surf
+
+    def _balloon_tail(self) -> Optional[pygame.Surface]:
+        hit = self._balloon_cache.get("_tail")
+        if hit is not None or "_tail" in self._balloon_cache:
+            return hit
+        tail = self._img("ChatBalloon.img", "npc/arrow")
+        if tail is not None:
+            tail = tail.copy()
+            tail.fill((0, 0, 0, 128), special_flags=pygame.BLEND_RGBA_MULT)
+        self._balloon_cache["_tail"] = tail
+        return tail
+
+    def _status_bar_h(self) -> int:
+        bar = self._img("StatusBar.img", "base/backgrnd")
+        return bar.get_height() if bar is not None else 71
+
     # ── 对话框绘制 ─────────────────────────────────────────────────
     def draw_dialog(self, surface) -> None:
         if not self.dialog_visible or not self.dialog_lines:
             return
         title, *body = self.dialog_lines
+        vw, vh = surface.get_width(), surface.get_height()
+        bw = min(560, vw - 24)
+        text_w = bw - 32
         wrapped: List[str] = []
         for ln in body:
-            wrapped.extend(self._wrap(ln, DLG_TEXT_W, self.font))
+            wrapped.extend(self._wrap(ln, text_w, self.font))
 
+        pad_top, line_h, pad_bottom = 12, 19, 14
+        h = pad_top + 21 + len(wrapped) * line_h + pad_bottom
+        balloon = self._balloon(bw, h)
+        tail = self._balloon_tail()
+        tail_h = tail.get_height() if tail is not None else 0
+
+        x = (vw - bw) // 2
+        y = vh - self._status_bar_h() - tail_h - 4 - h
+        self.dialog_rect = pygame.Rect(x, y, bw, h + tail_h)
+
+        if balloon is None:      # 素材缺失退回白纸窗体
+            self._draw_dialog_fallback(surface, title, wrapped)
+            return
+        surface.blit(balloon, (x, y))
+        if tail is not None:
+            surface.blit(tail, (x + (bw - tail.get_width()) // 2, y + h - 1))
+
+        surface.blit(self.font_big.render(title, True, (255, 216, 96)),
+                     (x + 16, y + pad_top - 2))
+        ty = y + pad_top + 21
+        for ln in wrapped:
+            shadow = self.font.render(ln, True, (0, 0, 0))
+            text = self.font.render(ln, True, (240, 240, 245))
+            surface.blit(shadow, (x + 17, ty + 1))
+            surface.blit(text, (x + 16, ty))
+            ty += line_h
+        hint = self.font_small.render("Enter/Esc 或點擊關閉", True, (160, 165, 175))
+        surface.blit(hint, (x + bw - hint.get_width() - 14,
+                            y + h - hint.get_height() - 5))
+
+    def _draw_dialog_fallback(self, surface, title, wrapped) -> None:
         h, content_h = self._dlg_layout(len(wrapped))
         x = (surface.get_width() - DLG_W) // 2
         y = surface.get_height() - 71 - 8 - h
+        self.dialog_rect = pygame.Rect(x, y, DLG_W, h)
         self._dlg_frame(surface, x, y, DLG_W, content_h)
-
-        # 标题与正文都落在白纸区内
         head = self.font_big.render(title, True, (110, 68, 18))
         surface.blit(head, (x + DLG_TEXT_X, y + 7))
         ty = y + DLG_TOP_H + 8
         for ln in wrapped:
             surface.blit(self.font.render(ln, True, (60, 52, 44)), (x + DLG_TEXT_X, ty))
             ty += DLG_LINE_H
-
-        # 确认按钮（底部蓝色页脚内，靠右）
         btn = self._img("UIWindow.img", "UtilDlgEx/BtOK/normal/0")
         if btn is not None:
             bxp = x + DLG_W - btn.get_width() - 12
             byp = y + h - btn.get_height() - 26
             surface.blit(btn, (bxp, byp))
-            tip = self.font_small.render("確認", True, (60, 52, 44))
-            surface.blit(tip, (bxp + (btn.get_width() - tip.get_width()) // 2,
-                               byp + (btn.get_height() - tip.get_height()) // 2))
 
     # ── 死亡提示 ───────────────────────────────────────────────────
     def draw_death(self, surface) -> None:
