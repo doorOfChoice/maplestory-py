@@ -389,30 +389,37 @@ class Combat:
             self.numbers.append(DamageNumber(
                 player.x, player.y - 40, amount, "blue"))
 
+    def _take(self, drop: "DropItem", player) -> bool:
+        """把一件掉落物收进角色：金币入 Combat，物品入背包；放不下则失败。"""
+        if drop.is_meso:
+            drop.taken = True
+            self.meso += drop.meso
+            return True
+        if drop.item is not None:
+            item = make_item(drop.item.get("id"), self.assets,
+                             count=int(drop.item.get("count") or 1),
+                             name=drop.item.get("name"))
+            if player.inventory.add(item):
+                drop.taken = True
+                return True
+        return False
+
     def pickup(self, player) -> bool:
-        """玩家拾取掉落 → 金币入 Combat，物品入玩家背包。
+        """按 Z 手动拾取：收取人物周边已解锁的掉落物。
 
         拾起一件后，同层附近的金币/掉落物自动蹦向玩家（原版行为）。
         背包装备栏满时装备留在地上。
         """
-        pr = pygame.Rect(int(player.x - 16), int(player.y - 30), 32, 60)
         got = False
         for drop in self.drops:
             if drop.taken or drop._age < drop.pickup_lock:
                 continue
-            if not pr.colliderect(drop.rect()):
+            if abs(drop.x - player.x) > settings.PICKUP_RANGE:
                 continue
-            if drop.is_meso:
-                drop.taken = True
-                self.meso += drop.meso
+            if abs(drop.y - player.y) > 30.0:
+                continue
+            if self._take(drop, player):
                 got = True
-            elif drop.item is not None:
-                item = make_item(drop.item.get("id"), self.assets,
-                                 count=int(drop.item.get("count") or 1),
-                                 name=drop.item.get("name"))
-                if player.inventory.add(item):
-                    drop.taken = True
-                    got = True
         if got:
             # 原版行为：拾起一件后，同层附近的金币/掉落物自动蹦向玩家
             feet = player.y + settings.FEET_OFFSET
@@ -424,21 +431,37 @@ class Combat:
         self.drops = [d for d in self.drops if not d.taken]
         return got
 
+    def collect_attracted(self, player) -> bool:
+        """吸附中的掉落物飞到身上即自动收取（无需再按 Z）。"""
+        pr = pygame.Rect(int(player.x - 16), int(player.y - 30), 32, 60)
+        got = False
+        for d in self.drops:
+            if d.taken or not d.attracted:
+                continue
+            if pr.colliderect(d.rect()):
+                if self._take(d, player):
+                    got = True
+        self.drops = [d for d in self.drops if not d.taken]
+        return got
+
     def drop_player_item(self, player, item) -> DropItem:
-        """玩家从背包扔出：向侧方抛出、落到脚下平台；带拾取锁避免瞬间捡回。"""
+        """玩家从背包扔出：从人物中心竖直上抛、自由落体回脚下平台（原版轨迹）。
+
+        带拾取锁避免瞬间捡回；拾取需按 Z 手动触发。
+        """
         feet = player.y + settings.FEET_OFFSET
         ground = self._surface_y(player.x, feet)
-        side = random.choice((-1, 1))
-        d = DropItem(player.x + side * 10.0, feet - 24.0,
+        d = DropItem(player.x, player.y,
                      item={"id": item.id, "name": item.name, "count": item.count},
                      ground_y=ground, assets=self.assets,
                      lifetime=settings.DROP_PLAYER_LIFETIME, pickup_lock=0.6)
-        d.vx = side * random.uniform(80.0, 140.0)
-        d.vy = -180.0
+        d.vx = 0.0
+        d.vy = settings.DROP_THROW_SPEED
         self.drops.append(d)
         return d
 
-    def update(self, dt: float, player=None) -> None:
+    def update(self, dt: float, player=None) -> bool:
+        """推进战斗实体；吸附中的掉落物飞到身上即自动收取，返回是否有收取。"""
         self.numbers = [n for n in self.numbers if n.update(dt)]
         for e in self.effects:
             e.update(dt)
@@ -453,6 +476,7 @@ class Combat:
                     d.vy = settings.PICKUP_ATTRACT_HOP
             d.update(dt)
         self.drops = [d for d in self.drops if d.life > 0 and not d.taken]
+        return self.collect_attracted(player) if player is not None else False
 
     def draw(self, surface: pygame.Surface, camera) -> None:
         for drop in self.drops:

@@ -189,8 +189,8 @@ class Game:
                 "（对话不影响行动，Enter/Esc 或点击关闭）"])
         else:
             self.ui.show_dialog("欢迎", ["冒险岛 v113 · 弓箭手村东部小山",
-                                         "A/D(或←→) 移动  空格 跳跃  S+空格 下跳",
-                                         "W(或↑) 爬绳/梯  J 攻击  数字键 技能  F 喝药",
+                                          "←→ 移动  空格 跳跃  ↓+空格 下跳  ↑ 爬绳/梯",
+                                          "A 攻击  Z 拾取  数字键 技能  F 喝药",
                                          "I 道具栏  K 技能栏  B 状态  Q 任务日志  Enter 对话  R 复活",
                                          "背包满了？双击道具使用/穿戴，把它拖出背包窗口即可扔在地上"
                                          "（已穿装备也能从纸娃娃拖出扔掉）。",
@@ -306,9 +306,6 @@ class Game:
                         self.audio.play("PickUpItem", 0.4)
                 elif pygame.K_1 <= event.key <= pygame.K_9:
                     self._cast_skill(event.key - pygame.K_1 + 1)
-                elif event.key == pygame.K_w:
-                    # W 只用于上绳/梯（长按逻辑在 Player.update 中处理），不触发跳跃
-                    pass
                 elif event.key in (pygame.K_SPACE, pygame.K_UP):
                     if (event.key == pygame.K_UP and not self.keys.down
                             and self._portal_at_feet() is not None):
@@ -326,9 +323,11 @@ class Game:
                         if self.player.on_ground:
                             self.audio.play("Jump", 0.5)
                         self.player.jump()
-                elif event.key == pygame.K_j:
+                elif event.key == pygame.K_z:
+                    self._try_pickup()
+                elif event.key == pygame.K_a:
                     self.player.start_attack()
-                elif event.key in (pygame.K_DOWN, pygame.K_s) and self.keys.jump:
+                elif event.key == pygame.K_DOWN and self.keys.jump:
                     self.player.drop_through(self.physics)
                 elif event.key == pygame.K_b:
                     self.panels.toggle_stat()
@@ -339,19 +338,26 @@ class Game:
         if self._loading:
             return
         pressed = pygame.key.get_pressed()
-        # WASD 与方向键并存
-        self.keys.left = bool(pressed[pygame.K_LEFT] or pressed[pygame.K_a])
-        self.keys.right = bool(pressed[pygame.K_RIGHT] or pressed[pygame.K_d])
-        self.keys.up = bool(pressed[pygame.K_UP] or pressed[pygame.K_w])
-        self.keys.down = bool(pressed[pygame.K_DOWN] or pressed[pygame.K_s])
-        self.keys.attack = bool(pressed[pygame.K_j])
+        # 移动只用方向键；A 为攻击
+        self.keys.left = bool(pressed[pygame.K_LEFT])
+        self.keys.right = bool(pressed[pygame.K_RIGHT])
+        self.keys.up = bool(pressed[pygame.K_UP])
+        self.keys.down = bool(pressed[pygame.K_DOWN])
+        self.keys.attack = bool(pressed[pygame.K_a])
         self.keys.jump = bool(pressed[pygame.K_SPACE])
 
-        # 兜底：弹窗瞬间按住的 J 等按键事件会被模态分支吞掉，
+        # 兜底：弹窗瞬间按住的 A 等按键事件会被模态分支吞掉，
         # 用持续按键状态补触发攻击（按下即生效，无需等松开重按）
         if (self.keys.attack and not self.ui.dialog_visible
                 and not self.dead and not self.player.attacking):
             self.player.start_attack()
+
+    def _try_pickup(self) -> bool:
+        """Z 键手动拾取人物周边掉落物；有收获则播放音效。"""
+        if self.combat.pickup(self.player):
+            self.audio.play("PickUpItem", 0.5)
+            return True
+        return False
 
     def _cast_skill(self, hotkey: int) -> None:
         """按数字快捷键施放技能（读职业动态快捷键表）。成功则播放施放特效。"""
@@ -794,9 +800,7 @@ class Game:
         for npc in self.npcs:
             npc.update(dt)
 
-        # 拾取
-        if self.combat.pickup(self.player):
-            self.audio.play("PickUpItem", 0.5)
+        # 拾取：普通掉落需按 Z 手动拾取（见 _try_pickup）；吸附中的在 combat.update 内自动收取
 
         # 死亡检测
         if self.player.hp <= 0:
@@ -804,7 +808,8 @@ class Game:
             self.ui.show_death()
             self.audio.play("GameIn", 0.4)
 
-        self.combat.update(dt, self.player)
+        if self.combat.update(dt, self.player):
+            self.audio.play("PickUpItem", 0.5)
         self.camera.center_on(self.player.x, self.player.y)
 
     # ── 绘制 ───────────────────────────────────────────────────────

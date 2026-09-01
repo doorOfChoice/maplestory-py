@@ -14,9 +14,8 @@ def test_attracted_drop_reaches_player_fast():
     c.drops.append(d)
     player = SimpleNamespace(x=0.0, y=-20.0)
     picked = False
-    for _ in range(45):       # 0.75s 内应到位
-        c.update(1 / 60, player)
-        if c.pickup(player):
+    for _ in range(45):       # 0.75s 内应到位（吸附物由 update 自动收取）
+        if c.update(1 / 60, player):
             picked = True
             break
     assert picked
