@@ -87,7 +87,7 @@ class StoragePanel:
             return False
         entries = self._bag_entries(player)
         max_scroll = max(0, len(entries) - self._vis_rows())
-        self._scroll = max(0, min(max_scroll, self._scroll - amount))
+        self._scroll = max(0, min(max_scroll, self._scroll + amount))
         return True
 
     def _take_to_bag(self, player, index: int) -> None:

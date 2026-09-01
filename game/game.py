@@ -198,10 +198,11 @@ class Game:
             self.ui.show_dialog("欢迎", ["冒险岛 v113 · 弓箭手村东部小山",
                                           "←→ 移动  空格 跳跃  ↓+空格 下跳  ↑ 爬绳/梯",
                                           "A 攻击  Z 拾取  数字键 技能  F 喝药",
-                                         "I 道具栏  K 技能栏  B 状态  Q 任务日志  Enter 对话  R 复活",
+                                          "I 道具栏  K 技能栏  B 状态  Q 任务日志  M 小地图",
+                                          "Enter 对话  R 复活",
                                          "背包满了？双击道具使用/穿戴，把它拖出背包窗口即可扔在地上"
                                          "（已穿装备也能从纸娃娃拖出扔掉）。",
-                                         "新手练到 Lv10 后，找出生点旁的赫麗娜转职弓箭手；"
+                                          "新手练到 Lv10 后，找出生点旁的赫丽娜转职弓箭手；"
                                          "走到发光传送门前按 ↑ 可切换地图。"
                                          "（对话不影响行动，Enter/Esc 或点击关闭）"])
 
@@ -218,7 +219,7 @@ class Game:
         self._respawn_queue = []      # [(剩余秒, life_data)]：切图/重生时清空
         self.npcs = [NPC(self.assets, d, i)
                      for i, d in enumerate(self._life_npcs)]
-        # 导师注入：原版赫麗娜在 100000201（不可达），在出生图额外生成一个实例
+        # 导师注入：原版赫丽娜在 100000201（不可达），在出生图额外生成一个实例
         if self.assets.map_id == settings.TRAINER_SPAWN_MAP:
             self.npcs.append(NPC(self.assets, {
                 "id": settings.BOWMAN_TRAINER_NPC,
@@ -277,6 +278,8 @@ class Game:
                         self.shop_panel.handle_wheel((cx, cy), amount, self.player)
                     elif self.storage_panel.visible:
                         self.storage_panel.handle_wheel((cx, cy), amount, self.player)
+                    elif self.panels.handle_wheel((cx, cy), amount, self.player):
+                        pass   # 背包 / 技能窗滚轮，已消费
             elif event.type == pygame.MOUSEMOTION:
                 if self.panels.is_dragging():
                     cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
@@ -297,13 +300,20 @@ class Game:
                     if event.key == pygame.K_r:
                         self.respawn()
                     continue
-                # 任务对话框：Enter/Esc 视为 OK（有 yes/no 时视为拒绝/关闭）
+                # 任务对话框：Enter/空格 = 确认（yes），Esc = 拒绝/关闭；
+                # 只有 yes/no 阶段拦截，其余按键（移动/面板开关）照常。
                 if self.ui.quest_visible:
-                    if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER,
-                                     pygame.K_SPACE, pygame.K_ESCAPE):
+                    qkey = None
+                    if event.key == pygame.K_ESCAPE:
+                        qkey = "close"
+                    elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER,
+                                       pygame.K_SPACE):
+                        qkey = "confirm"
+                    if qkey is not None:
                         if self._quest_flow is not None \
-                                and self._quest_flow["stage"] in ("offer", "complete"):
-                            self._quest_button("no")
+                                and self._quest_flow["stage"] in ("offer", "complete", "advance"):
+                            self._quest_button(
+                                "no" if qkey == "close" else "yes")
                         else:
                             self.ui.hide_quest()
                             self._quest_flow = None
@@ -576,7 +586,7 @@ class Game:
             cur = q.item_progress(self.player, qid, iid)
             lines.append(f"收集 {self.assets.item_name(str(iid)) or f'#{iid}'}  {cur}/{count}")
         if not lines and d.desc1:
-            lines.append(d.desc1)
+            lines.append(self._qmark(d.desc1))
         if d.reward_exp:
             lines.append(f"奖励：经验 {d.reward_exp}")
         if d.reward_money:

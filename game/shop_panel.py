@@ -139,7 +139,7 @@ class ShopPanel:
             return False
         entries = self._bag_entries(player)
         max_scroll = max(0, len(entries) - self._vis_rows())
-        self._scroll = max(0, min(max_scroll, self._scroll - amount))
+        self._scroll = max(0, min(max_scroll, self._scroll + amount))
         return True
 
     def _do_buy(self, player, combat) -> None:

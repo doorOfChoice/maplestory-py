@@ -25,6 +25,7 @@ import pygame
 from . import settings
 from .inventory import SLOT_ORDER, Item, islot_to_slot
 from .jobs import JOBS
+from .quests import render_markup
 from .scrolls import SCROLLS, apply_scroll, is_scroll_id
 from .stats import STAT_LABELS, wear_block
 
@@ -67,6 +68,8 @@ EQP_SLOT_POS = {                                 # slot → (col, row)
 # 技能：175×289；快捷栏：93×244（2 列 × 6 行）
 SKL_BG = "Skill/backgrnd"
 SKL_W, SKL_H = 175, 289
+SKL_ROW_H = 40           # 技能列表每行高度
+SKL_ROWS = 6             # 技能窗一屏可见行数（(SKL_H-49)//SKL_ROW_H）
 SHT_BG = "ShortCut/backgrnd"
 SHT_W, SHT_H = 93, 244
 SHT_CELL_X = [4, 48]
@@ -137,6 +140,8 @@ class Panels:
         self._slot_rects: List[tuple] = []   # (Rect, slot)
         self._skill_rows: List[tuple] = []   # (Rect, skill_id)
         self._tab_rects: List[tuple] = []    # (Rect, tab)
+        self._inv_scroll: dict = {}          # tab → 背包当前页首格索引（滚轮滚动）
+        self._skill_scroll = 0               # 技能窗当前首行索引（滚轮滚动）
         # ── 拖拽 / 关闭 ─────────────────────────────────────────────
         self._win_pos: dict = {}             # key → (x, y) 用户拖动后的绝对位置
         self._win_size: dict = {}            # key → (w, h) 当前帧窗口尺寸
@@ -373,6 +378,39 @@ class Panels:
                 return True
         return False
 
+    def handle_wheel(self, pos: Tuple[int, int], amount: int, player) -> bool:
+        """滚轮滚动背包 / 技能窗口（仓库/商店各自处理，不在此列）。
+
+        每格 amount 为 ±1（按钮 4=上滚，5=下滚）。滚动限幅到首末可见范围，
+        背包按一整行（INV_COLS 格）移动，技能窗按一行移动。
+        返回 True 表示事件已消费（避免穿透到下层窗口）。
+        """
+        if self.inv_visible and self._inv_rect.collidepoint(pos):
+            tab = self.inv_tab
+            items = self._inv_items(player)
+            max_scroll = max(0, len(items) - INV_SLOTS)
+            cur = self._inv_scroll.get(tab, 0)
+            self._inv_scroll[tab] = max(0, min(max_scroll, cur + amount * INV_COLS))
+            return True
+        if self.skill_visible and self._skill_rect.collidepoint(pos):
+            n = len(player.skills.learnable())
+            vis = SKL_ROWS
+            max_scroll = max(0, n - vis)
+            self._skill_scroll = max(0, min(max_scroll,
+                                            self._skill_scroll + amount))
+            return True
+        return False
+
+    def _inv_items(self, player) -> list:
+        """当前页签对应的背包物品列表（与绘制/点击使用同一顺序）。"""
+        inv = player.inventory
+        tab = self.inv_tab
+        if tab == "consume":
+            return list(inv.consumes.values())
+        if tab == "etc":
+            return list(inv.etcs.values())
+        return list(inv.equips)
+
     def _click_cell(self, player, tab: str, idx: int) -> None:
         inv = player.inventory
         if tab == "consume":
@@ -531,16 +569,21 @@ class Panels:
                 tx += 31
 
         # 标题行右侧：当前页数量（浅色标题条 → 深字）
-        cap_txt = fs.render(f"{len(items)}/{INV_SLOTS}", True, (70, 72, 86))
+        cap_txt = fs.render(str(len(items)) + "项", True, (70, 72, 86))
         surface.blit(cap_txt, (x + INV_W - cap_txt.get_width() - 40, y + 6))
 
         # 物品格（底图已含格子，只叠图标 + 数量）
+        # 超过 24 种物品时按滚轮滚动：scroll 为当前页首格索引（对齐每行 INV_COLS 格）
+        max_scroll = max(0, len(items) - INV_SLOTS)
+        base = self._inv_scroll.get(tab, 0)
+        base = max(0, min(max_scroll, base))
         for i in range(INV_SLOTS):
+            idx = base + i
             cx = x + INV_CELL_X[i % INV_COLS]
             cy = y + INV_CELL_Y[i // INV_COLS]
             cell = pygame.Rect(cx, cy, INV_CELL_W, INV_CELL_H)
-            if i < len(items):
-                item = items[i]
+            if idx < len(items):
+                item = items[idx]
                 icon = self._icon(item.id, item.kind)
                 if icon is not None:
                     icon = _fit_icon(icon, 32)
@@ -555,7 +598,7 @@ class Panels:
                                        cell.bottom - cnt.get_height()))
                 if cell.collidepoint(pygame.mouse.get_pos()):
                     self._tooltip = self._item_tip(item)
-            self._cell_rects.append((cell, tab, i))
+            self._cell_rects.append((cell, tab, idx))
 
         # 底部页脚：上行 = 金币图标 + 持有数（白底板 → 深棕字）
         coin = self._wz("Item/BtCoin/normal/0")
@@ -594,13 +637,17 @@ class Panels:
             surface.blit(fs.render(label, True, (255, 255, 255)),
                          (tr.x + (tr.w - fs.size(label)[0]) // 2, tr.y + 3))
             self._tab_rects.append((tr, key))
+        # 超 24 种时滚动：scroll 为当前页首格索引（沿用 INV_SLOTS 一屏容量）
+        max_scroll = max(0, len(items) - INV_SLOTS)
+        local_scroll = max(0, min(max_scroll, self._inv_scroll.get(tab, 0)))
         for i in range(cols * rows):
+            idx = local_scroll + i
             cx = x + PAD + (i % cols) * CELL
             cy = y + 52 + (i // cols) * CELL
             cell = pygame.Rect(cx, cy, CELL - 4, CELL - 4)
             pygame.draw.rect(surface, (40, 46, 60), cell, border_radius=4)
-            if i < len(items):
-                item = items[i]
+            if idx < len(items):
+                item = items[idx]
                 icon = self._icon(item.id, item.kind)
                 if icon is not None:
                     icon = _fit_icon(icon, 32)
@@ -612,7 +659,7 @@ class Panels:
                                        cell.bottom - cnt.get_height() + 1))
                 if cell.collidepoint(pygame.mouse.get_pos()):
                     self._tooltip = self._item_tip(item)
-            self._cell_rects.append((cell, tab, i))
+            self._cell_rects.append((cell, tab, idx))
 
     # ── 装备栏窗口（UIWindow/Equip 纸娃娃底板）─────────────────────
     def _draw_equip(self, surface, player) -> None:
@@ -741,13 +788,16 @@ class Panels:
 
         # 技能列表：逐行使用 Skill/skill0(已知)/skill1(未学) 原版行背景，
         # 全宽铺开以盖住 backgrnd 里烤死的深色高亮条，避免文字与底色重叠。
-        row_h = 40
+        # 技能超过 SKL_ROWS 行时按滚轮滚动：scroll 为当前首行索引。
+        row_h = SKL_ROW_H
         row_w = SKL_W - 12
         row_x = x + 6
         row_img_h = 38
         top = y + 49
         mouse = pygame.mouse.get_pos()
-        for i, sid in enumerate(sids[:6]):
+        max_rows = max(0, len(sids) - SKL_ROWS)
+        start = max(0, min(max_rows, self._skill_scroll))
+        for i, sid in enumerate(sids[start:start + SKL_ROWS]):
             d = book.defs.get(sid)
             if d is None:
                 continue
@@ -793,8 +843,10 @@ class Panels:
         book = player.skills
         f, fs = self.ui.font, self.ui.font_small
         vw, vh = surface.get_width(), surface.get_height()
+        sp_h = 52
+        vis_rows = max(1, min(len(sids), (vh - 150 - 58) // sp_h))
         w = 330
-        h = 46 + max(1, len(sids)) * 52 + 8
+        h = 46 + vis_rows * sp_h + 8
         base = (vw - w - 12, vh - 150 - h)
         x, y = self._resolve_pos("skill", base, (w, h), vw, vh)
         rect = pygame.Rect(x, y, w, h)
@@ -806,12 +858,14 @@ class Panels:
         surface.blit(sp, (x + w - PAD - 34 - sp.get_width(), y + 8))
         self._add_chrome(surface, "skill", x, y, w, 24)
         mouse = pygame.mouse.get_pos()
-        for i, sid in enumerate(sids):
+        max_rows = max(0, len(sids) - vis_rows)
+        start = max(0, min(max_rows, self._skill_scroll))
+        for i, sid in enumerate(sids[start:start + vis_rows]):
             d = book.defs.get(sid)
             if d is None:
                 continue
             lv = book.levels.get(sid, 0)
-            ry = y + 40 + i * 52
+            ry = y + 40 + i * sp_h
             row = pygame.Rect(x + PAD, ry, w - PAD * 2, 48)
             pygame.draw.rect(surface, (40, 46, 60), row, border_radius=4)
             icon = self.assets.skill_icon(sid)
@@ -842,6 +896,18 @@ class Panels:
                 self._skill_rows.append((btn, sid))
 
     # ── 任务日志窗口（UIWindow/Quest 底板）────────────────────────
+    def _wrap_text(self, text: str, width: int, font) -> List[str]:
+        """脱标签后按宽度折行（允许 \\n 分段），确保不溢出面板边界。"""
+        cleaned = render_markup(text,
+                                map_name=self.assets.map_name_of,
+                                npc_name=self.assets.npc_name,
+                                item_name=self.assets.item_name,
+                                mob_name=self.assets.mob_name_of)
+        lines: List[str] = []
+        for seg in cleaned.split("\n"):
+            lines.extend(self.ui._wrap(seg, width, font))
+        return lines or [""]
+
     def _draw_questlog(self, surface, player) -> None:
         f, fs = self.ui.font, self.ui.font_small
         vw, vh = surface.get_width(), surface.get_height()
@@ -873,16 +939,19 @@ class Panels:
             return
 
         ty = y + 40
+        # 面板可用文字宽度（左右留白，右端避开滚动条位）
+        quest_wrap = QST_W - 18 - 30
         for qid in active:
             d = quests.defs.get(qid)
             if d is None:
                 continue
+            # 任务名（含标记，先脱标签再折行）
+            name_lines = self._wrap_text(d.name, quest_wrap, fs)
             if ty + QST_ROW_H * 3 > y + QST_H - 10:
                 break
-            # 任务名
-            name = fs.render(d.name, True, (60, 52, 44))
-            surface.blit(name, (x + 18, ty))
-            ty += 20
+            for ln in name_lines:
+                surface.blit(fs.render(ln, True, (60, 52, 44)), (x + 18, ty))
+                ty += 20
             # 目标 NPC（优先交付 NPC，无则用接取 NPC）
             npc_id = d.end_npc if d.end_npc is not None else d.start_npc
             if npc_id is not None:
@@ -893,11 +962,12 @@ class Panels:
             # 目标行
             if self._quest_goal_lines is not None:
                 for line in self._quest_goal_lines(qid):
-                    if ty > y + QST_H - 12:
-                        break
-                    surface.blit(fs.render(line, True, (90, 82, 70)),
-                                 (x + 30, ty))
-                    ty += 16
+                    for ln in self._wrap_text(line, quest_wrap, fs):
+                        if ty > y + QST_H - 12:
+                            break
+                        surface.blit(fs.render(ln, True, (90, 82, 70)),
+                                     (x + 30, ty))
+                        ty += 16
             ty += 8
 
     # ── 状态窗（UIWindow/Stat/backgrnd，B 键）────────────────────────

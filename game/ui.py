@@ -264,7 +264,7 @@ class UI:
             self.font_small,
             "I 道具栏  K 技能栏  B 状态  F 喝药  数字键 技能  A 攻击  Z 拾取", (255, 255, 255))
         plate = pygame.Surface((hint.get_width() + 16, 20), pygame.SRCALPHA)
-        pygame.draw.rect(plate, (0, 0, 0, 120), (0, 0, plate.get_width(), 20),
+        pygame.draw.rect(plate, (0, 0, 0, 190), (0, 0, plate.get_width(), 20),
                          border_radius=6)
         plate.blit(hint, (8, 3))
         surface.blit(plate, (8, 8))
