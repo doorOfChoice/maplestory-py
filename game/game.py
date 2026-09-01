@@ -20,7 +20,7 @@ from .physics import Physics
 from .camera import Camera
 from .audio import Audio
 from .player import Player
-from .monster import Monster
+from .monster import Monster, RespawnQueue
 from .npc import NPC
 from .combat import Combat
 from .combat import DamageNumber
@@ -154,6 +154,7 @@ class Game:
             self.monsters: List[Monster] = []
             self.npcs: List[NPC] = []
             self.hits: List[dict] = []
+            self._respawns = RespawnQueue(settings.MOB_RESPAWN_DELAY)
             self._life_mobs = [d for d in self.assets.life if d["type"] == "mob"]
             self._life_npcs = [d for d in self.assets.life if d["type"] == "npc"]
             self._spawn_life()
@@ -187,6 +188,8 @@ class Game:
                                          "A/D(或←→) 移动  空格 跳跃  S+空格 下跳",
                                          "W(或↑) 爬绳/梯  J 攻击  数字键 技能  F 喝药",
                                          "I 道具栏  K 技能栏  B 状态  Q 任务日志  Enter 对话  R 复活",
+                                         "背包满了？双击道具使用/穿戴，把它拖出背包窗口即可扔在地上"
+                                         "（已穿装备也能从纸娃娃拖出扔掉）。",
                                          "新手练到 Lv10 后，找出生点旁的赫麗娜转职弓箭手；"
                                          "走到发光传送门前按 ↑ 可切换地图。"
                                          "（对话不影响行动，Enter/Esc 或点击关闭）"])
@@ -203,6 +206,8 @@ class Game:
                          for i, d in enumerate(self._life_mobs)]
         self.npcs = [NPC(self.assets, d, i)
                      for i, d in enumerate(self._life_npcs)]
+        if hasattr(self, "_respawns"):
+            self._respawns.clear()
         # 导师注入：原版赫麗娜在 100000201（不可达），在出生图额外生成一个实例
         if self.assets.map_id == settings.TRAINER_SPAWN_MAP:
             self.npcs.append(NPC(self.assets, {
@@ -239,7 +244,15 @@ class Game:
                     cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
                     self.panels.handle_mouse_motion((cx, cy))
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-                self.panels.handle_mouse_up()
+                if not self.dead:
+                    cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
+                    cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
+                    dropped = self.panels.handle_mouse_up((cx, cy), self.player)
+                    if dropped is not None:
+                        self.combat.drop_player_item(self.player, dropped)
+                        self.audio.play("PickUpItem", 0.3)
+                else:
+                    self.panels.handle_mouse_up()
             elif event.type == pygame.KEYDOWN:
                 if self.dead:
                     if event.key == pygame.K_r:
@@ -716,9 +729,17 @@ class Game:
         for mob in self.monsters:
             mob.update(dt, self.player.x, self.player.y, self.hits, self.audio,
                        no_aggro=no_aggro)
-        # 移除已消失的怪物
-        self.monsters = [m for m in self.monsters
-                         if not (m.dead and m.remove_after <= 0)]
+        # 移除已消失的怪物；死亡的排入重生队列，到期按原出生点重建
+        alive: List[Monster] = []
+        for m in self.monsters:
+            if m.dead and m.remove_after <= 0:
+                if 0 <= m.index < len(self._life_mobs):
+                    self._respawns.schedule(m.index, self._life_mobs[m.index])
+            else:
+                alive.append(m)
+        self.monsters = alive
+        for i, data in self._respawns.tick(dt):
+            self.monsters.append(Monster(self.assets, data, i, self.physics))
         self.combat.apply_mob_hits(self.player, self.hits)
 
         # 飞行中的箭（在怪物移动之后结算，命中数受 mobCount 限制）

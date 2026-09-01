@@ -11,8 +11,8 @@
 · Tooltip：UIWindow/ContextMenu 三段（t/c/s）官方深色底。
 
 任何素材缺失时自动退回旧版自绘面板，保证不闪退。
-点击行为与数据层保持不变：消耗页点击喝药、装备页点击穿戴、装备栏点击脱下、
-技能窗点击 BtSpUp 消耗 SP 升级。
+交互：物品**双击**使用/穿戴/脱下（0.35s 内两次点击），**拖出来源窗口**扔在地上
+（冒险岛同款，堆叠整扔、已穿装备可从纸娃娃拖出）；页签/加点/技能升级仍为单击。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from typing import List, Optional, Tuple
 import pygame
 
 from . import settings
-from .inventory import SLOT_ORDER, islot_to_slot
+from .inventory import SLOT_ORDER, Item, islot_to_slot
 from .jobs import JOBS
 from .stats import STAT_LABELS, wear_block
 
@@ -35,6 +35,8 @@ SLOT_NAMES = {
 
 CELL = 38          # 旧自绘面板用（fallback）
 PAD = 10
+DRAG_THRESHOLD = 6.0     # 按下后移动超过该像素才判定为「拖出扔东西」
+DOUBLE_CLICK_TIME = 0.35  # 双击使用/穿戴的两次点击最大间隔（秒）
 
 # ── 原版窗口几何（由 wz/UI.wz 底图逐像素实测）─────────────────────
 # 背包：175×307，4 列 × 6 行 = 24 格（原版老式背包），格 36×34
@@ -137,6 +139,8 @@ class Panels:
         self._win_size: dict = {}            # key → (w, h) 当前帧窗口尺寸
         self._view_size = (settings.VIEW_W, settings.VIEW_H)
         self._drag: Optional[Tuple[str, Tuple[int, int]]] = None  # (key, 抓取偏移)
+        self._item_drag: Optional[dict] = None   # 拖出扔东西 {source, item, start, pos, active}
+        self._last_click: Optional[Tuple[tuple, float]] = None   # (来源, 时刻) 双击检测
         self._close_rects: List[tuple] = []  # (Rect, key)
         self._title_rects: List[tuple] = []  # (Rect, key) 标题条=拖拽热区
 
@@ -149,8 +153,9 @@ class Panels:
     def toggle_inventory(self) -> None:
         self.inv_visible = not self.inv_visible
         self.equip_visible = self.inv_visible
-        if not self.inv_visible and self._drag and self._drag[0] in ("inv", "equip"):
+        if not self.inv_visible:
             self._drag = None
+            self._item_drag = None
 
     def toggle_skill(self) -> None:
         self.skill_visible = not self.skill_visible
@@ -181,6 +186,8 @@ class Panels:
             self.stat_visible = False
         if self._drag and self._drag[0] == key:
             self._drag = None
+        if key in ("inv", "equip"):
+            self._item_drag = None
 
     # ── 窗口定位（默认锚点 + 用户拖拽偏移）─────────────────────────
     def _resolve_pos(self, key: str, base: Tuple[int, int],
@@ -217,33 +224,111 @@ class Panels:
 
     # ── 鼠标：按下 / 拖动 / 松开 ───────────────────────────────────
     def is_dragging(self) -> bool:
-        return self._drag is not None
+        return self._drag is not None or self._item_drag is not None
+
+    def _item_at(self, pos: Tuple[int, int], player) -> Optional[Tuple[tuple, Item]]:
+        """命中检测：返回 ((来源, ...), Item)；空格子 / 空栏位返回 None。"""
+        inv = player.inventory
+        if self.inv_visible:
+            for rect, tab, idx in self._cell_rects:
+                if rect.collidepoint(pos):
+                    items = (list(inv.consumes.values()) if tab == "consume"
+                             else list(inv.etcs.values()) if tab == "etc"
+                             else list(inv.equips))
+                    if idx < len(items):
+                        return (("cell", tab, idx), items[idx])
+                    return None
+        if self.equip_visible:
+            for rect, slot in self._slot_rects:
+                if rect.collidepoint(pos):
+                    item = inv.equipped.get(slot)
+                    if item is not None:
+                        return (("slot", slot), item)
+                    return None
+        return None
 
     def handle_mouse_down(self, pos: Tuple[int, int], player) -> bool:
         for rect, key in self._close_rects:
             if rect.collidepoint(pos):
                 self._close_window(key)
                 return True
-        if self._drag is not None:
+        if self._drag is not None or self._item_drag is not None:
             return True
         for rect, key in self._title_rects:
             if rect.collidepoint(pos):
                 self._drag = (key, (pos[0] - rect.x, pos[1] - rect.y))
                 return True
+        hit = self._item_at(pos, player)
+        if hit is not None:
+            self._item_drag = {"source": hit[0], "item": hit[1],
+                               "start": pos, "pos": pos, "active": False}
+            return True
         return self.handle_click(pos, player)
 
     def handle_mouse_motion(self, pos: Tuple[int, int]) -> None:
-        if self._drag is None:
-            return
-        key, (gx, gy) = self._drag
-        w, h = self._win_size.get(key, (60, 40))
-        vw, vh = self._view_size
-        x = max(0, min(vw - w, pos[0] - gx))
-        y = max(0, min(vh - h, pos[1] - gy))
-        self._win_pos[key] = (x, y)
+        if self._drag is not None:
+            key, (gx, gy) = self._drag
+            w, h = self._win_size.get(key, (60, 40))
+            vw, vh = self._view_size
+            x = max(0, min(vw - w, pos[0] - gx))
+            y = max(0, min(vh - h, pos[1] - gy))
+            self._win_pos[key] = (x, y)
+        elif self._item_drag is not None:
+            d = self._item_drag
+            d["pos"] = pos
+            if not d["active"]:
+                dx = pos[0] - d["start"][0]
+                dy = pos[1] - d["start"][1]
+                if dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD:
+                    d["active"] = True
 
-    def handle_mouse_up(self) -> None:
+    def handle_mouse_up(self, pos: Optional[Tuple[int, int]] = None,
+                        player=None) -> Optional[Item]:
+        """松开鼠标：拖出来源窗口 → 取出物品回传（扔出）；
+        未拖动时同一格 0.35s 内两次点击 → 使用/穿戴/脱下。"""
+        drag = self._item_drag
+        self._item_drag = None
         self._drag = None
+        if drag is None or player is None or pos is None:
+            return None
+        home = self._inv_rect if drag["source"][0] == "cell" else self._equip_rect
+        if drag["active"]:
+            if home.collidepoint(pos):
+                return None      # 拖出去又放回来源窗口：取消
+            return self._take_for_drop(drag, player)
+        key = drag["source"]
+        now = pygame.time.get_ticks() / 1000.0
+        last = self._last_click
+        is_double = (last is not None and last[0] == key
+                     and now - last[1] <= DOUBLE_CLICK_TIME)
+        self._last_click = None if is_double else (key, now)
+        if is_double:
+            self._use_or_equip(drag, player)
+        return None
+
+    def _use_or_equip(self, drag: dict, player) -> None:
+        """双击行为：背包格 → 喝药/穿戴；纸娃娃栏位 → 脱下。"""
+        src = drag["source"]
+        if src[0] == "cell":
+            self._click_cell(player, src[1], src[2])
+        else:
+            if player.inventory.unequip(src[1]):
+                player.refresh_equips()
+            else:
+                self.flash("装备栏已满")
+
+    def _take_for_drop(self, drag: dict, player) -> Optional[Item]:
+        """确认扔出：从背包/装备栏取出该物品（堆叠整堆取出）。"""
+        src, item = drag["source"], drag["item"]
+        inv = player.inventory
+        if src[0] == "cell":
+            if src[1] == "equip":
+                return inv.pop_equip(src[2])
+            return inv.take_stack(item.id)
+        got = inv.pop_equipped(src[1])
+        if got is not None:
+            player.refresh_equips()
+        return got
 
     # ── 图标 ───────────────────────────────────────────────────────
     def _icon(self, item_id: str, kind: str) -> Optional[pygame.Surface]:
@@ -258,17 +343,7 @@ class Panels:
                 if rect.collidepoint(pos):
                     self.inv_tab = key
                     return True
-            for rect, slot in self._slot_rects:
-                if rect.collidepoint(pos):
-                    if player.inventory.unequip(slot):
-                        player.refresh_equips()
-                    else:
-                        self.flash("装备栏已满")
-                    return True
-            for rect, tab, idx in self._cell_rects:
-                if rect.collidepoint(pos):
-                    self._click_cell(player, tab, idx)
-                    return True
+            # 物品格/栏位的点击与拖拽由 _item_drag 状态机处理（双击使用/穿戴）
             if self._inv_rect.collidepoint(pos) or self._equip_rect.collidepoint(pos):
                 return True
         if self.skill_visible:
@@ -350,6 +425,15 @@ class Panels:
             self._draw_stat(surface, player)
         if self._tooltip is not None:
             self._draw_tooltip(surface, mouse)
+        # 拖拽中的物品图标跟手（画在最上层，窗口之外也可见）
+        if self._item_drag is not None and self._item_drag["active"]:
+            it = self._item_drag["item"]
+            icon = self._icon(it.id, it.kind)
+            if icon is not None:
+                icon = _fit_icon(icon, 32)
+                px, py = self._item_drag["pos"]
+                surface.blit(icon, (px - icon.get_width() // 2,
+                                    py - icon.get_height() // 2))
         # 顶部提示
         if self._toast is not None:
             text, remain = self._toast

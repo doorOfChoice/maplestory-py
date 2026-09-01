@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import random
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import pygame
 
@@ -14,6 +14,30 @@ from . import settings
 from .animation import Animation
 from .assets import Assets
 from .combat import roll_damage
+
+
+class RespawnQueue:
+    """怪物重生调度：死亡移除后按出生数据排队，到期回传 (index, data) 重建。"""
+
+    def __init__(self, delay: float):
+        self.delay = delay
+        self._pending: List[List] = []      # [剩余秒, index, data]
+
+    def schedule(self, index: int, data: dict) -> None:
+        self._pending.append([self.delay, index, data])
+
+    def tick(self, dt: float) -> List[Tuple[int, dict]]:
+        """推进计时，取出全部到期的出生数据。"""
+        ready: List[Tuple[int, dict]] = []
+        rest: List[List] = []
+        for entry in self._pending:
+            entry[0] -= dt
+            (ready if entry[0] <= 0 else rest).append(entry)
+        self._pending = rest
+        return [(idx, data) for _, idx, data in ready]
+
+    def clear(self) -> None:
+        self._pending.clear()
 
 
 class Monster:
