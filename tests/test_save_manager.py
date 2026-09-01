@@ -94,7 +94,7 @@ def test_questlog_to_from_dict_roundtrip():
 
 def test_save_manager_write_read_roundtrip():
     """SaveManager.flush + load 檔案內容一致。"""
-    data = {"version": 3, "player": {"level": 5, "hp": 80, "job": 0,
+    data = {"version": 4, "player": {"level": 5, "hp": 80, "job": 0,
                                      "stats": {"str": 4, "dex": 4, "int": 4, "luk": 4},
                                      "ap": 0}}
     with tempfile.TemporaryDirectory() as tmp:
@@ -108,7 +108,7 @@ def test_save_manager_write_read_roundtrip():
 
 def test_save_manager_request_save_eventually_persists():
     """request_save 非同步提交後，後台線程最終寫入磁碟。"""
-    data = {"version": 3, "player": {"level": 7, "hp": 60, "job": 0,
+    data = {"version": 4, "player": {"level": 7, "hp": 60, "job": 0,
                                      "stats": {"str": 4, "dex": 4, "int": 4, "luk": 4},
                                      "ap": 0}}
     with tempfile.TemporaryDirectory() as tmp:
@@ -125,9 +125,32 @@ def test_migrate_v2_adds_stats_by_job():
                                    "max_hp": 120, "mp": 30, "max_mp": 40,
                                    "job": 3000}}
     migrated = SaveManager.migrate(v2)
-    assert migrated["version"] == 3
+    assert migrated["version"] == 4
     assert migrated["player"]["stats"]["dex"] == 4 + 55
     assert migrated["player"]["ap"] == 0
+
+
+def test_migrate_v3_adds_storage():
+    """v3 旧档迁移：inventory 补空 storage 字段。"""
+    v3 = {"version": 3, "player": {"level": 5}, "inventory": {"consumes": {}}}
+    migrated = SaveManager.migrate(v3)
+    assert migrated["version"] == 4
+    assert migrated["inventory"]["storage"] == []
+
+
+def test_storage_roundtrip_and_merge():
+    """仓库：同 id 消耗品合并堆叠，装备逐件，roundtrip 保数量。"""
+    inv = Inventory()
+    inv.storage_add(Item(id="2000000", name="红水", count=5, kind="consume"))
+    inv.storage_add(Item(id="2000000", name="红水", count=3, kind="consume"))
+    inv.storage_add(Item(id="01302000", name="木剑", kind="equip"))
+    assert len(inv.storage) == 2
+    assert inv.storage[0].count == 8
+
+    inv2 = Inventory.from_dict(inv.to_dict(), assets=None)
+    assert inv2.storage[0].count == 8
+    assert inv2.storage[1].id == "01302000"
+    assert inv2.storage[1].kind == "equip"
 
 
 def test_save_manager_load_missing():

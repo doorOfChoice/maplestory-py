@@ -116,6 +116,15 @@ SKILL_MP_REGEN = 1.2             # MP 自然回复 / 秒
 SKILL_COOLDOWN: dict = {}        # 施放冷却覆盖表（秒）；缺省回退 0.8
 SKILL_MAX_LEVEL = 20             # 技能最高等级（裁剪 WZ level 表）
 
+# ── Buff / 状态异常（game/buffs.py）──────────────────────────────────
+CRIT_MULT = 1.5                  # 暴击伤害倍率
+POISON_TICK = 1.0                # 中毒结算间隔（秒）
+SLOW_MULT = 0.5                  # 减速期间移速倍率
+
+# ── 商店 / 仓库 / 卷轴（game/shop.py、inventory.py）──────────────────
+SELL_RATE = 0.5                  # 出售价 = 买价 × 该系数
+STORAGE_CAP = 48                 # 仓库格数上限
+
 # ── 职业 / 转职 ──────────────────────────────────────────────────────
 BOWMAN_JOB = 3000                # 弓箭手 1 转职业码
 BOWMAN_STARTER_BOW = "1452002"   # 转职附赠木弓（需求 Lv10；短弓 1452000 需 Lv25/DEX80）

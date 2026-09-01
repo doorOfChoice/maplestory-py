@@ -37,7 +37,7 @@ class SaveManager:
 
     @staticmethod
     def migrate(data: dict) -> dict:
-        """逐级迁移旧档：v1→v2 补 job/快捷键；v2→v3 补四维与 AP。"""
+        """逐级迁移旧档：v1→v2 补 job/快捷键；v2→v3 补四维与 AP；v3→v4 补仓库。"""
         if data.get("version", 1) < 2:
             player = data.setdefault("player", {})
             player.setdefault("job", 0)
@@ -53,6 +53,9 @@ class SaveManager:
             player["stats"] = stats
             player["ap"] = ap
             data["version"] = 3
+        if data.get("version") < 4:
+            data.setdefault("inventory", {}).setdefault("storage", [])
+            data["version"] = 4
         return data
 
     def request_save(self, data: dict) -> None:
@@ -103,7 +106,7 @@ class SaveManager:
     def collect_data(player, combat, map_id: str) -> dict:
         """收集所有需要存档的游戏状态为 dict。"""
         return {
-            "version": 3,
+            "version": 4,
             "player": {
                 "level": player.level,
                 "exp": player.exp,

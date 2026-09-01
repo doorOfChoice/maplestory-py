@@ -35,7 +35,7 @@ def test_save_v3_roundtrip():
     player = fake_player()
     combat = SimpleNamespace(meso=50, total_kills=3)
     data = SaveManager.collect_data(player, combat, "100000000")
-    assert data["version"] == 3
+    assert data["version"] == 4
     assert data["player"]["job"] == 3000
     assert data["player"]["stats"]["dex"] == 54
     assert data["player"]["ap"] == 4
@@ -69,7 +69,7 @@ def test_migrate_v1_defaults():
         path = Path(tmp) / "save.json"
         path.write_text(json.dumps(v1), encoding="utf-8")
         loaded = SaveManager(path).load()
-    assert loaded["version"] == 3
+    assert loaded["version"] == 4
     assert loaded["player"]["job"] == 0
     assert loaded["skills"]["hotkeys"] == {}
     # Lv5 新手：(5-1)×5=20 AP 按权重全进力量

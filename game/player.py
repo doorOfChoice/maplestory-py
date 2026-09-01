@@ -14,6 +14,7 @@ from . import settings
 from . import stats as stats_mod
 from .animation import Animation
 from .assets import Assets
+from .buffs import BuffList, StatusList
 from .physics import Physics
 from .inventory import Inventory, make_item
 from .jobs import JOBS, is_ranged_weapon
@@ -72,6 +73,10 @@ class Player:
             self._apply_save_data(save_data, assets, quest_defs)
         else:
             self._init_new_game(assets, quest_defs)
+
+        # buff / 状态异常（不入库：死亡与重登清空，同原版）
+        self.buffs = BuffList()
+        self.statuses = StatusList()
 
         self._load_anim(POSE_IDLE)
 
@@ -162,19 +167,25 @@ class Player:
         self._load_anim(POSE_IDLE if self.on_ground else POSE_JUMP)
 
     def attack_value(self) -> int:
-        """物理攻击力：武器面板 × 主属性权重 + 副属性/10（见 stats.attack）。"""
+        """物理攻击力：武器面板 × 主属性权重 + 副属性/10 + 被动/buff 加值。"""
         pad = self.inventory.attack() or settings.BASE_WEAPON_PAD
-        return stats_mod.attack(self.total_stats(), pad, self.is_ranged())
+        base = stats_mod.attack(self.total_stats(), pad, self.is_ranged())
+        return base + self.skills.passive_mods().get("atk", 0) \
+            + self.buffs.mod_sum("atk")
 
     def defense_value(self) -> int:
-        """物理防御力：装备 PDD 总和 + DEX//10。"""
-        return stats_mod.defense(self.total_stats(), self.inventory.defense())
+        """物理防御力：装备 PDD 总和 + DEX//10 + 被动/buff 加值。"""
+        return stats_mod.defense(self.total_stats(), self.inventory.defense()) \
+            + self.skills.passive_mods().get("def", 0) \
+            + self.buffs.mod_sum("def")
 
     # ── 四维属性 ───────────────────────────────────────────────────
     def total_stats(self) -> dict:
-        """四维合计 = 加点后的属性 + 装备词条（str/dex/int/luk）。"""
+        """四维合计 = 加点属性 + 装备词条 + 被动技能 + buff（str/dex/int/luk）。"""
         inv = self.inventory
+        passive = self.skills.passive_mods()
         return {k: self.stats.get(k, 0) + inv.bonus(k)
+                + passive.get(k, 0) + self.buffs.mod_sum(k)
                 for k in stats_mod.STAT_KEYS}
 
     @property
@@ -241,6 +252,8 @@ class Player:
 
     def _try_jump(self) -> None:
         """在地面 / 土狼窗口 / 绳梯 / 蹬墙 的跳。成功则清空缓冲避免重复起跳。"""
+        if self.statuses.locked():
+            return
         if self.climbing:
             # 从绳/梯上跳下：向上小跳（JUMP_VELOCITY 本身为负）
             self.climbing = False
@@ -285,7 +298,7 @@ class Player:
 
     def start_attack(self, skill_data: Optional[dict] = None) -> bool:
         """发起攻击；skill_data 非空时为技能攻击（先扣 MP/HP 消耗）。"""
-        if self.attacking or self.hurt_timer > 0:
+        if self.attacking or self.hurt_timer > 0 or self.statuses.locked():
             return False
         if skill_data is not None:
             if (self.mp < skill_data["mp_con"]
@@ -354,6 +367,12 @@ class Player:
         if self.mp < self.max_mp:
             self.mp = min(self.max_mp, self.mp + settings.SKILL_MP_REGEN * dt)
 
+        # buff / 状态异常计时（中毒本帧伤害直接扣血）
+        self.buffs.tick(dt)
+        poison_dmg = self.statuses.tick(dt)
+        if poison_dmg:
+            self.damage(poison_dmg)
+
         # 攻击结束回 idle（带超时保险，防止动画状态卡死无法再次攻击）
         if self.attacking:
             self.attack_timer -= dt
@@ -382,6 +401,8 @@ class Player:
 
         if self.attacking:
             self.stop_move()
+        elif self.statuses.locked():
+            self.stop_move()
         elif self.hurt_timer > 0:
             # 击退滑行，按距离衰减
             self.vx *= max(0.0, 1 - 6.0 * dt)
@@ -396,6 +417,7 @@ class Player:
             elif keys.right and not keys.left:
                 target_vx = settings.MOVE_SPEED
                 self.facing_right = True
+            target_vx *= self.statuses.speed_mult()
             accel = settings.MOVE_ACCEL
             if not self.on_ground:
                 accel *= settings.AIR_ACCEL

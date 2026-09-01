@@ -113,6 +113,31 @@ class Inventory:
         self.etcs: Dict[str, Item] = {}          # 其他材料（矿石等，堆叠）
         self.equips: List[Item] = []             # 未装备的装备散件
         self.equipped: Dict[str, Item] = {}      # slot → Item
+        self.storage: List[Item] = []            # 仓库（堆叠合并后的散件列表）
+
+    # ── 仓库（NPC 储物箱；容量见 settings.STORAGE_CAP）──────────────
+    def storage_add(self, item: Item) -> bool:
+        """入仓：可堆叠类合并，装备逐件；超容返回 False。"""
+        if item.kind in ("consume", "etc"):
+            table = self.consumes if item.kind == "consume" else self.etcs
+            for stored in self.storage:
+                if stored.id == item.id and stored.kind == item.kind:
+                    stored.count += item.count
+                    return True
+            if len(self.storage) >= settings.STORAGE_CAP:
+                return False
+            self.storage.append(item)
+            return True
+        if len(self.storage) >= settings.STORAGE_CAP:
+            return False
+        self.storage.append(item)
+        return True
+
+    def storage_take(self, index: int) -> Optional[Item]:
+        """取出第 index 格（整堆/整件）；越界返回 None。"""
+        if 0 <= index < len(self.storage):
+            return self.storage.pop(index)
+        return None
 
     # ── 收纳 ───────────────────────────────────────────────────────
     def add(self, item: Item) -> bool:
@@ -247,6 +272,7 @@ class Inventory:
             "etcs": {k: v.count for k, v in self.etcs.items()},
             "equips": [i.id for i in self.equips],
             "equipped": {k: v.id for k, v in self.equipped.items()},
+            "storage": [{"id": i.id, "count": i.count} for i in self.storage],
         }
 
     @classmethod
@@ -269,4 +295,9 @@ class Inventory:
                 inv.equipped[item.slot] = item
             elif not assets:
                 inv.equipped[slot] = item
+        for entry in data.get("storage", []):
+            id_, count = str(entry["id"]), int(entry.get("count") or 1)
+            item = (make_item(id_, assets, count) if assets
+                    else Item(id=id_, count=count, kind=item_kind(id_)))
+            inv.storage.append(item)
         return inv

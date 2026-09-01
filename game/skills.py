@@ -179,6 +179,15 @@ class SkillBook:
     def gain_sp(self, amount: int) -> None:
         self.sp += amount
 
+    def passive_mods(self) -> Dict[str, int]:
+        """已学被动技能的聚合属性修正（键：str/dex/int/luk/atk/def/crit/hp/mp）。
+
+        当前为空表占位；转职分支（feat/job-advance）解析 WZ 被动节点
+        （source skill 的 attack/boost/dex/criticalrate/hp/mp 等字段）后填充。
+        player.total_stats / attack_value / defense_value 会读取本表。
+        """
+        return {}
+
     def on_advance(self, jobdef) -> None:
         """转职：职业附赠被动直接满级（免费），主动技能重排快捷键。"""
         self._passive_ids = {str(p) for p in jobdef.passive_ids}
