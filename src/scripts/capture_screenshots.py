@@ -7,7 +7,7 @@ welcome / gameplay / inventory / skills / quests / overview → screenshots/。
 不會讀寫真實存檔（SAVE_FILE 重導向到 temp 目錄），也不播放聲音。
 
 用法（專案根目錄）：
-    uv run python capture_screenshots.py
+    uv run python src/scripts/capture_screenshots.py
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from pathlib import Path
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["SDL_AUDIODRIVER"] = "dummy"
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pygame
 
@@ -28,7 +28,8 @@ from game import settings
 from game.inventory import make_item
 
 DT = 1.0 / 60.0
-OUT_DIR = Path(__file__).resolve().parent / "screenshots"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+OUT_DIR = PROJECT_ROOT / "screenshots"
 
 
 def build_game():

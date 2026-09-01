@@ -15,7 +15,7 @@
 | ![任务日志](screenshots/quests.png) | ![全貌](screenshots/overview.png) |
 | 任务日志（含目标 NPC） | 关闭面板后的完整画面 |
 
-截图可执行 `uv run python capture_screenshots.py` 重新生成至 `screenshots/`。
+截图可执行 `uv run python src/scripts/capture_screenshots.py` 重新生成至 `screenshots/`。
 
 ## 功能特色
 
@@ -74,17 +74,17 @@ uv run pytest      # 跑测试
 ## 项目结构
 
 ```
-wzpy/      函数库层：WZ 解析、解密、渲染器（可独立重复使用）
-game/      应用层：游戏循环、物理、实体、战斗、技能、背包、任务、UI、存档
+src/wzpy/   函数库层：WZ 解析、解密、渲染器（可独立重复使用）
+src/game/   应用层：游戏循环、物理、实体、战斗、技能、背包、任务、UI、存档
+src/tests/  pytest 整合测试（合成数据，不需 WZ 文件）
 wz/        WZ 原档（只读；目录纳入版本控制，WZ 文件本身未纳入）
 screenshots/   README 用游戏截图
-tests/      pytest 整合测试（合成数据，不需 WZ 文件）
 ```
 
 ## 开发指引
 
 - 模块 docstring、类别说明与代码注释一律使用**简体中文**
-- 常量集中于 `game/settings.py`；实体物理热点类别使用 `__slots__`
+- 常量集中于 `src/game/settings.py`；实体物理热点类别使用 `__slots__`
 - 新功能或修 bug 依循 TDD（见 `.agents/skills/tdd/`）：透过公开接口写整合测试，不用 mock
 - 测试不得依赖 `wz/` 下 WZ 文件存在的环境，请以合成数据建构
 

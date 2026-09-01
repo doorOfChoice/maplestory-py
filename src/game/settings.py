@@ -7,7 +7,8 @@
 from pathlib import Path
 
 # ── 路径 ─────────────────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# 代码位于 src/game，故向上三阶回到项目根（src/game → src → 项目根）。
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 WZ_DIR = PROJECT_ROOT / "wz"
 REGION = "EMS"
 
