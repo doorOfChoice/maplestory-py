@@ -150,6 +150,26 @@ class Inventory:
             del self.consumes[item_id]
         return spec
 
+    # ── 取出（扔出 / 转移用）───────────────────────────────────────
+    def take_stack(self, item_id: str) -> Optional[Item]:
+        """整堆取出消耗品/其他材料；不存在返回 None。"""
+        for table in (self.consumes, self.etcs):
+            cur = table.get(item_id)
+            if cur is not None:
+                del table[item_id]
+                return cur
+        return None
+
+    def pop_equip(self, index: int) -> Optional[Item]:
+        """取出背包中第 index 件散件装备。"""
+        if 0 <= index < len(self.equips):
+            return self.equips.pop(index)
+        return None
+
+    def pop_equipped(self, slot: str) -> Optional[Item]:
+        """从装备栏直接取下某栏位（不占背包，扔出用）。"""
+        return self.equipped.pop(slot, None)
+
     # ── 穿脱 ───────────────────────────────────────────────────────
     def equip(self, index: int) -> bool:
         """装备 equips[index]；同栏位旧装备自动脱下换回。

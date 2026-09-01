@@ -192,6 +192,8 @@ class Game:
                                          "A/D(或←→) 移动  空格 跳跃  S+空格 下跳",
                                          "W(或↑) 爬绳/梯  J 攻击  数字键 技能  F 喝药",
                                          "I 道具栏  K 技能栏  B 状态  Q 任务日志  Enter 对话  R 复活",
+                                         "背包满了？双击道具使用/穿戴，把它拖出背包窗口即可扔在地上"
+                                         "（已穿装备也能从纸娃娃拖出扔掉）。",
                                          "新手练到 Lv10 后，找出生点旁的赫麗娜转职弓箭手；"
                                          "走到发光传送门前按 ↑ 可切换地图。"
                                          "（对话不影响行动，Enter/Esc 或点击关闭）"])
@@ -217,7 +219,7 @@ class Game:
                 "cy": settings.TRAINER_SPAWN[1]}, len(self.npcs)))
 
     def _tick_respawns(self, dt: float) -> None:
-        """mobTime>0 的怪死亡后按计时原地重生；-1 仅切图重生，0 永不重生。"""
+        """重生队列计时：mobTime>0 按其毫秒数，否则用 MOB_RESPAWN_DELAY 兜底。"""
         if not self._respawn_queue:
             return
         still: List[Tuple[float, dict]] = []
@@ -259,7 +261,15 @@ class Game:
                     cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
                     self.panels.handle_mouse_motion((cx, cy))
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-                self.panels.handle_mouse_up()
+                if not self.dead:
+                    cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
+                    cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
+                    dropped = self.panels.handle_mouse_up((cx, cy), self.player)
+                    if dropped is not None:
+                        self.combat.drop_player_item(self.player, dropped)
+                        self.audio.play("PickUpItem", 0.3)
+                else:
+                    self.panels.handle_mouse_up()
             elif event.type == pygame.KEYDOWN:
                 if self.dead:
                     if event.key == pygame.K_r:
@@ -764,12 +774,13 @@ class Game:
         for mob in self.monsters:
             mob.update(dt, self.player.x, self.player.y, self.hits, self.audio,
                        no_aggro=no_aggro)
-        # 移除已消失的怪物；mobTime>0 者排入原地重生队列
+        # 移除已消失的怪物；死亡者排入重生队列（mobTime>0 用其值，否则默认延迟）
         alive: List[Monster] = []
         for m in self.monsters:
             if m.dead and m.remove_after <= 0:
-                if m.mob_time > 0:
-                    self._respawn_queue.append((m.mob_time / 1000.0, m.life_data))
+                delay = (m.mob_time / 1000.0 if m.mob_time > 0
+                         else settings.MOB_RESPAWN_DELAY)
+                self._respawn_queue.append((delay, m.life_data))
             else:
                 alive.append(m)
         self.monsters = alive

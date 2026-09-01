@@ -107,13 +107,15 @@ class DropItem:
 
     def __init__(self, x: float, y: float, item: Optional[dict] = None,
                  meso: int = 0, ground_y: Optional[float] = None,
-                 assets: Optional[Assets] = None):
+                 assets: Optional[Assets] = None,
+                 lifetime: Optional[float] = None, pickup_lock: float = 0.0):
         self.x = x
         self.y = y
         self.item = item
         self.meso = int(meso)
         self.assets = assets
-        self.life = settings.DROP_LIFETIME
+        self.life = settings.DROP_LIFETIME if lifetime is None else lifetime
+        self.pickup_lock = pickup_lock   # 生成后短暂不可拾取（玩家扔出防瞬间捡回）
         self.vx = random.uniform(-30, 30)
         self.vy = -120.0
         self.taken = False
@@ -396,7 +398,7 @@ class Combat:
         pr = pygame.Rect(int(player.x - 16), int(player.y - 30), 32, 60)
         got = False
         for drop in self.drops:
-            if drop.taken:
+            if drop.taken or drop._age < drop.pickup_lock:
                 continue
             if not pr.colliderect(drop.rect()):
                 continue
@@ -406,6 +408,7 @@ class Combat:
                 got = True
             elif drop.item is not None:
                 item = make_item(drop.item.get("id"), self.assets,
+                                 count=int(drop.item.get("count") or 1),
                                  name=drop.item.get("name"))
                 if player.inventory.add(item):
                     drop.taken = True
@@ -421,6 +424,20 @@ class Combat:
         self.drops = [d for d in self.drops if not d.taken]
         return got
 
+    def drop_player_item(self, player, item) -> DropItem:
+        """玩家从背包扔出：向侧方抛出、落到脚下平台；带拾取锁避免瞬间捡回。"""
+        feet = player.y + settings.FEET_OFFSET
+        ground = self._surface_y(player.x, feet)
+        side = random.choice((-1, 1))
+        d = DropItem(player.x + side * 10.0, feet - 24.0,
+                     item={"id": item.id, "name": item.name, "count": item.count},
+                     ground_y=ground, assets=self.assets,
+                     lifetime=settings.DROP_PLAYER_LIFETIME, pickup_lock=0.6)
+        d.vx = side * random.uniform(80.0, 140.0)
+        d.vy = -180.0
+        self.drops.append(d)
+        return d
+
     def update(self, dt: float, player=None) -> None:
         self.numbers = [n for n in self.numbers if n.update(dt)]
         for e in self.effects:
@@ -429,10 +446,11 @@ class Combat:
         for d in self.drops:
             if d.attracted and player is not None:
                 dx = player.x - d.x
-                d.vx = (90.0 if dx >= 0 else -90.0)
+                d.vx = (settings.PICKUP_ATTRACT_SPEED if dx >= 0
+                        else -settings.PICKUP_ATTRACT_SPEED)
                 # 落地则再起跳，形成连续蹦跳效果
                 if d.vy == 0.0 and d.y >= d.ground_y - 0.5:
-                    d.vy = -150.0
+                    d.vy = settings.PICKUP_ATTRACT_HOP
             d.update(dt)
         self.drops = [d for d in self.drops if d.life > 0 and not d.taken]
 
