@@ -47,6 +47,23 @@ SLOT_ORDER = ("cap", "face", "earr", "top", "overall", "pants",
 STAT_KEYS = ("incPAD", "incMAD", "incPDD", "incSTR", "incDEX",
              "incINT", "incLUK", "incHP", "incMP")
 
+# 玩家侧属性短键 → WZ 词条键（装备 info 以 inc 前缀命名）
+STAT_KEY_MAP = {"str": "incSTR", "dex": "incDEX", "int": "incINT",
+                "luk": "incLUK", "hp": "incHP", "mp": "incMP"}
+
+
+def _equip_entry(item: Item) -> dict:
+    """装备序列化为 {id, extra, tuc}（含强化词条与剩余次数）。"""
+    return {"id": item.id, "extra": dict(item.extra), "tuc": item.tuc}
+
+
+def _storage_entry(item: Item) -> dict:
+    """仓库条目：消耗/其他记数量；装备记强化词条与剩余次数。"""
+    if item.kind == "equip":
+        return {"id": item.id, "kind": "equip", "count": 1,
+                "extra": dict(item.extra), "tuc": item.tuc}
+    return {"id": item.id, "kind": item.kind, "count": item.count}
+
 
 def item_kind(item_id: str) -> str:
     try:
@@ -82,7 +99,17 @@ def make_item(item_id: str, assets, count: int = 1,
         norm_id = f"{int(item_id):08d}"
     except (TypeError, ValueError):
         norm_id = str(item_id)
-    return Item(id=norm_id, name=name, count=count, kind=kind, info=info)
+    item = Item(id=norm_id, name=name, count=count, kind=kind, info=info)
+    item.tuc = _tuc_of(info)
+    return item
+
+
+def _tuc_of(info: Dict[str, Any]) -> int:
+    """取 WZ info.tuc（可强化次数），缺省 0。"""
+    try:
+        return max(0, int(info.get("tuc") or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 @dataclass
@@ -92,6 +119,8 @@ class Item:
     count: int = 1
     kind: str = "etc"
     info: Dict[str, Any] = field(default_factory=dict)   # 装备属性 / 消耗品 spec
+    extra: Dict[str, int] = field(default_factory=dict)  # 强化卷轴附加词条
+    tuc: int = 0                   # 可强化次数（穿戴时取 WZ info.tuc 缺省 0）
 
     @property
     def slot(self) -> Optional[str]:
@@ -99,10 +128,15 @@ class Item:
         return islot_to_slot(self.info.get("islot") or "")
 
     def stat(self, key: str) -> int:
+        """读取词条：基础 info + 强化 extra 合并。"""
         try:
-            return int(self.info.get(key) or 0)
+            base = int(self.info.get(key) or 0)
         except (TypeError, ValueError):
-            return 0
+            base = 0
+        try:
+            return base + int(self.extra.get(key) or 0)
+        except (TypeError, ValueError):
+            return base
 
 
 class Inventory:
@@ -251,8 +285,12 @@ class Inventory:
         return sum(i.stat(key) for i in self.equipped.values())
 
     def bonus(self, key: str) -> int:
-        """装备词条（str/dex/int/luk/hp/mp 等直接键）求和。"""
-        return self.stat_sum(key)
+        """装备词条（str/dex/... 映射到 WZ 的 incSTR/incDEX/... 键）求和。
+
+        WZ 词条键带 inc 前缀，玩家侧 total_stats / recalc_vitals 用
+        短键（str/dex/int/luk/hp/mp）读取，这里做键名映射。
+        """
+        return self.stat_sum(STAT_KEY_MAP.get(key, key))
 
     def attack(self) -> int:
         return self.stat_sum("incPAD")
@@ -270,10 +308,28 @@ class Inventory:
         return {
             "consumes": {k: v.count for k, v in self.consumes.items()},
             "etcs": {k: v.count for k, v in self.etcs.items()},
-            "equips": [i.id for i in self.equips],
-            "equipped": {k: v.id for k, v in self.equipped.items()},
-            "storage": [{"id": i.id, "count": i.count} for i in self.storage],
+            "equips": [_equip_entry(i) for i in self.equips],
+            "equipped": {k: _equip_entry(v) for k, v in self.equipped.items()},
+            "storage": [_storage_entry(i) for i in self.storage],
         }
+
+    @staticmethod
+    def _build_equip(entry, assets) -> Item:
+        """从存档条目构建装备：兼容旧纯 id 字符串与新 {id, extra, tuc} 字典。"""
+        if isinstance(entry, dict):
+            eid = str(entry.get("id", ""))
+            item = make_item(eid, assets) if assets else Item(id=eid, kind="equip")
+            try:
+                item.extra = {str(k): int(v) for k, v in (entry.get("extra") or {}).items()}
+            except (TypeError, ValueError):
+                item.extra = {}
+            try:
+                item.tuc = max(0, int(entry.get("tuc") or 0))
+            except (TypeError, ValueError):
+                item.tuc = 0
+            return item
+        eid = str(entry)
+        return make_item(eid, assets) if assets else Item(id=eid, kind="equip")
 
     @classmethod
     def from_dict(cls, data: dict, assets=None) -> Inventory:
@@ -286,18 +342,22 @@ class Inventory:
             item = (make_item(id_, assets, count) if assets
                     else Item(id=id_, count=count, kind="etc"))
             inv.etcs[id_] = item
-        for eid in data.get("equips", []):
-            item = make_item(eid, assets) if assets else Item(id=eid, kind="equip")
-            inv.equips.append(item)
-        for slot, eid in data.get("equipped", {}).items():
-            item = make_item(eid, assets) if assets else Item(id=eid, kind="equip")
+        for entry in data.get("equips", []):
+            inv.equips.append(cls._build_equip(entry, assets))
+        for slot, entry in data.get("equipped", {}).items():
+            item = cls._build_equip(entry, assets)
             if assets and item.slot is not None:
                 inv.equipped[item.slot] = item
             elif not assets:
                 inv.equipped[slot] = item
         for entry in data.get("storage", []):
             id_, count = str(entry["id"]), int(entry.get("count") or 1)
-            item = (make_item(id_, assets, count) if assets
-                    else Item(id=id_, count=count, kind=item_kind(id_)))
+            if entry.get("kind") == "equip":
+                item = cls._build_equip(entry, assets)
+                item.count = 1
+            else:
+                kind = entry.get("kind") or item_kind(id_)
+                item = (make_item(id_, assets, count) if assets
+                        else Item(id=id_, count=count, kind=kind))
             inv.storage.append(item)
         return inv

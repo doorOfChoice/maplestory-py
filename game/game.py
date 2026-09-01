@@ -31,6 +31,9 @@ from .jobs import JOBS, can_advance
 from .ui import UI
 from .minimap import MiniMap
 from .panels import Panels
+from .shop import SHOP_NPCS, STORAGE_NPC
+from .shop_panel import ShopPanel
+from .storage_panel import StoragePanel
 from .quests import load_quest_defs, render_markup
 from .save_manager import SaveManager
 from .splash import Splash
@@ -129,6 +132,10 @@ class Game:
             self._boot_progress = 0.40
             self.panels = Panels(self.ui, self.assets)
             self.panels._quest_goal_lines = self._quest_extra_goal_lines
+            self.panels.combat = self.combat
+            # 商店 / 仓库面板（由 NPC 对话按钮打开）
+            self.shop_panel = ShopPanel(self.ui, self.assets)
+            self.storage_panel = StoragePanel(self.ui, self.assets)
 
             # 任务数据：等待后台解析完成（只解析 ENABLED_QUESTS 精选任务）
             quest_thread.join()
@@ -249,12 +256,27 @@ class Game:
                         self._quest_button(btn)
                     elif self.ui.quest_dialog_hit((cx, cy)):
                         pass   # 点对话框空白处不关闭（选项型）
+                    elif self.ui.dialog_button_hit((cx, cy)) is not None:
+                        self._dialog_button(self.ui.dialog_button_hit((cx, cy)))
                     elif self.ui.dialog_hit((cx, cy)):
                         # 点击气泡本体 → 关闭对话（面板照常可点）
                         self.ui.hide_dialog()
                         self._talk_npc = None
+                    elif self.shop_panel.visible:
+                        self.shop_panel.handle_click((cx, cy), self.player, self.combat)
+                    elif self.storage_panel.visible:
+                        self.storage_panel.handle_click((cx, cy), self.player)
                     else:
                         self.panels.handle_mouse_down((cx, cy), self.player)
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button in (4, 5):
+                if not self.dead:
+                    cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
+                    cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
+                    amount = -1 if event.button == 4 else 1
+                    if self.shop_panel.visible:
+                        self.shop_panel.handle_wheel((cx, cy), amount, self.player)
+                    elif self.storage_panel.visible:
+                        self.storage_panel.handle_wheel((cx, cy), amount, self.player)
             elif event.type == pygame.MOUSEMOTION:
                 if self.panels.is_dragging():
                     cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
@@ -292,6 +314,12 @@ class Game:
                                      pygame.K_SPACE, pygame.K_ESCAPE):
                         self.ui.hide_dialog()
                         self._talk_npc = None
+                        continue
+                # 商店 / 仓库面板：Esc 关闭
+                if event.key == pygame.K_ESCAPE:
+                    if self.shop_panel.visible or self.storage_panel.visible:
+                        self.shop_panel.close()
+                        self.storage_panel.close()
                         continue
                 if event.key == pygame.K_i:
                     self.panels.toggle_inventory()
@@ -374,7 +402,7 @@ class Game:
                     eff, self.player.x, self.player.y))
 
     def _try_talk(self) -> None:
-        """与 NPC 对话：导师转职 > 任务交互 > 普通寒暄。"""
+        """与 NPC 对话：导师转职 > 任务交互 > 普通寒暄（商人带商店/仓库按钮）。"""
         for npc in self.npcs:
             if npc.rect().colliderect(
                     pygame.Rect(int(self.player.x - 20), int(self.player.y - 40), 40, 80)):
@@ -384,10 +412,29 @@ class Game:
                     return
                 if self._begin_quest_flow(npc):
                     return
+                buttons: List[str] = []
+                if npc.npc_id in SHOP_NPCS:
+                    buttons.append("shop")
+                if npc.npc_id == STORAGE_NPC:
+                    buttons.append("storage")
                 self.ui.show_dialog(npc.name,
                                     dialogues.get_dialog(npc.npc_id, npc.name),
-                                    anchor=npc)
+                                    anchor=npc, buttons=buttons or None)
                 return
+
+    def _dialog_button(self, key: str) -> None:
+        """NPC 对话按钮回调：打开商店 / 仓库面板。"""
+        npc = self._talk_npc
+        self.ui.hide_dialog()
+        self._talk_npc = None
+        if npc is None:
+            return
+        if key == "shop":
+            self.storage_panel.close()
+            self.shop_panel.open(npc.npc_id)
+        elif key == "storage":
+            self.shop_panel.close()
+            self.storage_panel.open()
 
     # ── 转职对话流程 ───────────────────────────────────────────────
     def _begin_advance_flow(self, npc) -> bool:
@@ -626,6 +673,8 @@ class Game:
         self.ui.hide_quest()
         self._talk_npc = None
         self._quest_flow = None
+        self.shop_panel.close()
+        self.storage_panel.close()
         self.audio.stop_bgm()
 
         self.assets.start_load_map(map_id)
@@ -848,6 +897,10 @@ class Game:
         self.ui.draw_map_name(self.canvas, self.assets.map_name(), name_y)
         self.panels.draw_quickslots(self.canvas, self.player)
         self.panels.draw(self.canvas, self.player, self.combat.meso)
+        if self.shop_panel.visible:
+            self.shop_panel.draw(self.canvas, self.player, self.combat)
+        elif self.storage_panel.visible:
+            self.storage_panel.draw(self.canvas, self.player)
         self.ui.draw_dialog(self.canvas, self.camera)
         self.ui.draw_quest(self.canvas)
         self.ui.draw_death(self.canvas)

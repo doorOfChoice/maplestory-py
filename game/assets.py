@@ -891,6 +891,36 @@ class Assets:
         self._icon_cache[key] = result
         return result
 
+    def item_price(self, item_id: str) -> Optional[int]:
+        """物品买价（Character.wz / Item.wz info.price）；缺 price 返回 None。缓存。
+
+        自制卷轴（234 类目）无 WZ 数据会返回 None，由 shop.item_price 兜底。
+        """
+        key = f"price:{item_id}"
+        hit = self._icon_cache.get(key)
+        if hit is not None:
+            return hit
+        result: Optional[int] = None
+        try:
+            iid = int(item_id)
+        except (TypeError, ValueError):
+            iid = -1
+        if 1000000 <= iid < 2000000:
+            info = self.equip_info(item_id) or {}
+            raw = info.get("price")
+        elif 2000000 <= iid < 3000000:
+            ci = self.consume_info(item_id) or {}
+            raw = (ci.get("info") or {}).get("price")
+        else:
+            raw = None
+        if raw is not None:
+            try:
+                result = int(raw)
+            except (TypeError, ValueError):
+                result = None
+        self._icon_cache[key] = result
+        return result
+
     def item_name(self, item_id: str) -> Optional[str]:
         """String.wz 物品名（消耗品 / 装备 / 其他）。缓存。"""
         key = f"name:{item_id}"

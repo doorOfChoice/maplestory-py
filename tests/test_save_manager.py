@@ -12,7 +12,7 @@ from game.save_manager import SaveManager
 
 
 def test_inventory_to_from_dict_roundtrip():
-    """Inventory → dict → Inventory，id/count 不變，kind 正確。"""
+    """Inventory → dict → Inventory，id/count 不變，kind 正確（裝備帶 extra/tuc）。"""
     inv = Inventory()
     inv.consumes["2000000"] = Item(id="2000000", name="紅水", count=12, kind="consume")
     inv.etcs["4000003"] = Item(id="4000003", name="木柴", count=5, kind="etc")
@@ -23,15 +23,21 @@ def test_inventory_to_from_dict_roundtrip():
     d = inv.to_dict()
     assert d["consumes"] == {"2000000": 12}
     assert d["etcs"] == {"4000003": 5}
-    assert d["equips"] == ["01040000"]
-    assert d["equipped"] == {"weapon": "01302000", "top": "01060000"}
+    assert d["equips"] == [{"id": "01040000", "extra": {}, "tuc": 0}]
+    assert d["equipped"] == {
+        "weapon": {"id": "01302000", "extra": {}, "tuc": 0},
+        "top": {"id": "01060000", "extra": {}, "tuc": 0},
+    }
 
     inv2 = Inventory.from_dict(d, assets=None)
     assert inv2.consumes["2000000"].count == 12
     assert inv2.consumes["2000000"].id == "2000000"
     assert inv2.etcs["4000003"].count == 5
     assert inv2.equips[0].id == "01040000"
+    assert inv2.equips[0].extra == {}
     assert inv2.equipped["weapon"].id == "01302000"
+    assert inv2.equipped["weapon"].extra == {}
+    assert inv2.equipped["weapon"].tuc == 0
 
 
 def test_inventory_to_from_dict_empty():

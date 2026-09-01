@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import random
 from typing import List, Optional, Tuple
 
 import pygame
@@ -24,6 +25,7 @@ import pygame
 from . import settings
 from .inventory import SLOT_ORDER, Item, islot_to_slot
 from .jobs import JOBS
+from .scrolls import SCROLLS, apply_scroll, is_scroll_id
 from .stats import STAT_LABELS, wear_block
 
 SLOT_NAMES = {
@@ -130,6 +132,7 @@ class Panels:
         self._auto_rect: Optional[pygame.Rect] = None
         self._num_cache: dict = {}           # (ch, color) → 染色后的像素数字
         self._quest_goal_lines = None    # Game 注入：qid → 目标行列表
+        self.combat = None               # Game 注入：卷轴强化费 / 金币结算用
         self._cell_rects: List[tuple] = []   # (Rect, tab, index)
         self._slot_rects: List[tuple] = []   # (Rect, slot)
         self._skill_rows: List[tuple] = []   # (Rect, skill_id)
@@ -375,7 +378,11 @@ class Panels:
         if tab == "consume":
             items = list(inv.consumes.values())
             if idx < len(items):
-                spec = inv.use_consume(items[idx].id)
+                item = items[idx]
+                if is_scroll_id(item.id):
+                    self._apply_scroll(item, player)
+                    return
+                spec = inv.use_consume(item.id)
                 if spec:
                     hp = int(spec.get("hp") or 0)
                     mp = int(spec.get("mp") or 0)
@@ -396,6 +403,32 @@ class Panels:
                     player.refresh_equips()
                 else:
                     self.flash("装备栏已满")
+
+    def _apply_scroll(self, scroll_item: Item, player) -> None:
+        """双击卷轴：对当前武器使用（扣强化费，成功/失败各耗一次次数）。"""
+        scroll = SCROLLS.get(scroll_item.id)
+        if scroll is None:
+            self.flash("无法使用的卷轴")
+            return
+        target = player.inventory.equipped.get(scroll["slot"])
+        if target is None:
+            self.flash("请先装备目标装备")
+            return
+        combat = self.combat
+        meso = combat.meso if combat is not None else 0
+        result = apply_scroll(scroll, target, random.Random(),
+                              level=player.level, meso=meso)
+        if result is None:
+            self.flash("无法强化：栏位不符或强化次数已用完")
+            return
+        if not result["charged"]:
+            self.flash(result["msg"])
+            return
+        if combat is not None:
+            combat.meso = result["meso"]
+        player.inventory.use_consume(scroll_item.id)
+        player.refresh_equips()
+        self.flash(result["msg"])
 
     def flash(self, text: str, duration: float = 1.6) -> None:
         """顶部居中短暂提示（如无法穿戴 / 背包已满）。"""
@@ -1118,7 +1151,13 @@ class Panels:
                 lines.append(f"恢复 HP {spec['hp']}")
             if spec.get("mp"):
                 lines.append(f"恢复 MP {spec['mp']}")
-            lines.append("点击使用")
+            if is_scroll_id(item.id):
+                sc = SCROLLS.get(item.id)
+                if sc:
+                    lines.append(f"{sc['name']} 成功率 {sc['rate']}%")
+                lines.append("双击对当前武器强化")
+            else:
+                lines.append("点击使用")
         return "\n".join(lines)
 
     def _draw_tooltip(self, surface, mouse_pos) -> None:
