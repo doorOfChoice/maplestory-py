@@ -17,11 +17,9 @@ import pygame
 
 from game import settings
 from game.render.assets import Assets
-from game.systems import dialogues
 from game.render.effects import Effect
-from game.core.jobs import JOBS, can_advance, job_for_trainer
-from game.systems.shop import SHOP_NPCS, STORAGE_NPC
 from game.systems.quests import load_quest_defs, render_markup
+from game.npc_dialogue import NpcDialogueController
 from game.save_manager import SaveManager
 from game.render.splash import Splash
 from game.context import GameContext
@@ -123,8 +121,7 @@ class Game:
         """世界构建完成后，在主线程恢复轻量状态并播 BGM / 欢迎对话框。"""
         self.keys = _Keys()
         self.dead = False
-        self._talk_npc: Optional[object] = None
-        self._quest_flow = None
+        self._dialogue = NpcDialogueController(self.ctx, self.quest_defs)
         self._banner: Optional[Tuple[str, str]] = None
         self._banner_timer = 0.0
         self.spawn_grace = settings.SPAWN_GRACE
@@ -161,19 +158,10 @@ class Game:
                 if not self.dead:
                     cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
                     cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
-                    # 任务对话框按钮优先
-                    btn = self.ctx.ui.quest_hit((cx, cy))
-                    if btn is not None:
-                        self._quest_button(btn)
-                    elif self.ctx.ui.quest_dialog_hit((cx, cy)):
-                        pass   # 点对话框空白处不关闭（选项型）
-                    elif self.ctx.ui.dialog_button_hit((cx, cy)) is not None:
-                        self._dialog_button(self.ctx.ui.dialog_button_hit((cx, cy)))
-                    elif self.ctx.ui.dialog_hit((cx, cy)):
-                        # 点击气泡本体 → 关闭对话（面板照常可点）
-                        self.ctx.ui.hide_dialog()
-                        self._talk_npc = None
-                    elif self.ctx.shop_panel.visible:
+                    # 对话层（列表/按钮/气泡）优先消费；否则交给商店/仓库/背包
+                    if self._dialogue.consume_click((cx, cy)):
+                        continue
+                    if self.ctx.shop_panel.visible:
                         self.ctx.shop_panel.handle_click((cx, cy), self.ctx.world.player, self.ctx.world.combat)
                     elif self.ctx.storage_panel.visible:
                         self.ctx.storage_panel.handle_click((cx, cy), self.ctx.world.player)
@@ -210,31 +198,9 @@ class Game:
                     if event.key == pygame.K_r:
                         self.respawn()
                     continue
-                # 任务对话框：Enter/空格 = 确认（yes），Esc = 拒绝/关闭；
-                # 只有 yes/no 阶段拦截，其余按键（移动/面板开关）照常。
-                if self.ctx.ui.quest_visible:
-                    qkey = None
-                    if event.key == pygame.K_ESCAPE:
-                        qkey = "close"
-                    elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER,
-                                       pygame.K_SPACE):
-                        qkey = "confirm"
-                    if qkey is not None:
-                        if self._quest_flow is not None \
-                                and self._quest_flow["stage"] in ("offer", "complete", "advance"):
-                            self._quest_button(
-                                "no" if qkey == "close" else "yes")
-                        else:
-                            self.ctx.ui.hide_quest()
-                            self._quest_flow = None
-                        continue
-                # 对话框非模态：Enter/空格/Esc 关闭本次按键；其余按键照常
-                if self.ctx.ui.dialog_visible:
-                    if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER,
-                                     pygame.K_SPACE, pygame.K_ESCAPE):
-                        self.ctx.ui.hide_dialog()
-                        self._talk_npc = None
-                        continue
+                # 任务/寒暄对话框：回车/空格/Esc 交给对话层消费；其余按键照常
+                if self._dialogue.consume_keydown(event.key):
+                    continue
                 # 商店 / 仓库面板：Esc 关闭
                 if event.key == pygame.K_ESCAPE:
                     if self.ctx.shop_panel.visible or self.ctx.storage_panel.visible:
@@ -280,7 +246,7 @@ class Game:
                 elif event.key == pygame.K_b:
                     self.ctx.panels.toggle_stat()
                 elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                    self._try_talk()
+                    self._dialogue.try_talk()
 
         # 加载期间不采集按键、不兜底攻击
         if self._loading:
@@ -321,173 +287,12 @@ class Game:
                 self.ctx.world.combat.effects.append(Effect(
                     eff, self.ctx.world.player.x, self.ctx.world.player.y))
 
-    def _try_talk(self) -> None:
-        """与 NPC 对话：导师转职 > 任务交互 > 普通寒暄（商人带商店/仓库按钮）。"""
-        for npc in self.ctx.world.npcs:
-            if npc.rect().colliderect(
-                    pygame.Rect(int(self.ctx.world.player.x - 20), int(self.ctx.world.player.y - 40), 40, 80)):
-                self._talk_npc = npc
-                jobdef = job_for_trainer(npc.npc_id)
-                if jobdef is not None and self._begin_advance_flow(npc, jobdef):
-                    return
-                if self._begin_quest_flow(npc):
-                    return
-                buttons: List[str] = []
-                if npc.npc_id in SHOP_NPCS:
-                    buttons.append("shop")
-                if npc.npc_id == STORAGE_NPC:
-                    buttons.append("storage")
-                self.ctx.ui.show_dialog(npc.name,
-                                    dialogues.get_dialog(npc.npc_id, npc.name),
-                                    anchor=npc, buttons=buttons or None)
-                return
-
-    def _dialog_button(self, key: str) -> None:
-        """NPC 对话按钮回调：打开商店 / 仓库面板。"""
-        npc = self._talk_npc
-        self.ctx.ui.hide_dialog()
-        self._talk_npc = None
-        if npc is None:
-            return
-        if key == "shop":
-            self.ctx.storage_panel.close()
-            self.ctx.shop_panel.open(npc.npc_id)
-        elif key == "storage":
-            self.ctx.shop_panel.close()
-            self.ctx.storage_panel.open()
-
-    # ── 转职对话流程 ───────────────────────────────────────────────
-    def _begin_advance_flow(self, npc, jobdef) -> bool:
-        """导师对话：可转职弹确认框；已转职/等级不足给对应提示。
-
-        jobdef 由 job_for_trainer(npc.npc_id) 解析 —— 新增职业只需在 JOBS
-        登记 trainer_npc 即自动拿到转职对话，无需改动本方法。
-        """
-        if self.ctx.world.player.job == jobdef.code:
-            self.ctx.ui.show_dialog(
-                npc.name, [f"你已经是一名出色的{jobdef.name}了。"], anchor=npc)
-            return True
-        if can_advance(self.ctx.world.player, jobdef):
-            self._quest_flow = {"npc": npc, "quest": None, "stage": "advance",
-                                "code": jobdef.code}
-            self.ctx.ui.show_quest(f"转职 · {jobdef.name}", [
-                f"你想成为{jobdef.name}吗？",
-                f"达到 Lv{jobdef.advance_lv} 的新手可以转职为{jobdef.name}，",
-                "转职后我会送你武器并教你该职业的技能。"], ["yes", "no"])
-            return True
-        self.ctx.ui.show_dialog(npc.name, [
-            "你还太弱小了，达到等级再来找我吧。",
-            f"（当前 Lv{self.ctx.world.player.level} / 需要 Lv{jobdef.advance_lv}）"], anchor=npc)
-        return True
-
-    # ── 任务对话状态机 ─────────────────────────────────────────────
-    def _begin_quest_flow(self, npc) -> bool:
-        """检查与 NPC 的任务交互。返回是否进入了任务对话框。"""
-        quests = self.ctx.world.player.quests
-        npc_id = npc.npc_id
-
-        # 1. 可交付（进行中且条件满足）
-        for qid, d in self.quest_defs.items():
-            if d.end_npc is not None and str(d.end_npc) == npc_id \
-                    and quests.is_accepted(qid) and quests.can_complete(qid, self.ctx.world.player):
-                self._quest_flow = {"npc": npc, "quest": qid, "stage": "complete"}
-                self._show_quest_complete(qid)
-                return True
-
-        # 2. 可接取（给予 NPC 是这位，且条件满足、未接未完成）
-        for qid, d in self.quest_defs.items():
-            if d.start_npc is not None and str(d.start_npc) == npc_id \
-                    and not quests.started(qid) and quests.can_start(qid, self.ctx.world.player):
-                self._quest_flow = {"npc": npc, "quest": qid, "stage": "offer"}
-                self._show_quest_offer(qid)
-                return True
-
-        # 3. 进行中但条件未满足（交付 NPC 是这位）
-        for qid, d in self.quest_defs.items():
-            if d.end_npc is not None and str(d.end_npc) == npc_id \
-                    and quests.is_accepted(qid):
-                self._quest_flow = {"npc": npc, "quest": qid, "stage": "status"}
-                self._show_quest_status(qid)
-                return True
-
-        return False
-
     def _qmark(self, text: str) -> str:
         """把官方 Say 文本里的标记替换为可读文本。"""
         a = self.assets
         return render_markup(text, a,
                              map_name=a.map_name_of, npc_name=a.npc_name,
                              item_name=a.item_name, mob_name=a.mob_name_of)
-
-    def _show_quest_offer(self, qid: str) -> None:
-        d = self.quest_defs[qid]
-        lines = [self._qmark(l) for l in d.accept_lines] or [f"要接受任务「{d.name}」吗？"]
-        self.ctx.ui.show_quest(f"任务 · {d.name}", lines, ["yes", "no"])
-
-    def _show_quest_complete(self, qid: str) -> None:
-        d = self.quest_defs[qid]
-        lines = [self._qmark(l) for l in d.complete_lines] or [
-            f"已完成任务「{d.name}」的所有条件！要领取奖励吗？"]
-        self.ctx.ui.show_quest(f"任务完成 · {d.name}", lines, ["yes", "no"])
-
-    def _show_quest_status(self, qid: str) -> None:
-        d = self.quest_defs[qid]
-        lines = [self._qmark(l) for l in d.complete_stop] or \
-                [f"「{d.name}」还未完成，继续努力吧！"]
-        self.ctx.ui.show_quest(d.name, lines, ["ok"])
-
-    def _quest_button(self, key: str) -> None:
-        """任务/转职对话框按钮回调：yes / no / ok。"""
-        flow = self._quest_flow
-        if flow is None:
-            self.ctx.ui.hide_quest()
-            return
-        if flow["stage"] == "advance":
-            code = flow["code"]
-            self.ctx.ui.hide_quest()
-            self._quest_flow = None
-            if key == "yes":
-                self.ctx.world.player.advance_to(code, self.assets)
-                self.ctx.audio.play("LevelUp", 0.6)
-                self.ctx.panels.flash(
-                    f"转职成功：{JOBS[code].name}")
-            return
-        qid = flow["quest"]
-        quests = self.ctx.world.player.quests
-        if flow["stage"] == "offer":
-            if key == "yes":
-                if quests.accept(qid, self.ctx.world.player):
-                    d = self.quest_defs[qid]
-                    self.ctx.audio.play("QuestClear", 0.5)
-                    self.ctx.panels.flash(f"任务接受：{d.name}")
-                    flow["stage"] = "accepted"
-                    lines = [self._qmark(l) for l in d.accept_yes] or \
-                            [f"已接受任务「{d.name}」。按 Q 查看任务日志。"]
-                    self.ctx.ui.show_quest(d.name, lines, ["ok"])
-                else:
-                    self.ctx.ui.hide_quest()
-            else:
-                d = self.quest_defs[qid]
-                flow["stage"] = "declined"
-                lines = [self._qmark(l) for l in d.accept_no] or ["好吧，改变心意的话再来找我。"]
-                self.ctx.ui.show_quest(d.name, lines, ["ok"])
-        elif flow["stage"] == "complete":
-            if key == "yes":
-                if quests.complete(qid, self.ctx.world.player, self.ctx.world.combat,
-                                   self.assets, self.ctx.audio):
-                    d = self.quest_defs[qid]
-                    self.ctx.panels.flash(f"任务完成：{d.name}")
-                    flow["stage"] = "completed"
-                    lines = [self._qmark(l) for l in d.complete_yes] or \
-                            [f"已获得任务「{d.name}」的奖励！"]
-                    self.ctx.ui.show_quest(d.name, lines, ["ok"])
-                else:
-                    self.ctx.ui.hide_quest()
-            else:
-                self.ctx.ui.hide_quest()
-        else:   # status / accepted / declined / completed 只展示 → 关闭
-            self.ctx.ui.hide_quest()
-            self._quest_flow = None
 
     def _quest_extra_goal_lines(self, qid: str) -> List[str]:
         """任务日志：生成当前进行中任务的目标行（击杀 / 收集 / 描述）。"""
@@ -518,8 +323,7 @@ class Game:
         self.dead = False
         self.spawn_grace = settings.SPAWN_GRACE
         self.ctx.ui.hide_death()
-        self.ctx.ui.hide_dialog()
-        self._talk_npc = None
+        self._dialogue.close_all()
         p = self.ctx.world.player
         p.hp = p.max_hp
         p.attacking = False
@@ -536,10 +340,7 @@ class Game:
         """切换到目标地图：后台渲染地图，主线程显示加载画面。"""
         if self._loading:
             return
-        self.ctx.ui.hide_dialog()
-        self.ctx.ui.hide_quest()
-        self._talk_npc = None
-        self._quest_flow = None
+        self._dialogue.close_all()
         self.ctx.shop_panel.close()
         self.ctx.storage_panel.close()
         self.ctx.audio.stop_bgm()
@@ -598,24 +399,14 @@ class Game:
             return
 
         # 对话框不再暂停世界；走远 / 切图自动收起
-        if self.ctx.ui.dialog_visible and self._talk_npc is not None:
-            r = self._talk_npc.rect()
-            if abs(self.ctx.world.player.x - r.centerx) > 140:
-                self.ctx.ui.hide_dialog()
-                self._talk_npc = None
-        # 任务对话框同样在走远后收起
-        if self.ctx.ui.quest_visible and self._quest_flow is not None:
-            r = self._quest_flow["npc"].rect()
-            if abs(self.ctx.world.player.x - r.centerx) > 140:
-                self.ctx.ui.hide_quest()
-                self._quest_flow = None
+        self._dialogue.update()
 
         # 出生保护计时
         if self.spawn_grace > 0:
             self.spawn_grace -= dt
 
         # 世界帧（玩家/怪物/箭/NPC/战斗/相机），弹窗时屏蔽传送门检测
-        portal_blocked = self.ctx.ui.quest_visible or self.ctx.ui.dialog_visible
+        portal_blocked = self._dialogue.portal_blocked()
         portal = self.ctx.world.update(dt, self.keys, self.spawn_grace,
                                    audio=self.ctx.audio, portal_blocked=portal_blocked)
         if portal is not None:
@@ -655,6 +446,7 @@ class Game:
             self.ctx.storage_panel.draw(self.canvas, self.ctx.world.player)
         self.ctx.ui.draw_dialog(self.canvas, self.ctx.world.camera)
         self.ctx.ui.draw_quest(self.canvas)
+        self._dialogue.draw(self.canvas)
         self.ctx.ui.draw_death(self.canvas)
 
         # 黑场淡入（切图 / 重生后从黑渐变到场景，避免瞬间弹出）

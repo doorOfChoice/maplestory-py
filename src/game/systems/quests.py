@@ -272,6 +272,35 @@ def _collect_stop(stop_node) -> List[str]:
     return lines
 
 
+@dataclass(frozen=True)
+class NpcQuest:
+    """某个 NPC 名下的一条可交互任务（供列表/菜单展示）。"""
+    qid: str
+    title: str
+    level: int = 0
+    state: str = "offer"      # offer=可接取 / complete=可交付
+
+
+def collect_npc_quests(defs: Dict[str, QuestDef], log: "QuestLog",
+                       npc_id, player) -> List[NpcQuest]:
+    """收集该 NPC 的可交付 + 可接取任务，交付排在前（供选择菜单）。
+
+    ``npc_id`` 以字符串比较；不属本 NPC 的任务一律忽略。
+    """
+    out: List[NpcQuest] = []
+    for qid, d in defs.items():
+        if d.end_npc is not None and str(d.end_npc) == npc_id \
+                and log.is_accepted(qid) and log.can_complete(qid, player):
+            out.append(NpcQuest(qid=qid, title=d.name, level=d.lvmin,
+                                state="complete"))
+        elif d.start_npc is not None and str(d.start_npc) == npc_id \
+                and not log.started(qid) and log.can_start(qid, player):
+            out.append(NpcQuest(qid=qid, title=d.name, level=d.lvmin,
+                                state="offer"))
+    out.sort(key=lambda q: 0 if q.state == "complete" else 1)
+    return out
+
+
 # ════════════════════════════════════════════════════════════════════
 # 文本标记渲染
 # ════════════════════════════════════════════════════════════════════

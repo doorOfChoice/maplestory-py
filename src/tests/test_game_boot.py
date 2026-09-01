@@ -9,6 +9,7 @@ _update / _draw / _enter_map / respawn），是刻意的「冒烟" harness——
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 import pygame
 import pytest
@@ -84,3 +85,54 @@ def test_respawn_recovers_player(game):
     assert game.ctx.world.player.hp == game.ctx.world.player.max_hp
     assert game.ctx.world.monsters is not None
     assert game.ctx.world.npcs is not None
+
+
+def _fake_npc(npc_id: str = "1012100") -> SimpleNamespace:
+    return SimpleNamespace(
+        npc_id=npc_id, name="赫丽娜",
+        rect=lambda: pygame.Rect(0, 0, 40, 80))
+
+
+def test_advancement_flow_uses_script(game):
+    """转职经脚本会话：Lv10 新手对导师点 yes → 转职为弓箭手，会话结束。"""
+    from game.core.jobs import JOBS
+    _boot(game)
+    game.ctx.world.player.job = 0
+    game.ctx.world.player.level = 10
+    npc = _fake_npc()
+    dlg = game._dialogue
+    assert dlg._begin_advance_flow(npc, JOBS[3000]) is True
+    assert dlg._advance_session is not None
+    assert dlg._advance_session.node_id == "confirm"
+    dlg._advance_button("yes")
+    assert game.ctx.world.player.job == 3000
+    assert dlg._advance_session is not None      # 停在「恭喜转职」节点
+    dlg._advance_button("ok")
+    assert dlg._advance_session is None
+    game._draw()   # 转职后正常出帧
+
+
+def test_npc_quest_menu_select_opens_quest(game):
+    """多任务弹原版列表，点选条目进入对应任务的接取流程。"""
+    from game.systems.quests import QuestDef, collect_npc_quests, QuestLog
+    _boot(game)
+    npc = _fake_npc()
+    player = game.ctx.world.player
+    defs = {
+        "1": QuestDef(qid="1", name="弓箭手入门", start_npc=1012100, lvmin=10),
+        "2": QuestDef(qid="2", name="打菇菇", start_npc=1012100, lvmin=5),
+        "3": QuestDef(qid="3", name="别处任务", start_npc=9999999, lvmin=10),
+    }
+    player.quests = QuestLog(defs)
+    game.quest_defs = defs
+    dlg = game._dialogue
+    dlg.quest_defs = defs
+    items = collect_npc_quests(defs, player.quests, "1012100", player)
+    assert [it.qid for it in items] == ["1", "2"]
+    dlg._open_quest_menu(npc, items)
+    assert dlg._quest_menu_view is not None
+    game._draw()   # 出菜单帧不崩溃
+    dlg._open_npc_quest(npc, items[1])
+    assert dlg._quest_flow == {"npc": npc, "quest": "2", "stage": "offer"}
+    dlg._close_quest_menu()
+    game._draw()
