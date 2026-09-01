@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from lupa import LuaRuntime
 
-from game.systems.lua_quests import _ints, _lines, _pairs, _quest_to_def
+from game.systems.lua_quests import _ints, _lines, _pairs, _quest_to_def, load_lua_quest_defs
 
 pytest.importorskip("lupa")
 
@@ -129,3 +129,94 @@ def test_quest_to_def_full_fields():
     assert d.reward_items == [(2000000, 2)]
     assert d.next_quest == 2001
     assert d.accept_lines == ["a1", "a2"]
+
+
+# ── 加载器：目录扫描 + 沙箱执行 ──────────────────────────────────────────
+
+def _write_script(tmp: Path, name: str, body: str) -> Path:
+    path = tmp / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_load_lua_quest_defs_single_npc():
+    """单个 NPC 脚本定义 2 个任务，返回正确的 qid 和字段。"""
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        _write_script(tmp, "1012100.lua", """\
+local M = {}
+function M.quests(ctx)
+  return {
+    { name = "任务1", lvmin=1, accept_lines = {"a1"}, complete_lines = {"c1"} },
+    { name = "任务2", lvmin=5, end_items = {{2000000, 3}},
+      accept_lines = {"a2"}, complete_lines = {"c2"} },
+  }
+end
+return M
+""")
+        defs = load_lua_quest_defs(script_dir=tmp)
+        assert len(defs) == 2
+        assert "c_1012100_1" in defs
+        assert defs["c_1012100_1"].name == "任务1"
+        assert defs["c_1012100_1"].lvmin == 1
+        assert defs["c_1012100_1"].start_npc == 1012100
+        assert "c_1012100_2" in defs
+        assert defs["c_1012100_2"].end_items == [(2000000, 3)]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_lua_quest_defs_two_npcs():
+    """两个 NPC 脚本，各自任务都能正确加载。"""
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        _write_script(tmp, "1012100.lua", """\
+local M = {}
+function M.quests(ctx) return {{ name = "N1", accept_lines = {"a"}, complete_lines = {"c"} }} end
+return M
+""")
+        _write_script(tmp, "1012119.lua", """\
+local M = {}
+function M.quests(ctx) return {{ name = "N2", accept_lines = {"b"}, complete_lines = {"d"} }} end
+return M
+""")
+        defs = load_lua_quest_defs(script_dir=tmp)
+        assert len(defs) == 2
+        assert "c_1012100_1" in defs
+        assert "c_1012119_1" in defs
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_lua_quest_defs_no_quests():
+    """脚本没有 quests 函数，跳过。"""
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        _write_script(tmp, "empty.lua", "local M = {} return M\n")
+        defs = load_lua_quest_defs(script_dir=tmp)
+        assert defs == {}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_lua_quest_defs_one_bad_skip():
+    """多条任务中一条翻译失败，不拖垮其余。"""
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        _write_script(tmp, "1012100.lua", """\
+local M = {}
+function M.quests(ctx)
+  return {
+    { name = "good", accept_lines = {"a"}, complete_lines = {"c"} },
+    { },  -- 没 name → 跳过
+    { name = "also_good", accept_lines = {"b"}, complete_lines = {"d"} },
+  }
+end
+return M
+""")
+        defs = load_lua_quest_defs(script_dir=tmp)
+        assert len(defs) == 2
+        assert "c_1012100_1" in defs
+        assert "c_1012100_3" in defs
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)

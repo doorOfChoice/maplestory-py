@@ -10,7 +10,17 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import lupa
+from lupa import LuaRuntime
+
+from game import settings
 from game.systems.quests import QuestDef
+
+# 内容脚本目录：resources/content/npc/<npc_id>.lua
+_SCRIPT_DIR = settings.RESOURCE_DIR / "content" / "npc"
+
+# 沙箱里禁止的系统库/加载函数（与 scripting.py 保持一致）
+_FORBIDDEN = ("os", "io", "package", "debug", "dofile", "loadfile")
 
 
 def _pairs(v) -> List[Tuple[int, int]]:
@@ -103,3 +113,44 @@ def _quest_to_def(npc_id: str, idx: int, tbl) -> Optional[QuestDef]:
     except (TypeError, ValueError, AttributeError) as e:
         logging.warning("Lua quest [%s/%d] parse failed: %s", npc_id, idx, e)
         return None
+
+
+def _sandbox() -> LuaRuntime:
+    lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
+    g = lua.globals()
+    for name in _FORBIDDEN:
+        g[name] = None
+    return lua
+
+
+def load_lua_quest_defs(
+    script_dir: Optional[Path] = None,
+    ctx: Any = None,
+) -> Dict[str, QuestDef]:
+    """扫描 script_dir 下 *.lua，加载 quests() 翻译成 {qid: QuestDef}。"""
+    script_dir = script_dir or _SCRIPT_DIR
+    defs: Dict[str, QuestDef] = {}
+    if not script_dir.is_dir():
+        return defs
+    for path in sorted(script_dir.glob("*.lua")):
+        npc_id = path.stem
+        try:
+            lua = _sandbox()
+            src = path.read_text(encoding="utf-8")
+            mod = lua.execute(src, str(path))
+            quests_fn = mod["quests"]
+            if quests_fn is None:
+                continue
+            quests_tbl = quests_fn(ctx)
+            if quests_tbl is None:
+                continue
+            for i in range(1, len(quests_tbl) + 1):
+                item = quests_tbl[i]
+                if item is None:
+                    continue
+                d = _quest_to_def(npc_id, i, item)
+                if d is not None:
+                    defs[d.qid] = d
+        except Exception:
+            logging.warning("Lua script %s load failed", path, exc_info=True)
+    return defs
