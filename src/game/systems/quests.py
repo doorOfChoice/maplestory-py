@@ -117,6 +117,8 @@ class QuestDef:
     complete_lines: List[str] = field(default_factory=list)
     complete_yes: List[str] = field(default_factory=list)
     complete_stop: List[str] = field(default_factory=list)   # 条件未满足时的提示
+    # ── Lua 驱动 ─────────────────────────────────────────
+    script: Optional[str] = None  # 设为脚本名（如 "advance"）时，NPC 对话由 Lua 会话驱动
     # ── QuestInfo 描述 ──────────────────────────────────
     desc0: str = ""           # 接取前提示
     desc1: str = ""           # 进行中描述
@@ -444,6 +446,14 @@ class QuestLog:
         return 0
 
     # ── 动作 ────────────────────────────────────────────────────────
+    def force_complete(self, qid: str) -> None:
+        """无奖励直接把任务置为已完成（用于转职等 Lua 驱动的特殊流程）。
+
+        与 complete 不同：不检查接受状态/条件、不发任何奖励，仅改状态，
+        使该任务不再出现在可接列表与任务日志的进行中区。
+        """
+        self.status[qid] = Q_COMPLETED
+
     def accept(self, qid: str, player) -> bool:
         if not self.can_start(qid, player):
             return False

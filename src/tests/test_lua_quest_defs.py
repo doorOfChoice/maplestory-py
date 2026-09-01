@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from lupa import LuaRuntime
 
-from game.systems.lua_quests import _ints, _lines, _pairs, _quest_to_def, load_lua_quest_defs
+from game.systems.lua_quests import _ints, _lines, _pairs, _quest_to_def, load_lua_quest_defs, build_advance_quest_defs
 from game.systems.quests import QuestDef, QuestLog, collect_npc_quests
 
 pytest.importorskip("lupa")
@@ -246,3 +246,36 @@ def test_collect_npc_quests_merges_lua_and_wz():
     qids = [it.qid for it in items]
     assert "1000" in qids
     assert "c_1012100_1" in qids
+
+
+def test_build_advance_quest_defs():
+    """有导师的职业生成转职任务：script=advance，接取条件为前置职业（lvmin 不限等级）。"""
+    defs = build_advance_quest_defs()
+    assert "adv_3000" in defs
+    d = defs["adv_3000"]
+    assert d.name == "转职：弓箭手"
+    assert d.script == "advance"
+    assert d.start_npc == 1012100
+    assert d.end_npc == 1012100
+    assert d.lvmin == 0
+    assert d.jobs == [0]
+
+
+def test_build_advance_quest_defs_trainer_collect():
+    """转职任务出现在其导师 NPC 的可接列表里（玩家为前置职业且达标）。"""
+    defs = build_advance_quest_defs()
+    log = QuestLog(defs)
+    player = SimpleNamespace(level=10, job=0, x=0.0, y=0.0,
+                             inventory=SimpleNamespace(etcs={}, consumes={}))
+    items = collect_npc_quests(defs, log, "1012100", player)
+    assert [it.qid for it in items] == ["adv_3000"]
+
+
+def test_build_advance_quest_defs_hidden_after_job():
+    """已转职（job=3000）后，转职任务不再出现在列表。"""
+    defs = build_advance_quest_defs()
+    log = QuestLog(defs)
+    player = SimpleNamespace(level=30, job=3000, x=0.0, y=0.0,
+                             inventory=SimpleNamespace(etcs={}, consumes={}))
+    items = collect_npc_quests(defs, log, "1012100", player)
+    assert items == []

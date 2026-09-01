@@ -49,6 +49,7 @@ class NpcDialogueController:
         self._advance_session = None                   # 转职解说会话
         self._advance_ctx: Optional[Any] = None
         self._advance_npc: Optional[object] = None
+        self._advance_qid: Optional[str] = None
         self._quest_menu_view: Optional[QuestAlarmView] = None   # 多任务选择列表
         self._quest_menu_items: List[object] = []
         self._quest_menu_npc: Optional[object] = None
@@ -56,15 +57,12 @@ class NpcDialogueController:
 
     # ── 入口：找 NPC 并路由 ─────────────────────────────────────────
     def try_talk(self) -> None:
-        """与脚下 NPC 对话：导师转职 > 任务交互（列表/直连）> 普通寒暄。"""
+        """与脚下 NPC 对话：任务交互（列表/直连，含转职 Lua 任务）> 普通寒暄。"""
         for npc in self.ctx.world.npcs:
             if npc.rect().colliderect(
                     pygame.Rect(int(self.ctx.world.player.x - 20),
                                 int(self.ctx.world.player.y - 40), 40, 80)):
                 self._talk_npc = npc
-                jobdef = job_for_trainer(npc.npc_id)
-                if jobdef is not None and self._begin_advance_flow(npc, jobdef):
-                    return
                 qlist = collect_npc_quests(
                     self.quest_defs, self.ctx.world.player.quests,
                     str(npc.npc_id), self.ctx.world.player)
@@ -186,6 +184,7 @@ class NpcDialogueController:
         self._advance_session = None
         self._advance_ctx = None
         self._advance_npc = None
+        self._advance_qid = None
         self._close_quest_menu()
 
     def portal_blocked(self) -> bool:
@@ -193,7 +192,15 @@ class NpcDialogueController:
 
     # ── 单任务接取/交付 ─────────────────────────────────────────────
     def _open_npc_quest(self, npc, item) -> None:
-        """进入单个任务的接取/交付流程（item 为 collect_npc_quests 的 NpcQuest）。"""
+        """进入单个任务的接取/交付流程（item 为 collect_npc_quests 的 NpcQuest）。
+
+        Lua 驱动的任务（QuestDef.script 非空，如转职 adv_*）路由到 Lua 会话，
+        其余走标准 offer/complete 流程。
+        """
+        d = self.quest_defs.get(item.qid)
+        if d is not None and d.script:
+            self._begin_lua_quest(npc, item.qid, d.script)
+            return
         self._quest_flow = {"npc": npc, "quest": item.qid, "stage": item.state}
         if item.state == "complete":
             self._show_quest_complete(item.qid)
@@ -232,17 +239,18 @@ class NpcDialogueController:
             self.ctx.shop_panel.close()
             self.ctx.storage_panel.open()
 
-    # ── 转职对话（内容脚本在 content/advance.lua）──────────────────────
-    def _begin_advance_flow(self, npc, jobdef) -> bool:
-        """导师对话：由 Lua 会话按玩家状态路由（可转职/已是该职/不足）。"""
+    # ── Lua 驱动的任务对话（如转职：内容脚本在 content/advance.lua）─────────
+    def _begin_lua_quest(self, npc, qid: str, script: str) -> None:
+        """由 Lua 会话驱动的任务对话：按玩家状态路由，并记住所属任务 qid。"""
+        jobdef = job_for_trainer(npc.npc_id)
         sess, ctx = build_lua_session(
-            "advance", player=self.ctx.world.player, jobdef=jobdef,
+            script, player=self.ctx.world.player, jobdef=jobdef,
             npc_name=npc.name, assets=self.assets)
         self._advance_session = sess
         self._advance_ctx = ctx
         self._advance_npc = npc
+        self._advance_qid = qid
         self._show_session_snapshot()
-        return True
 
     def _show_session_snapshot(self) -> None:
         """把当前对话会话的快照（说话人/文本/选项）渲染到原版任务框。"""
@@ -276,6 +284,10 @@ class NpcDialogueController:
                 self.ctx.audio.play("LevelUp", 0.6)
                 self.ctx.panels.flash(
                     f"转职成功：{JOBS[self.ctx.world.player.job].name}")
+                # 转职任务完成：置为已完成，不再出现在可接列表
+                if self._advance_qid is not None:
+                    self.ctx.world.player.quests.force_complete(self._advance_qid)
+            self._advance_qid = None
             return
         self._show_session_snapshot()
 

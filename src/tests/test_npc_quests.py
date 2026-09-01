@@ -49,3 +49,25 @@ def test_other_npc_quest_excluded():
     log = QuestLog(defs)
     got = collect_npc_quests(defs, log, "1012100", make_player())
     assert "3" not in [q.qid for q in got]
+
+
+def test_force_complete_marks_completed_without_rewards():
+    """force_complete 直接把任务置为已完成，不发任何奖励。"""
+    defs = make_defs()
+    log = QuestLog(defs)
+    player = make_player()
+    log.force_complete("1")
+    assert log.is_completed("1")
+    # 不触发 accept（无 accept_items），也不走 complete（无 reward 结算）
+    assert log.started("1")
+    # 完成后不再出现在可接列表
+    got = collect_npc_quests(defs, log, "1012100", player)
+    assert [q.qid for q in got] == []
+
+
+def test_force_complete_unknown_qid_noop():
+    """不存在的 qid 调用 force_complete 不报错。"""
+    defs = make_defs()
+    log = QuestLog(defs)
+    log.force_complete("99999")
+    assert not log.started("99999") or log.is_completed("99999")

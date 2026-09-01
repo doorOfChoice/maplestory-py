@@ -14,6 +14,7 @@ import lupa
 from lupa import LuaRuntime
 
 from game import settings
+from game.core.jobs import JOBS
 from game.systems.quests import QuestDef
 
 # 内容脚本目录：resources/content/npc/<npc_id>.lua
@@ -153,4 +154,29 @@ def load_lua_quest_defs(
                     defs[d.qid] = d
         except Exception:
             logging.warning("Lua script %s load failed", path, exc_info=True)
+    return defs
+
+
+def build_advance_quest_defs() -> Dict[str, QuestDef]:
+    """为每个有导师的职业生成「转职任务」QuestDef（script=advance 驱动）。
+
+    转职任务 = 一个无杀怪/收集条件的特殊任务：对话由 Lua 会话（advance.lua）驱动，
+    完成时改真身职业。lvmin 置 0 使新手任何时候都能在导师处看到该任务并得到
+    「等级不足」的引导（Lua 脚本内的 weak 分支）；jobs 限制为前置职业，转职后
+    自然不再出现在列表。
+    """
+    defs: Dict[str, QuestDef] = {}
+    for jd in JOBS.values():
+        if jd.trainer_npc is None:
+            continue
+        qid = f"adv_{jd.code}"
+        defs[qid] = QuestDef(
+            qid=qid,
+            name=f"转职：{jd.name}",
+            start_npc=jd.trainer_npc,
+            end_npc=jd.trainer_npc,
+            lvmin=0,
+            jobs=[jd.prejob],
+            script="advance",
+        )
     return defs

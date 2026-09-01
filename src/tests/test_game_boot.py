@@ -101,7 +101,7 @@ def test_advancement_flow_uses_script(game):
     game.ctx.world.player.level = 10
     npc = _fake_npc()
     dlg = game._dialogue
-    assert dlg._begin_advance_flow(npc, JOBS[3000]) is True
+    dlg._begin_lua_quest(npc, "adv_3000", "advance")
     assert dlg._advance_session is not None
     assert [o.label for o in dlg._advance_session.snapshot().options] == ["yes", "no"]
     dlg._advance_button("yes")
