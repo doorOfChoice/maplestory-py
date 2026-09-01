@@ -53,7 +53,28 @@ def test_buff_skill_level_has_time_field():
 
 
 @needs_wz
-def test_mobskill_img_contains_status_skills():
+def test_bowman_passive_mods_reads_real_fields():
+    """真实被动：转职后 passive_mods 解析 霸王箭的 prop/damage、精準強化 x。"""
+    pygame.init()
+    pygame.display.set_mode((8, 8))
+    from game.assets import Assets
+    from game.skills import load_skill_defs, SkillBook
+    assets = Assets(settings.TRAINER_SPAWN_MAP)
+    try:
+        defs = load_skill_defs(assets, ["3000000", "3000001", "3000002"])
+        book = SkillBook(assets, 3000, defs=defs)
+        book.on_advance(__import__("game.jobs", fromlist=["JOBS"]).JOBS[3000])
+        mods = book.passive_mods()
+        # 霸王箭(3000001) 满级 prop=40、damage=200；精準強化(3000000) x=16
+        assert mods["crit"] == 40
+        assert mods["crit_mult"] == 200
+        assert mods["acc"] == 16
+        assert mods.get("range", 0) > 0
+    finally:
+        assets.close()
+
+
+
     """MobSkill.img 含毒(125)/晕(123)/减速(126) 技能，level 表带 time/prop。"""
     pygame.init()
     pygame.display.set_mode((8, 8))

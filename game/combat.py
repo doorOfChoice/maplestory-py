@@ -306,13 +306,16 @@ class Combat:
             mult = skill["damage"]
         else:
             mult = 1.0
-        atk = player.attack_value()
-        luk = getattr(player, "luk", 0)
+        atk_lo, atk_hi = player.attack_range()
+        player_level = getattr(player, "level", 0)
         crit_rate = getattr(player, "crit_rate", lambda: 0.0)()
+        crit_mult = getattr(player, "crit_mult", lambda: settings.CRIT_MULT)()
 
         for mob in targets:
-            dmg, crit = stats_mod.roll_damage(atk, mult, getattr(mob, "pd", 0),
-                                              luk, random, crit_rate)
+            dmg, crit = stats_mod.roll_damage(
+                atk_lo, atk_hi, mult, getattr(mob, "pd", 0),
+                player_level, getattr(mob, "level", 0), random,
+                crit_rate, crit_mult)
             self.numbers.append(DamageNumber(
                 mob.x, mob.cy - mob.sprite_h, dmg,
                 "violet" if (skill or crit) else "red", big=crit))
@@ -331,18 +334,22 @@ class Combat:
         弹道贴图用箭矢物品的 bullet 节点（原版同款）。
         """
         crit_rate = getattr(player, "crit_rate", lambda: 0.0)()
+        crit_mult = getattr(player, "crit_mult", lambda: settings.CRIT_MULT)()
+        player_level = getattr(player, "level", 0)
+        atk_lo, atk_hi = player.attack_range()
         if skill_data is None:
-            dmg, crit = stats_mod.roll_damage(player.attack_value(), 1.0,
-                                              0, 0, random, crit_rate)
+            dmg, crit = stats_mod.roll_damage(
+                atk_lo, atk_hi, 1.0, 0, player_level, 0, random,
+                crit_rate, crit_mult)
             n, mob_count = 1, 1
             kind = "red"
             frames = self.assets.normal_arrow_frames() if self.assets else []
             hit_frames: List = []
         else:
             sid = skill_data["id"]
-            dmg, crit = stats_mod.roll_damage(player.attack_value(),
-                                              skill_data["damage"],
-                                              0, 0, random, crit_rate)
+            dmg, crit = stats_mod.roll_damage(
+                atk_lo, atk_hi, skill_data["damage"], 0, player_level, 0,
+                random, crit_rate, crit_mult)
             n = max(1, int(skill_data.get("bullet_count", 1)))
             mob_count = max(1, skill_data["mob_count"])
             kind = "violet"
@@ -396,7 +403,7 @@ class Combat:
             amount = max(1, int(hit["amount"] * 100.0 / (100 + player.defense_value())))
             player.damage(amount)
             self.numbers.append(DamageNumber(
-                player.x, player.y - 40, amount, "blue"))
+                player.x, player.y - 40, amount, "red"))
             for atk in hit.get("status_attacks", ()):
                 if random.random() * 100.0 < atk.get("prob", 0):
                     player.statuses.apply(atk["kind"], atk["duration"],

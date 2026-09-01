@@ -22,6 +22,18 @@ def approach(value: float, target: float, max_delta: float) -> float:
     return target
 
 
+def friction(value: float, dt: float, coeff: float) -> float:
+    """速度摩擦衰减：保留惯性、按系数每帧按比例减速，接近 0 时归零。
+
+    用于攻击期间等「不做主动加速、但也别骤停」的场景（原版挥击手感）：
+    带着进入时的速度滑行，逐渐定住。
+    """
+    if value == 0.0:
+        return 0.0
+    v = value * max(0.0, 1 - coeff * dt)
+    return v if abs(v) >= 1.0 else 0.0
+
+
 class JumpFeather:
     """跳跃手感：按压缓冲（press 后短暂内存） + 土狼时间（离地后仍可跳）。
 

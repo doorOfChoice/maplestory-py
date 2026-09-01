@@ -79,6 +79,7 @@ class Monster:
         self.max_hp = int(stats.get("hp") or 10)
         self.hp = self.max_hp
         self.exp = int(stats.get("exp") or 0)
+        self.level = int(stats.get("level") or 0)
         self.attack_power = int(stats.get("weaponAttack") or 10)
         self.pd = int(stats.get("weaponDefense") or 0)
         self.speed = float(stats.get("speed") or 0)

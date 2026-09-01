@@ -82,8 +82,15 @@ def test_spawn_arrows_bullet_count():
         x, y = 0.0, 100.0
         facing_right = True
         feet_y = 120.0
+        level = 10
         def attack_value(self):
             return 50
+        def attack_range(self):
+            return (50, 50)
+        def crit_rate(self):
+            return 0.0
+        def crit_mult(self):
+            return 1.5
     skill = {"id": "3001005", "damage": 0.92, "mob_count": 1,
              "bullet_count": 2, "mp_con": 10, "hp_con": 0, "range": 0}
     combat.spawn_arrows(P(), skill)
@@ -106,8 +113,15 @@ def test_spawn_arrows_normal_attack():
     class P:
         x, y = 0.0, 100.0
         facing_right = True
+        level = 10
         def attack_value(self):
             return 50
+        def attack_range(self):
+            return (50, 50)
+        def crit_rate(self):
+            return 0.0
+        def crit_mult(self):
+            return 1.5
     combat.spawn_arrows(P(), None)
     assert len(combat.arrows) == 1
     assert 47 <= combat.arrows[0].dmg <= 53      # 普攻伤害带 ±5% 浮动

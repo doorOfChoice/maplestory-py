@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import pygame
 
@@ -21,7 +21,7 @@ from .jobs import JOBS, is_ranged_weapon
 from .skills import SkillBook
 from .stats import base_stats
 from .quests import QuestLog
-from .motion import approach, JumpFeather
+from .motion import approach, friction, JumpFeather
 
 POSE_IDLE = "stand1"
 POSE_RUN = "walk1"
@@ -141,7 +141,7 @@ class Player:
         self.navel_px = self.assets.character_navel_px(self.equips, pose, flip)
 
     def exp_to_next(self) -> int:
-        return int(settings.BASE_EXP_NEED * (settings.EXP_GROWTH ** (self.level - 1)))
+        return stats_mod.exp_to_next(self.level)
 
     # ── 装备 / 属性 ────────────────────────────────────────────────
     def advance_to(self, code: int, assets: Assets) -> None:
@@ -171,16 +171,30 @@ class Player:
         self._load_anim(POSE_IDLE if self.on_ground else POSE_JUMP)
 
     def attack_value(self) -> int:
-        """物理攻击力：武器面板 × 主属性权重 + 副属性/10 + 被动/buff 加值。"""
+        """物理攻击力（面板上限端）：武器面板 × 主属性权重 + 被动/buff 加值。"""
         pad = self.inventory.attack() or settings.BASE_WEAPON_PAD
         base = stats_mod.attack(self.total_stats(), pad, self.is_ranged())
         return base + self.skills.passive_mods().get("atk", 0) \
             + self.buffs.mod_sum("atk")
 
+    def attack_range(self) -> Tuple[int, int]:
+        """物理攻击区间 (min, max)：供战斗按 AyumiLove 公式结算。"""
+        pad = self.inventory.attack() or settings.BASE_WEAPON_PAD
+        lo, hi = stats_mod.attack_range(self.total_stats(), pad, self.is_ranged())
+        bonus = self.skills.passive_mods().get("atk", 0) + self.buffs.mod_sum("atk")
+        return max(1, lo + bonus), max(1, hi + bonus)
+
     def crit_rate(self) -> float:
         """暴击率（%）：被动技能 + buff 的 crit 词条之和。"""
         return float(self.skills.passive_mods().get("crit", 0)
                      + self.buffs.mod_sum("crit"))
+
+    def crit_mult(self) -> float:
+        """暴击伤害倍率：被动 crit_mult（如霸王箭 150→1.5），否则用默认。"""
+        pm = self.skills.passive_mods()
+        if pm.get("crit_mult"):
+            return pm["crit_mult"] / 100.0
+        return settings.CRIT_MULT
 
     def _apply_buff_skill(self, skill_data: dict) -> bool:
         """buff 技能接线：WZ level 表含 time 字段时上 buff 并返回 True。
@@ -432,7 +446,9 @@ class Player:
             self._try_jump()
 
         if self.attacking:
-            self.stop_move()
+            # 攻击期间保留进入攻击时的水平速度（惯性）但不响应方向键加速，
+            # 按摩擦逐渐衰减到停 —— 原版挥击时「边走边砍、最后定住」的手感。
+            self.vx = friction(self.vx, dt, settings.ATTACK_MOVE_FRICTION)
         elif self.statuses.locked():
             self.stop_move()
         elif self.hurt_timer > 0:

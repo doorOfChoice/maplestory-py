@@ -180,13 +180,42 @@ class SkillBook:
         self.sp += amount
 
     def passive_mods(self) -> Dict[str, int]:
-        """已学被动技能的聚合属性修正（键：str/dex/int/luk/atk/def/crit/hp/mp）。
+        """已学被动技能的聚合属性修正。
 
-        当前为空表占位；转职分支（feat/job-advance）解析 WZ 被动节点
-        （source skill 的 attack/boost/dex/criticalrate/hp/mp 等字段）后填充。
-        player.total_stats / attack_value / defense_value 会读取本表。
+        键：str/dex/int/luk/atk/def/crit/crit_mult/acc/range/hp/mp。
+        被动技能在转职 on_advance 时已满级（invisible 附赠），这里读取
+        Skill.wz level 表的真实字段映射：
+            prop   → crit（暴击率 %，如霸王箭 12→40）
+            damage → crit_mult（暴击伤害 %，如霸王箭 105→200）
+            x      → acc（命中，如精準強化 1→16）
+            range  → range（射程加成，如百步穿楊 15→120）
+        player.total_stats / attack_value / defense_value / crit_rate 会读取本表。
         """
-        return {}
+        mods: Dict[str, int] = {}
+        for pid in self._passive_ids:
+            d = self.defs.get(pid)
+            lv = self.levels.get(pid, 0)
+            if d is None or lv <= 0:
+                continue
+            lv_table = d.stat(lv, "prop", 0)
+            if lv_table:
+                mods["crit"] = mods.get("crit", 0) + lv_table
+            lv_dmg = d.stat(lv, "damage", 0)
+            if lv_dmg:
+                mods["crit_mult"] = lv_dmg
+            lv_x = d.stat(lv, "x", 0)
+            if lv_x:
+                mods["acc"] = mods.get("acc", 0) + lv_x
+            lv_r = d.stat(lv, "range", 0)
+            if lv_r:
+                mods["range"] = mods.get("range", 0) + lv_r
+            for stat_key, src in (("dex", "dex"), ("str", "str"),
+                                  ("hp", "hp"), ("mp", "mp"),
+                                  ("atk", "attack"), ("def", "pdd")):
+                val = d.stat(lv, src, 0)
+                if val:
+                    mods[stat_key] = mods.get(stat_key, 0) + val
+        return mods
 
     def on_advance(self, jobdef) -> None:
         """转职：职业附赠被动直接满级（免费），主动技能重排快捷键。"""

@@ -65,8 +65,8 @@ def test_cast_buff_skill_applies_mods_and_raises_attack(monkeypatch):
     assert player.buffs.mod_sum("atk") == 5
     assert player.buffs.mod_sum("dex") == 10
     assert player.buffs.mod_sum("crit") == 15
-    # atk +5 直接进面板；dex +10 作副属性按 /10 计入
-    assert player.attack_value() == before + 6
+    # atk +5 直接进面板；dex +10 作为副属性按主属性权重计入
+    assert player.attack_value() == before + 7
 
 
 def test_cast_buff_skill_consumes_mp_without_entering_attack(monkeypatch):

@@ -62,8 +62,8 @@ PLAYER_STEP_UP = 36.0
 ATTACK_RANGE = 58.0              # 攻击命中框向前延伸距离
 ATTACK_HEIGHT = 30.0
 BASE_DAMAGE = 25                 # 基础攻击力
-BASE_EXP_NEED = 15               # 1 级所需经验
-EXP_GROWTH = 1.35                # 每级经验需求增长倍率
+ATTACK_MOVE_FRICTION = 8.0       # 攻击期间水平速度每秒摩擦衰减系数（保留惯性滑行至停）
+# 经验需求：官方逐级表见 game/stats.py EXP_TO_NEXT，此处不再用指数近似
 RESPAWN_FULL = True
 
 # ── 数值系统（四维 / AP / HP·MP 成长，公式见 game/stats.py）─────────

@@ -1,12 +1,12 @@
-"""数值系统纯函数：加点 / HP·MP 公式 / 攻防伤害 / 穿戴门控。"""
+"""数值系统纯函数：加点 / HP·MP 公式 / 攻击区间 / 伤害结算 / 经验查表 / 穿戴门控。"""
 from __future__ import annotations
 
 import random
 
 from game import settings
 from game.stats import (
-    allocate, attack, auto_allocate, base_stats, defense, max_hp, max_mp,
-    roll_damage, wear_block,
+    allocate, attack, attack_range, auto_allocate, base_stats, defense,
+    exp_to_next, max_hp, max_mp, roll_damage, wear_block,
 )
 
 
@@ -54,7 +54,7 @@ def test_max_hp_mp_formula():
 
 
 def test_attack_uses_dex_for_ranged_and_str_for_melee():
-    """远程主属性 DEX、近战主属性 STR；副属性取另一维。"""
+    """远程主属性 DEX、近战主属性 STR；远程更吃 DEX。"""
     stats = {"str": 4, "dex": 104, "int": 4, "luk": 4}
     ranged = attack(stats, 25, ranged=True)
     melee = attack(stats, 25, ranged=False)
@@ -68,25 +68,63 @@ def test_attack_monotonic_in_main_stat():
     assert high > low
 
 
-def test_roll_damage_bounds():
-    """伤害 = atk×倍率×rand(0.95~1.05) − 怪物PDD×(1−LUK/100)，下限 1。"""
-    rng = random.Random(7)
-    for _ in range(50):
-        d, _crit = roll_damage(100, 1.9, 30, 4, rng)
-        assert 100 * 1.9 * 0.95 - 30 <= d <= 100 * 1.9 * 1.05
-    assert roll_damage(1, 0.1, 9999, 0, rng) == (1, False)
+def test_attack_range_min_le_max():
+    """攻击区间 Min ≤ Max，且都随主属性增长。"""
+    stats = {"str": 4, "dex": 60, "int": 4, "luk": 4}
+    lo, hi = attack_range(stats, 25, ranged=True)
+    assert 1 <= lo <= hi
+    lo2, hi2 = attack_range({"str": 4, "dex": 120, "int": 4, "luk": 4},
+                            25, ranged=True)
+    assert lo2 >= lo and hi2 >= hi
 
 
-def test_roll_damage_luk_reduces_mitigation():
-    """LUK 越高，怪物 PDD 减免越多（同随机种子对比）。"""
-    d_low, _ = roll_damage(100, 1.0, 50, 0, random.Random(5))
-    d_high, _ = roll_damage(100, 1.0, 50, 100, random.Random(5))
-    assert d_high > d_low
+def test_roll_damage_level_defense_reduction():
+    """怪物高于玩家等级：伤害按等级差减免（D 越大越低）。"""
+    lo, hi = attack_range({"str": 4, "dex": 104, "int": 4, "luk": 4}, 60,
+                          ranged=True)
+    d_same, _ = roll_damage(lo, hi, 1.0, 0, 10, 10, random.Random(9))
+    d_above, _ = roll_damage(lo, hi, 1.0, 0, 10, 30, random.Random(9))
+    assert d_above < d_same
+
+
+def test_roll_damage_pdd_reduces():
+    """怪物 PDD 越高伤害越低（同等级差、同 rng）。"""
+    lo, hi = attack_range({"str": 4, "dex": 104, "int": 4, "luk": 4}, 60,
+                          ranged=True)
+    d_low, _ = roll_damage(lo, hi, 1.0, 0, 10, 10, random.Random(5))
+    d_high, _ = roll_damage(lo, hi, 1.0, 100, 10, 10, random.Random(5))
+    assert d_high < d_low
+
+
+def test_roll_damage_never_below_one():
+    """任何输入伤害下限 1。"""
+    lo, hi = 1, 1
+    assert roll_damage(lo, hi, 0.1, 9999, 10, 10, random.Random(0))[0] == 1
 
 
 def test_defense_includes_dex_and_equipment():
     """防御 = 装备 PDD + DEX//10。"""
     assert defense({"str": 4, "dex": 50, "int": 4, "luk": 4}, 20) == 25
+
+
+def test_exp_to_next_official_table():
+    """经验查表：官方 v113 逐级值（非指数近似）。"""
+    assert exp_to_next(1) == 15
+    assert exp_to_next(2) == 34
+    assert exp_to_next(9) == 1242
+    assert exp_to_next(10) == 1242
+    assert exp_to_next(20) == 3705
+    assert exp_to_next(30) == 19112
+    assert exp_to_next(45) == 75458
+
+
+def test_exp_to_next_grows_monotonically():
+    """经验需求单调不减（含表尾近似区间）。"""
+    cur = 0
+    for lv in range(1, 70):
+        nxt = exp_to_next(lv)
+        assert nxt >= cur
+        cur = nxt
 
 
 def test_wear_block_level_and_stats():
