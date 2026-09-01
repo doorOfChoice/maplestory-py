@@ -1,7 +1,7 @@
 """气泡宽度贴合文本内容：短句不撑满屏，长文封顶且不超屏。"""
 from __future__ import annotations
 
-from game.ui import fit_bubble_width
+from game.render.ui import fit_bubble_width
 
 
 def test_short_text_uses_min_width():

@@ -1,8 +1,8 @@
 """技能学习四重门控与转职附赠：SP / 前置 req / 人物等级 / invisible 排除。"""
 from __future__ import annotations
 
-from game.jobs import JOBS
-from game.skills import SkillBook, SkillDef
+from game.core.jobs import JOBS
+from game.systems.skills import SkillBook, SkillDef
 
 
 def make_def(sid: str, name: str = "技能", max_level: int = 3,

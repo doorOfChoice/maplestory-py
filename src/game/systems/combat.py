@@ -10,17 +10,50 @@ Game 主循环持有 Combat，负责：
 from __future__ import annotations
 
 import random
-from typing import List, Optional, Tuple
+from typing import List, Optional, Protocol, Tuple
 
 import pygame
 
-from . import settings
-from . import stats as stats_mod
-from .animation import Animation
-from .assets import Assets
-from .effects import Effect
-from .inventory import make_item
-from .fonts import render_text
+from game import settings
+from game.core import stats as stats_mod
+from game.core.animation import Animation
+from game.render.assets import Assets
+from game.render.effects import Effect
+from game.systems.inventory import make_item
+from game.core.fonts import render_text
+
+
+class Combatant(Protocol):
+    """攻击方（Player）在伤害结算链路中暴露的最小「数值契约」。
+
+    战斗只依赖这套接口计算伤害，不关心 Player 的其它实现细节；
+    可注入假对象，便于脱离实体的单元测试与后续 DI。
+    """
+    x: float
+    y: float
+    facing_right: bool
+    level: int
+
+    @property
+    def luk(self) -> int: ...
+
+    def attack_range(self) -> Tuple[int, int]: ...
+    def crit_rate(self) -> float: ...
+    def crit_mult(self) -> float: ...
+    def attack_rect(self) -> Optional[pygame.Rect]: ...
+
+
+class CombatTarget(Protocol):
+    """可被攻击的实体（Monster / 合成怪物）所需接口。"""
+    x: float
+    cy: float
+    sprite_h: float
+    pd: int
+    level: int
+    dead: bool
+
+    def rect(self) -> pygame.Rect: ...
+    def take_hit(self, damage: int, from_x: Optional[float] = None) -> bool: ...
 
 
 def roll_damage(base: int) -> int:
@@ -222,8 +255,8 @@ class Arrow:
             if not self.rect().colliderect(mob.rect()):
                 continue
             self.hit_ids.add(id(mob))
-            luk = getattr(player, "luk", 0)
-            dmg = max(1, self.dmg - int(getattr(mob, "pd", 0) * (1 - luk / 100.0)))
+            luk = player.luk if player is not None else 0
+            dmg = max(1, self.dmg - int(mob.pd * (1 - luk / 100.0)))
             kind = "violet" if (self.crit or self.kind == "violet") else "red"
             combat.numbers.append(DamageNumber(
                 mob.x, mob.cy - mob.sprite_h, dmg, kind, big=self.crit))
@@ -281,7 +314,8 @@ class Combat:
                 best, best_d = y, d
         return best
 
-    def player_attack(self, player, monsters) -> None:
+    def player_attack(self, player: Combatant,
+                      monsters: List[CombatTarget]) -> None:
         """玩家攻击：命中框与怪物碰撞盒相交则造成伤害 + 官方命中特效。
 
         普攻：单目标、攻击力 100%；技能攻击按 level.damage 倍率、
@@ -307,14 +341,14 @@ class Combat:
         else:
             mult = 1.0
         atk_lo, atk_hi = player.attack_range()
-        player_level = getattr(player, "level", 0)
-        crit_rate = getattr(player, "crit_rate", lambda: 0.0)()
-        crit_mult = getattr(player, "crit_mult", lambda: settings.CRIT_MULT)()
+        player_level = player.level
+        crit_rate = player.crit_rate()
+        crit_mult = player.crit_mult()
 
         for mob in targets:
             dmg, crit = stats_mod.roll_damage(
-                atk_lo, atk_hi, mult, getattr(mob, "pd", 0),
-                player_level, getattr(mob, "level", 0), random,
+                atk_lo, atk_hi, mult, mob.pd,
+                player_level, mob.level, random,
                 crit_rate, crit_mult)
             self.numbers.append(DamageNumber(
                 mob.x, mob.cy - mob.sprite_h, dmg,
@@ -327,15 +361,16 @@ class Combat:
                 self._on_kill(player, mob)
 
     # ── 远程弹道 ───────────────────────────────────────────────────
-    def spawn_arrows(self, player, skill_data: Optional[dict]) -> None:
+    def spawn_arrows(self, player: Combatant,
+                     skill_data: Optional[dict]) -> None:
         """一次远程起手：按 bulletCount 生成错峰直线箭，从手部位置出发。
 
         skill_data=None 为普攻：单箭、攻击力 100%、红色飘字，
         弹道贴图用箭矢物品的 bullet 节点（原版同款）。
         """
-        crit_rate = getattr(player, "crit_rate", lambda: 0.0)()
-        crit_mult = getattr(player, "crit_mult", lambda: settings.CRIT_MULT)()
-        player_level = getattr(player, "level", 0)
+        crit_rate = player.crit_rate()
+        crit_mult = player.crit_mult()
+        player_level = player.level
         atk_lo, atk_hi = player.attack_range()
         if skill_data is None:
             dmg, crit = stats_mod.roll_damage(

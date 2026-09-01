@@ -18,9 +18,9 @@ needs_wz = pytest.mark.skipif(
 def test_bowman_tree_contains_bowman_skills():
     pygame.init()
     pygame.display.set_mode((8, 8))
-    from game.assets import Assets
-    from game.jobs import skill_ids_for_job
-    from game.skills import load_skill_defs
+    from game.render.assets import Assets
+    from game.core.jobs import skill_ids_for_job
+    from game.systems.skills import load_skill_defs
     assets = Assets(settings.TRAINER_SPAWN_MAP)
     try:
         ids = skill_ids_for_job(assets, 3000)
@@ -41,8 +41,8 @@ def test_buff_skill_level_has_time_field():
     """真实 buff 技能：疾風步(3001003) level 表含 time（秒，70s）与 mpCon。"""
     pygame.init()
     pygame.display.set_mode((8, 8))
-    from game.assets import Assets
-    from game.skills import load_skill_defs
+    from game.render.assets import Assets
+    from game.systems.skills import load_skill_defs
     assets = Assets(settings.TRAINER_SPAWN_MAP)
     try:
         d = load_skill_defs(assets, ["3001003"])["3001003"]
@@ -57,13 +57,13 @@ def test_bowman_passive_mods_reads_real_fields():
     """真实被动：转职后 passive_mods 解析 霸王箭的 prop/damage、精準強化 x。"""
     pygame.init()
     pygame.display.set_mode((8, 8))
-    from game.assets import Assets
-    from game.skills import load_skill_defs, SkillBook
+    from game.render.assets import Assets
+    from game.systems.skills import load_skill_defs, SkillBook
     assets = Assets(settings.TRAINER_SPAWN_MAP)
     try:
         defs = load_skill_defs(assets, ["3000000", "3000001", "3000002"])
         book = SkillBook(assets, 3000, defs=defs)
-        book.on_advance(__import__("game.jobs", fromlist=["JOBS"]).JOBS[3000])
+        book.on_advance(__import__("game.core.jobs", fromlist=["JOBS"]).JOBS[3000])
         mods = book.passive_mods()
         # 霸王箭(3000001) 满级 prop=40、damage=200；精準強化(3000000) x=16
         assert mods["crit"] == 40
@@ -78,7 +78,7 @@ def test_bowman_passive_mods_reads_real_fields():
     """MobSkill.img 含毒(125)/晕(123)/减速(126) 技能，level 表带 time/prop。"""
     pygame.init()
     pygame.display.set_mode((8, 8))
-    from game.assets import Assets
+    from game.render.assets import Assets
     assets = Assets(settings.TRAINER_SPAWN_MAP)
     try:
         img = assets.wz["Skill"].root.images.get("MobSkill.img")
@@ -98,8 +98,8 @@ def test_map_mobs_have_no_status_skill_refs():
     """本 WZ 怪物 img 无 skill 引用节点：解析返回空表（映射缺省静默）。"""
     pygame.init()
     pygame.display.set_mode((8, 8))
-    from game.assets import Assets
-    from game.monster import parse_mob_status_skills
+    from game.render.assets import Assets
+    from game.entities.monster import parse_mob_status_skills
     assets = Assets(settings.TRAINER_SPAWN_MAP)
     try:
         mob_ids = {str(int(l["id"])) for l in assets.life}

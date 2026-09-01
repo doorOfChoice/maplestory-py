@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pygame
 
-from .animation import Animation
-from .assets import Assets
+from game.core.animation import Animation
+from game.render.assets import Assets
 
 
 class NPC:

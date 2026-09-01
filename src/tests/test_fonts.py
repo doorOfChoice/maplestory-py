@@ -2,7 +2,7 @@
 import pygame
 import pytest
 
-from game.fonts import has_cjk_font, load_cjk_font
+from game.core.fonts import has_cjk_font, load_cjk_font
 
 pygame.font.init()
 

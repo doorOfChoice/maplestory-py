@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Callable, List, Optional, Tuple
 
-from . import settings
-from .inventory import Inventory, Item, item_kind
+from game import settings
+from game.systems.inventory import Inventory, Item, item_kind
 
 # ── 货架配置（商店 id → 物品 id 列表，id 为补零 8 位）────────────────
 SHOPS: dict = {

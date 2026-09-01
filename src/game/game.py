@@ -1,7 +1,9 @@
-"""游戏主场景：装配地图 / 生成 life 实体 / 主循环（60fps 固定步长）。
+"""游戏主场景：装配依赖 → 生成 World（单图场景）→ 主循环（60fps 固定步长）。
 
-流程：加载资源 → 生成玩家 / 怪物 / NPC → 主循环（输入 → 更新 → 绘制）
-出生 / 死亡重生：出生在入口 portal；HP 归零显示死亡界面，按 R 回到出生点并重置怪物。
+流程：加载资源 → World 构建玩家 / 怪物 / NPC → 主循环（输入 → 更新 → 绘制）
+出生 / 死亡重生：出生在入口 portal；HP 归零显示死亡界面，按 R 回出生点。
+Game 负责输入、UI 覆盖层（对话/横幅/淡入/死亡界面）、存档与地图加载状态机；
+World（src/game/world.py）负责单图场景的状态、实体与每帧更新/绘制。
 """
 
 from __future__ import annotations
@@ -13,31 +15,17 @@ from typing import List, Optional, Tuple
 
 import pygame
 
-from . import settings
-from .animation import Animation
-from .assets import Assets
-from .physics import Physics
-from .camera import Camera
-from .audio import Audio
-from .player import Player
-from .monster import Monster
-from .npc import NPC
-from .combat import Combat
-from .combat import DamageNumber
-from . import dialogues
-from . import travel
-from .effects import Effect
-from .jobs import JOBS, can_advance
-from .ui import UI
-from .minimap import MiniMap
-from .panels import Panels
-from .shop import SHOP_NPCS, STORAGE_NPC
-from .shop_panel import ShopPanel
-from .storage_panel import StoragePanel
-from .quests import load_quest_defs, render_markup
-from .save_manager import SaveManager
-from .splash import Splash
-from .fonts import load_cjk_font, render_text
+from game import settings
+from game.render.assets import Assets
+from game.systems import dialogues
+from game.render.effects import Effect
+from game.core.jobs import JOBS, can_advance, job_for_trainer
+from game.systems.shop import SHOP_NPCS, STORAGE_NPC
+from game.systems.quests import load_quest_defs, render_markup
+from game.save_manager import SaveManager
+from game.render.splash import Splash
+from game.context import GameContext
+from game.core.fonts import load_cjk_font, render_text
 
 # 输入对象（把 pygame 按键抽象成 Player.update 需要的形状）
 class _Keys:
@@ -91,7 +79,7 @@ class Game:
 
     # ── 后台构建整个世界 ────────────────────────────────────────────
     def _build_world(self, start_map: str) -> None:
-        """后台线程执行原先 __init__ 的重活：资源 / 任务 / 实体 / 面板。
+        """后台线程执行原先 __init__ 的重活：资源 / 任务 / World / 面板。
 
         逐步推进 _boot_progress 以驱动开屏进度条；任何异常都让世界就绪
         并抛给主线程（避免游戏卡死在开屏）。
@@ -114,57 +102,15 @@ class Game:
 
             quest_thread = threading.Thread(target=_load_quests, daemon=True)
             quest_thread.start()
-            self.physics = Physics(self.assets.footholds, self.assets.ropes,
-                                   bounds=self.assets.bounds)
-            self.camera = Camera(self.assets.map_width, self.assets.map_height,
-                                 self.assets.bounds["left"],
-                                 self.assets.bounds["top"])
-            self.audio = Audio(self.assets, self.assets.map_bgm_path())
-            self.combat = Combat(self.assets)
-            self.ui = UI(self.assets)
-            self.minimap = MiniMap(
-                self.assets.footholds, self.assets.ropes, self.assets.portals,
-                self.assets.bounds, self.assets.map_width, self.assets.map_height,
-                mag=(self.assets.map_desc.get("minimap") or {}).get("mag"),
-                canvas=self.assets.minimap_surface(),
-                map_surface=self.assets.map_surface)
-
-            self._boot_progress = 0.40
-            self.panels = Panels(self.ui, self.assets)
-            self.panels._quest_goal_lines = self._quest_extra_goal_lines
-            self.panels.combat = self.combat
-            # 商店 / 仓库面板（由 NPC 对话按钮打开）
-            self.shop_panel = ShopPanel(self.ui, self.assets)
-            self.storage_panel = StoragePanel(self.ui, self.assets)
 
             # 任务数据：等待后台解析完成（只解析 ENABLED_QUESTS 精选任务）
             quest_thread.join()
             self.quest_defs = quest_box.get("defs") or {}
 
-            # 出生点：入口 portal（sp，type 0）；读档时用存档位置
-            spawn = self._find_spawn()
-            self.spawn_x = spawn[0]
-            self.spawn_y = spawn[1]
-            if self.save_data:
-                pd = self.save_data["player"]
-                self.spawn_x = float(pd["x"])
-                self.spawn_y = float(pd["y"]) + settings.FEET_OFFSET
-
-            self.player = Player(self.assets, self.spawn_x, self.spawn_y,
-                                 quest_defs=self.quest_defs,
-                                 save_data=self.save_data)
-            if not self.save_data:
-                self.player.facing_right = True
-            # 落地吸附到出生点的 foothold
-            self._place_player_at_spawn()
-
-            self._boot_progress = 0.70
-            self.monsters: List[Monster] = []
-            self.npcs: List[NPC] = []
-            self.hits: List[dict] = []
-            self._life_mobs = [d for d in self.assets.life if d["type"] == "mob"]
-            self._life_npcs = [d for d in self.assets.life if d["type"] == "npc"]
-            self._spawn_life()
+            # 组合根：装配音效 / UI / 面板 / 单图场景（World），并完成互相接线
+            self.ctx = GameContext.create(self.assets, self.quest_defs,
+                                          self.save_data)
+            self.ctx.panels._quest_goal_lines = self._quest_extra_goal_lines
 
             self._boot_progress = 1.0
             self._boot_status = ""
@@ -177,25 +123,23 @@ class Game:
         """世界构建完成后，在主线程恢复轻量状态并播 BGM / 欢迎对话框。"""
         self.keys = _Keys()
         self.dead = False
-        self._talk_npc: Optional[NPC] = None
+        self._talk_npc: Optional[object] = None
         self._quest_flow = None
-        self._portal_cooldown = 0.0
-        self._portal_pulse = 0.0
         self._banner: Optional[Tuple[str, str]] = None
         self._banner_timer = 0.0
         self.spawn_grace = settings.SPAWN_GRACE
         self.fade = 1.0        # 开屏进入游戏时黑场淡入
 
-        self.audio.play_bgm()
+        self.ctx.audio.play_bgm()
         self._show_banner()
-        self._preload_neighbors()
+        self.ctx.world.preload_neighbors()
         if self.save_data:
-            self.ui.show_dialog("读取存档", [
-                f"欢迎回来，Lv.{self.player.level} 冒险者！",
+            self.ctx.ui.show_dialog("读取存档", [
+                f"欢迎回来，Lv.{self.ctx.world.player.level} 冒险者！",
                 "已从本地存档载入你的进度。",
                 "（对话不影响行动，Enter/Esc 或点击关闭）"])
         else:
-            self.ui.show_dialog("欢迎", ["冒险岛 v113 · 弓箭手村东部小山",
+            self.ctx.ui.show_dialog("欢迎", ["冒险岛 v113 · 弓箭手村东部小山",
                                           "←→ 移动  空格 跳跃  ↓+空格 下跳  ↑ 爬绳/梯",
                                           "A 攻击  Z 拾取  数字键 技能  F 喝药",
                                           "I 道具栏  K 技能栏  B 状态  Q 任务日志  M 小地图",
@@ -204,41 +148,7 @@ class Game:
                                          "（已穿装备也能从纸娃娃拖出扔掉）。",
                                           "新手练到 Lv10 后，找出生点旁的赫丽娜转职弓箭手；"
                                          "走到发光传送门前按 ↑ 可切换地图。"
-                                         "（对话不影响行动，Enter/Esc 或点击关闭）"])
-
-    # ── 生成 ───────────────────────────────────────────────────────
-    def _find_spawn(self):
-        for p in self.assets.portals:
-            if p["name"] == "sp" and p["type"] == 0:
-                return float(p["x"]), float(p["y"])
-        return 0.0, 0.0
-
-    def _spawn_life(self) -> None:
-        self.monsters = [Monster(self.assets, d, i, self.physics)
-                         for i, d in enumerate(self._life_mobs)]
-        self._respawn_queue = []      # [(剩余秒, life_data)]：切图/重生时清空
-        self.npcs = [NPC(self.assets, d, i)
-                     for i, d in enumerate(self._life_npcs)]
-        # 导师注入：原版赫丽娜在 100000201（不可达），在出生图额外生成一个实例
-        if self.assets.map_id == settings.TRAINER_SPAWN_MAP:
-            self.npcs.append(NPC(self.assets, {
-                "id": settings.BOWMAN_TRAINER_NPC,
-                "x": settings.TRAINER_SPAWN[0],
-                "cy": settings.TRAINER_SPAWN[1]}, len(self.npcs)))
-
-    def _tick_respawns(self, dt: float) -> None:
-        """重生队列计时：mobTime>0 按其毫秒数，否则用 MOB_RESPAWN_DELAY 兜底。"""
-        if not self._respawn_queue:
-            return
-        still: List[Tuple[float, dict]] = []
-        for remaining, data in self._respawn_queue:
-            remaining -= dt
-            if remaining <= 0:
-                self.monsters.append(
-                    Monster(self.assets, data, len(self.monsters), self.physics))
-            else:
-                still.append((remaining, data))
-        self._respawn_queue = still
+                                          "（对话不影响行动，Enter/Esc 或点击关闭）"])
 
     # ── 输入 ───────────────────────────────────────────────────────
     def _handle_input(self) -> None:
@@ -252,49 +162,49 @@ class Game:
                     cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
                     cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
                     # 任务对话框按钮优先
-                    btn = self.ui.quest_hit((cx, cy))
+                    btn = self.ctx.ui.quest_hit((cx, cy))
                     if btn is not None:
                         self._quest_button(btn)
-                    elif self.ui.quest_dialog_hit((cx, cy)):
+                    elif self.ctx.ui.quest_dialog_hit((cx, cy)):
                         pass   # 点对话框空白处不关闭（选项型）
-                    elif self.ui.dialog_button_hit((cx, cy)) is not None:
-                        self._dialog_button(self.ui.dialog_button_hit((cx, cy)))
-                    elif self.ui.dialog_hit((cx, cy)):
+                    elif self.ctx.ui.dialog_button_hit((cx, cy)) is not None:
+                        self._dialog_button(self.ctx.ui.dialog_button_hit((cx, cy)))
+                    elif self.ctx.ui.dialog_hit((cx, cy)):
                         # 点击气泡本体 → 关闭对话（面板照常可点）
-                        self.ui.hide_dialog()
+                        self.ctx.ui.hide_dialog()
                         self._talk_npc = None
-                    elif self.shop_panel.visible:
-                        self.shop_panel.handle_click((cx, cy), self.player, self.combat)
-                    elif self.storage_panel.visible:
-                        self.storage_panel.handle_click((cx, cy), self.player)
+                    elif self.ctx.shop_panel.visible:
+                        self.ctx.shop_panel.handle_click((cx, cy), self.ctx.world.player, self.ctx.world.combat)
+                    elif self.ctx.storage_panel.visible:
+                        self.ctx.storage_panel.handle_click((cx, cy), self.ctx.world.player)
                     else:
-                        self.panels.handle_mouse_down((cx, cy), self.player)
+                        self.ctx.panels.handle_mouse_down((cx, cy), self.ctx.world.player)
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button in (4, 5):
                 if not self.dead:
                     cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
                     cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
                     amount = -1 if event.button == 4 else 1
-                    if self.shop_panel.visible:
-                        self.shop_panel.handle_wheel((cx, cy), amount, self.player)
-                    elif self.storage_panel.visible:
-                        self.storage_panel.handle_wheel((cx, cy), amount, self.player)
-                    elif self.panels.handle_wheel((cx, cy), amount, self.player):
+                    if self.ctx.shop_panel.visible:
+                        self.ctx.shop_panel.handle_wheel((cx, cy), amount, self.ctx.world.player)
+                    elif self.ctx.storage_panel.visible:
+                        self.ctx.storage_panel.handle_wheel((cx, cy), amount, self.ctx.world.player)
+                    elif self.ctx.panels.handle_wheel((cx, cy), amount, self.ctx.world.player):
                         pass   # 背包 / 技能窗滚轮，已消费
             elif event.type == pygame.MOUSEMOTION:
-                if self.panels.is_dragging():
+                if self.ctx.panels.is_dragging():
                     cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
                     cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
-                    self.panels.handle_mouse_motion((cx, cy))
+                    self.ctx.panels.handle_mouse_motion((cx, cy))
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                 if not self.dead:
                     cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
                     cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
-                    dropped = self.panels.handle_mouse_up((cx, cy), self.player)
+                    dropped = self.ctx.panels.handle_mouse_up((cx, cy), self.ctx.world.player)
                     if dropped is not None:
-                        self.combat.drop_player_item(self.player, dropped)
-                        self.audio.play("PickUpItem", 0.3)
+                        self.ctx.world.combat.drop_player_item(self.ctx.world.player, dropped)
+                        self.ctx.audio.play("PickUpItem", 0.3)
                 else:
-                    self.panels.handle_mouse_up()
+                    self.ctx.panels.handle_mouse_up()
             elif event.type == pygame.KEYDOWN:
                 if self.dead:
                     if event.key == pygame.K_r:
@@ -302,7 +212,7 @@ class Game:
                     continue
                 # 任务对话框：Enter/空格 = 确认（yes），Esc = 拒绝/关闭；
                 # 只有 yes/no 阶段拦截，其余按键（移动/面板开关）照常。
-                if self.ui.quest_visible:
+                if self.ctx.ui.quest_visible:
                     qkey = None
                     if event.key == pygame.K_ESCAPE:
                         qkey = "close"
@@ -315,60 +225,60 @@ class Game:
                             self._quest_button(
                                 "no" if qkey == "close" else "yes")
                         else:
-                            self.ui.hide_quest()
+                            self.ctx.ui.hide_quest()
                             self._quest_flow = None
                         continue
                 # 对话框非模态：Enter/空格/Esc 关闭本次按键；其余按键照常
-                if self.ui.dialog_visible:
+                if self.ctx.ui.dialog_visible:
                     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER,
                                      pygame.K_SPACE, pygame.K_ESCAPE):
-                        self.ui.hide_dialog()
+                        self.ctx.ui.hide_dialog()
                         self._talk_npc = None
                         continue
                 # 商店 / 仓库面板：Esc 关闭
                 if event.key == pygame.K_ESCAPE:
-                    if self.shop_panel.visible or self.storage_panel.visible:
-                        self.shop_panel.close()
-                        self.storage_panel.close()
+                    if self.ctx.shop_panel.visible or self.ctx.storage_panel.visible:
+                        self.ctx.shop_panel.close()
+                        self.ctx.storage_panel.close()
                         continue
                 if event.key == pygame.K_i:
-                    self.panels.toggle_inventory()
+                    self.ctx.panels.toggle_inventory()
                 elif event.key == pygame.K_k:
-                    self.panels.toggle_skill()
+                    self.ctx.panels.toggle_skill()
                 elif event.key == pygame.K_q:
-                    self.panels.toggle_quest_log()
+                    self.ctx.panels.toggle_quest_log()
                 elif event.key == pygame.K_m:
-                    self.minimap.toggle()
+                    self.ctx.world.minimap.toggle()
                 elif event.key == pygame.K_f:
-                    if self.player.use_potion():
-                        self.audio.play("PickUpItem", 0.4)
+                    if self.ctx.world.player.use_potion():
+                        self.ctx.audio.play("PickUpItem", 0.4)
                 elif pygame.K_1 <= event.key <= pygame.K_9:
                     self._cast_skill(event.key - pygame.K_1 + 1)
                 elif event.key in (pygame.K_SPACE, pygame.K_UP):
                     if (event.key == pygame.K_UP and not self.keys.down
-                            and self._portal_at_feet() is not None):
+                            and self.ctx.world.portal_at_feet() is not None):
                         pass  # 站在传送门上按 ↑ → 交给 _check_portal 切图，不跳跃
                     elif self.keys.down:
-                        self.player.drop_through(self.physics)
-                    elif self.player.climbing:
+                        self.ctx.world.player.drop_through(self.ctx.world.physics)
+                    elif self.ctx.world.player.climbing:
                         # 只有空格从绳上跳下；↑ 在绳上继续爬
                         if event.key == pygame.K_SPACE:
-                            self.audio.play("Jump", 0.5)
-                            self.player.jump()
-                    elif (self.physics.rope_at(self.player.x, self.player.y) is None
+                            self.ctx.audio.play("Jump", 0.5)
+                            self.ctx.world.player.jump()
+                    elif (self.ctx.world.physics.rope_at(self.ctx.world.player.x, self.ctx.world.player.y) is None
                           or event.key == pygame.K_SPACE):
                         # 绳边按 ↑ 是爬绳意图，不起跳
-                        if self.player.on_ground:
-                            self.audio.play("Jump", 0.5)
-                        self.player.jump()
+                        if self.ctx.world.player.on_ground:
+                            self.ctx.audio.play("Jump", 0.5)
+                        self.ctx.world.player.jump()
                 elif event.key == pygame.K_z:
                     self._try_pickup()
                 elif event.key == pygame.K_a:
-                    self.player.start_attack()
+                    self.ctx.world.player.start_attack()
                 elif event.key == pygame.K_DOWN and self.keys.jump:
-                    self.player.drop_through(self.physics)
+                    self.ctx.world.player.drop_through(self.ctx.world.physics)
                 elif event.key == pygame.K_b:
-                    self.panels.toggle_stat()
+                    self.ctx.panels.toggle_stat()
                 elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                     self._try_talk()
 
@@ -386,39 +296,39 @@ class Game:
 
         # 兜底：弹窗瞬间按住的 A 等按键事件会被模态分支吞掉，
         # 用持续按键状态补触发攻击（按下即生效，无需等松开重按）
-        if (self.keys.attack and not self.ui.dialog_visible
-                and not self.dead and not self.player.attacking):
-            self.player.start_attack()
+        if (self.keys.attack and not self.ctx.ui.dialog_visible
+                and not self.dead and not self.ctx.world.player.attacking):
+            self.ctx.world.player.start_attack()
 
     def _try_pickup(self) -> bool:
         """Z 键手动拾取人物周边掉落物；有收获则播放音效。"""
-        if self.combat.pickup(self.player):
-            self.audio.play("PickUpItem", 0.5)
+        if self.ctx.world.combat.pickup(self.ctx.world.player):
+            self.ctx.audio.play("PickUpItem", 0.5)
             return True
         return False
 
     def _cast_skill(self, hotkey: int) -> None:
         """按数字快捷键施放技能（读职业动态快捷键表）。成功则播放施放特效。"""
-        sid = self.player.skills.hotkeys.get(hotkey)
+        sid = self.ctx.world.player.skills.hotkeys.get(hotkey)
         if sid is None:
             return
-        data = self.player.skills.cast(sid, self.player.level)
+        data = self.ctx.world.player.skills.cast(sid, self.ctx.world.player.level)
         if data is None:
             return
-        if self.player.start_attack(data):
+        if self.ctx.world.player.start_attack(data):
             eff = self.assets.skill_effect_frames(sid)
             if eff:
-                self.combat.effects.append(Effect(
-                    eff, self.player.x, self.player.y))
+                self.ctx.world.combat.effects.append(Effect(
+                    eff, self.ctx.world.player.x, self.ctx.world.player.y))
 
     def _try_talk(self) -> None:
         """与 NPC 对话：导师转职 > 任务交互 > 普通寒暄（商人带商店/仓库按钮）。"""
-        for npc in self.npcs:
+        for npc in self.ctx.world.npcs:
             if npc.rect().colliderect(
-                    pygame.Rect(int(self.player.x - 20), int(self.player.y - 40), 40, 80)):
+                    pygame.Rect(int(self.ctx.world.player.x - 20), int(self.ctx.world.player.y - 40), 40, 80)):
                 self._talk_npc = npc
-                if npc.npc_id == settings.BOWMAN_TRAINER_NPC \
-                        and self._begin_advance_flow(npc):
+                jobdef = job_for_trainer(npc.npc_id)
+                if jobdef is not None and self._begin_advance_flow(npc, jobdef):
                     return
                 if self._begin_quest_flow(npc):
                     return
@@ -427,7 +337,7 @@ class Game:
                     buttons.append("shop")
                 if npc.npc_id == STORAGE_NPC:
                     buttons.append("storage")
-                self.ui.show_dialog(npc.name,
+                self.ctx.ui.show_dialog(npc.name,
                                     dialogues.get_dialog(npc.npc_id, npc.name),
                                     anchor=npc, buttons=buttons or None)
                 return
@@ -435,46 +345,51 @@ class Game:
     def _dialog_button(self, key: str) -> None:
         """NPC 对话按钮回调：打开商店 / 仓库面板。"""
         npc = self._talk_npc
-        self.ui.hide_dialog()
+        self.ctx.ui.hide_dialog()
         self._talk_npc = None
         if npc is None:
             return
         if key == "shop":
-            self.storage_panel.close()
-            self.shop_panel.open(npc.npc_id)
+            self.ctx.storage_panel.close()
+            self.ctx.shop_panel.open(npc.npc_id)
         elif key == "storage":
-            self.shop_panel.close()
-            self.storage_panel.open()
+            self.ctx.shop_panel.close()
+            self.ctx.storage_panel.open()
 
     # ── 转职对话流程 ───────────────────────────────────────────────
-    def _begin_advance_flow(self, npc) -> bool:
-        """导师对话：可转职弹确认框；已转职/等级不足给对应提示。"""
-        jobdef = JOBS[settings.BOWMAN_JOB]
-        if self.player.job == jobdef.code:
-            self.ui.show_dialog(npc.name, ["你已经是一名出色的弓箭手了。"], anchor=npc)
+    def _begin_advance_flow(self, npc, jobdef) -> bool:
+        """导师对话：可转职弹确认框；已转职/等级不足给对应提示。
+
+        jobdef 由 job_for_trainer(npc.npc_id) 解析 —— 新增职业只需在 JOBS
+        登记 trainer_npc 即自动拿到转职对话，无需改动本方法。
+        """
+        if self.ctx.world.player.job == jobdef.code:
+            self.ctx.ui.show_dialog(
+                npc.name, [f"你已经是一名出色的{jobdef.name}了。"], anchor=npc)
             return True
-        if can_advance(self.player, jobdef):
-            self._quest_flow = {"npc": npc, "quest": None, "stage": "advance"}
-            self.ui.show_quest(f"转职 · {jobdef.name}", [
-                "你想成为弓箭手吗？",
+        if can_advance(self.ctx.world.player, jobdef):
+            self._quest_flow = {"npc": npc, "quest": None, "stage": "advance",
+                                "code": jobdef.code}
+            self.ctx.ui.show_quest(f"转职 · {jobdef.name}", [
+                f"你想成为{jobdef.name}吗？",
                 f"达到 Lv{jobdef.advance_lv} 的新手可以转职为{jobdef.name}，",
-                "转职后我会送你一把短弓并教你弓箭手的技能。"], ["yes", "no"])
+                "转职后我会送你武器并教你该职业的技能。"], ["yes", "no"])
             return True
-        self.ui.show_dialog(npc.name, [
+        self.ctx.ui.show_dialog(npc.name, [
             "你还太弱小了，达到等级再来找我吧。",
-            f"（当前 Lv{self.player.level} / 需要 Lv{jobdef.advance_lv}）"], anchor=npc)
+            f"（当前 Lv{self.ctx.world.player.level} / 需要 Lv{jobdef.advance_lv}）"], anchor=npc)
         return True
 
     # ── 任务对话状态机 ─────────────────────────────────────────────
     def _begin_quest_flow(self, npc) -> bool:
         """检查与 NPC 的任务交互。返回是否进入了任务对话框。"""
-        quests = self.player.quests
+        quests = self.ctx.world.player.quests
         npc_id = npc.npc_id
 
         # 1. 可交付（进行中且条件满足）
         for qid, d in self.quest_defs.items():
             if d.end_npc is not None and str(d.end_npc) == npc_id \
-                    and quests.is_accepted(qid) and quests.can_complete(qid, self.player):
+                    and quests.is_accepted(qid) and quests.can_complete(qid, self.ctx.world.player):
                 self._quest_flow = {"npc": npc, "quest": qid, "stage": "complete"}
                 self._show_quest_complete(qid)
                 return True
@@ -482,7 +397,7 @@ class Game:
         # 2. 可接取（给予 NPC 是这位，且条件满足、未接未完成）
         for qid, d in self.quest_defs.items():
             if d.start_npc is not None and str(d.start_npc) == npc_id \
-                    and not quests.started(qid) and quests.can_start(qid, self.player):
+                    and not quests.started(qid) and quests.can_start(qid, self.ctx.world.player):
                 self._quest_flow = {"npc": npc, "quest": qid, "stage": "offer"}
                 self._show_quest_offer(qid)
                 return True
@@ -507,69 +422,71 @@ class Game:
     def _show_quest_offer(self, qid: str) -> None:
         d = self.quest_defs[qid]
         lines = [self._qmark(l) for l in d.accept_lines] or [f"要接受任务「{d.name}」吗？"]
-        self.ui.show_quest(f"任务 · {d.name}", lines, ["yes", "no"])
+        self.ctx.ui.show_quest(f"任务 · {d.name}", lines, ["yes", "no"])
 
     def _show_quest_complete(self, qid: str) -> None:
         d = self.quest_defs[qid]
         lines = [self._qmark(l) for l in d.complete_lines] or [
             f"已完成任务「{d.name}」的所有条件！要领取奖励吗？"]
-        self.ui.show_quest(f"任务完成 · {d.name}", lines, ["yes", "no"])
+        self.ctx.ui.show_quest(f"任务完成 · {d.name}", lines, ["yes", "no"])
 
     def _show_quest_status(self, qid: str) -> None:
         d = self.quest_defs[qid]
         lines = [self._qmark(l) for l in d.complete_stop] or \
                 [f"「{d.name}」还未完成，继续努力吧！"]
-        self.ui.show_quest(d.name, lines, ["ok"])
+        self.ctx.ui.show_quest(d.name, lines, ["ok"])
 
     def _quest_button(self, key: str) -> None:
         """任务/转职对话框按钮回调：yes / no / ok。"""
         flow = self._quest_flow
         if flow is None:
-            self.ui.hide_quest()
+            self.ctx.ui.hide_quest()
             return
         if flow["stage"] == "advance":
-            self.ui.hide_quest()
+            code = flow["code"]
+            self.ctx.ui.hide_quest()
             self._quest_flow = None
             if key == "yes":
-                self.player.advance_to(settings.BOWMAN_JOB, self.assets)
-                self.audio.play("LevelUp", 0.6)
-                self.panels.flash("转职成功：弓箭手")
+                self.ctx.world.player.advance_to(code, self.assets)
+                self.ctx.audio.play("LevelUp", 0.6)
+                self.ctx.panels.flash(
+                    f"转职成功：{JOBS[code].name}")
             return
         qid = flow["quest"]
-        quests = self.player.quests
+        quests = self.ctx.world.player.quests
         if flow["stage"] == "offer":
             if key == "yes":
-                if quests.accept(qid, self.player):
+                if quests.accept(qid, self.ctx.world.player):
                     d = self.quest_defs[qid]
-                    self.audio.play("QuestClear", 0.5)
-                    self.panels.flash(f"任务接受：{d.name}")
+                    self.ctx.audio.play("QuestClear", 0.5)
+                    self.ctx.panels.flash(f"任务接受：{d.name}")
                     flow["stage"] = "accepted"
                     lines = [self._qmark(l) for l in d.accept_yes] or \
                             [f"已接受任务「{d.name}」。按 Q 查看任务日志。"]
-                    self.ui.show_quest(d.name, lines, ["ok"])
+                    self.ctx.ui.show_quest(d.name, lines, ["ok"])
                 else:
-                    self.ui.hide_quest()
+                    self.ctx.ui.hide_quest()
             else:
                 d = self.quest_defs[qid]
                 flow["stage"] = "declined"
                 lines = [self._qmark(l) for l in d.accept_no] or ["好吧，改变心意的话再来找我。"]
-                self.ui.show_quest(d.name, lines, ["ok"])
+                self.ctx.ui.show_quest(d.name, lines, ["ok"])
         elif flow["stage"] == "complete":
             if key == "yes":
-                if quests.complete(qid, self.player, self.combat,
-                                   self.assets, self.audio):
+                if quests.complete(qid, self.ctx.world.player, self.ctx.world.combat,
+                                   self.assets, self.ctx.audio):
                     d = self.quest_defs[qid]
-                    self.panels.flash(f"任务完成：{d.name}")
+                    self.ctx.panels.flash(f"任务完成：{d.name}")
                     flow["stage"] = "completed"
                     lines = [self._qmark(l) for l in d.complete_yes] or \
                             [f"已获得任务「{d.name}」的奖励！"]
-                    self.ui.show_quest(d.name, lines, ["ok"])
+                    self.ctx.ui.show_quest(d.name, lines, ["ok"])
                 else:
-                    self.ui.hide_quest()
+                    self.ctx.ui.hide_quest()
             else:
-                self.ui.hide_quest()
+                self.ctx.ui.hide_quest()
         else:   # status / accepted / declined / completed 只展示 → 关闭
-            self.ui.hide_quest()
+            self.ctx.ui.hide_quest()
             self._quest_flow = None
 
     def _quest_extra_goal_lines(self, qid: str) -> List[str]:
@@ -577,13 +494,13 @@ class Game:
         d = self.quest_defs.get(qid)
         if d is None:
             return []
-        q = self.player.quests
+        q = self.ctx.world.player.quests
         lines: List[str] = []
         for mid, count in d.kills:
             cur = q.kill_progress(qid, mid)
             lines.append(f"击杀 {self.assets.mob_name_of(mid)}  {cur}/{count}")
         for iid, count in d.end_items:
-            cur = q.item_progress(self.player, qid, iid)
+            cur = q.item_progress(self.ctx.world.player, qid, iid)
             lines.append(f"收集 {self.assets.item_name(str(iid)) or f'#{iid}'}  {cur}/{count}")
         if not lines and d.desc1:
             lines.append(self._qmark(d.desc1))
@@ -597,97 +514,35 @@ class Game:
         return lines
 
     # ── 重生 ───────────────────────────────────────────────────────
-    def _place_player_at_spawn(self) -> None:
-        p = self.player
-        p.x = self.spawn_x
-        p.y = self.spawn_y - settings.FEET_OFFSET
-        p.vx = p.vy = 0.0
-        p.on_ground = False
-        p.climbing = False
-        p.attacking = False
-        p.attack_timer = 0.0
-        p.drop_layers.clear()
-        p.drop_timer = 0.0
-        fh = self.physics.grounded_surface(p.x, p.feet_y)
-        if fh is not None:
-            p.y = fh.y_at(p.x) - settings.FEET_OFFSET
-            p.on_ground = True
-            p.cur_fh = fh
-            p.ground_layer = fh.layer
-
     def respawn(self) -> None:
         self.dead = False
         self.spawn_grace = settings.SPAWN_GRACE
-        self.ui.hide_death()
-        self.ui.hide_dialog()
+        self.ctx.ui.hide_death()
+        self.ctx.ui.hide_dialog()
         self._talk_npc = None
-        self.player.hp = self.player.max_hp
-        self.player.attacking = False
-        self.player.hurt_timer = 0.0
-        self.player.invuln_timer = 0.0
-        self.player.feather.consume()
-        self.player.buffs.clear()
-        self.player.statuses.clear()
+        p = self.ctx.world.player
+        p.hp = p.max_hp
+        p.attacking = False
+        p.hurt_timer = 0.0
+        p.invuln_timer = 0.0
+        p.feather.consume()
+        p.buffs.clear()
+        p.statuses.clear()
         self.fade = 1.0        # 重生黑场淡入
-        self._place_player_at_spawn()
-        self._spawn_life()
-        self.combat.drops.clear()
-        self.combat.numbers.clear()
-        self.combat.effects.clear()
-        self.combat.arrows.clear()
+        self.ctx.world.respawn_scene()
 
     # ── 传送门 / 地图切换 ──────────────────────────────────────────
-    def _usable_portals(self) -> List[dict]:
-        """当前地图可通行的传送门（WZ 数据驱动，含 trigger / target_id / same_map）。"""
-        return travel.usable_portals(self.assets.portals,
-                                     self.assets.map_renderer.has_map,
-                                     self.assets.map_id)
-
-    def _portal_at_feet(self) -> Optional[dict]:
-        """回传玩家脚底重叠、且此刻可触发的传送门（按↑门需 up 键，碰撞门即时）。"""
-        feet = self.player.y + settings.FEET_OFFSET
-        pr = pygame.Rect(int(self.player.x - 12), int(feet - 12), 24, 24)
-        for p in self._usable_portals():
-            prt = pygame.Rect(int(p["x"]) - 14, int(p["y"]) - 14, 28, 28)
-            if pr.colliderect(prt):
-                return p
-        return None
-
-    def _check_portal(self, dt: float) -> bool:
-        """站在可通行传送门上触发切图：按↑门需 up 键，碰撞门碰到即走。返回是否切图。"""
-        if self._portal_cooldown > 0:
-            self._portal_cooldown -= dt
-            return False
-        p = self._portal_at_feet()
-        if p is None:
-            return False
-        if p["trigger"] == "up" and not self.keys.up:
-            return False
-        if p.get("same_map"):
-            self._enter_same_map(p)
-            return True
-        self._enter_map(p["target_id"], p.get("targetName"))
-        return True
-
-    def _enter_same_map(self, p: dict) -> None:
-        """同图瞬移门：不重载地图，直接落地到目标门位置（原版 psh 行为）。"""
-        self._portal_cooldown = 0.8
-        sx, sy = self._portal_position(p.get("targetName"))
-        self.spawn_x, self.spawn_y = sx, sy
-        self._place_player_at_spawn()
-        self.fade = 1.0                # 黑场淡入，掩盖瞬移
-
     def _enter_map(self, map_id: str, portal_name: Optional[str]) -> None:
         """切换到目标地图：后台渲染地图，主线程显示加载画面。"""
         if self._loading:
             return
-        self.ui.hide_dialog()
-        self.ui.hide_quest()
+        self.ctx.ui.hide_dialog()
+        self.ctx.ui.hide_quest()
         self._talk_npc = None
         self._quest_flow = None
-        self.shop_panel.close()
-        self.storage_panel.close()
-        self.audio.stop_bgm()
+        self.ctx.shop_panel.close()
+        self.ctx.storage_panel.close()
+        self.ctx.audio.stop_bgm()
 
         self.assets.start_load_map(map_id)
         self._loading = True
@@ -697,35 +552,11 @@ class Game:
     def _finish_loading(self) -> None:
         """后台线程完成后，在主线程恢复游戏状态。"""
         bgm_path = self.assets.finish_load_map()
-        map_id, portal_name = self._pending_map
-        self.physics = Physics(self.assets.footholds, self.assets.ropes,
-                               bounds=self.assets.bounds)
-        self.camera = Camera(self.assets.map_width, self.assets.map_height,
-                             self.assets.bounds["left"], self.assets.bounds["top"])
-        self.audio.bgm_path = bgm_path
-        self._life_mobs = [d for d in self.assets.life if d["type"] == "mob"]
-        self._life_npcs = [d for d in self.assets.life if d["type"] == "npc"]
-
-        sx, sy = self._portal_position(portal_name)
-        self.spawn_x, self.spawn_y = sx, sy
-        self.minimap.set_map(
-            self.assets.footholds, self.assets.ropes, self.assets.portals,
-            self.assets.bounds, self.assets.map_width, self.assets.map_height,
-            mag=(self.assets.map_desc.get("minimap") or {}).get("mag"),
-            canvas=self.assets.minimap_surface(),
-            map_surface=self.assets.map_surface)
-        self._place_player_at_spawn()
-        self._spawn_life()
-        self.combat.drops.clear()
-        self.combat.numbers.clear()
-        self.combat.effects.clear()
-        self.combat.arrows.clear()
-        self.hits.clear()
-        self._portal_cooldown = 0.8
-
-        self.audio.play_bgm()
+        _map_id, portal_name = self._pending_map
+        self.ctx.audio.bgm_path = bgm_path
+        self.ctx.world.finish_loading(portal_name)
+        self.ctx.audio.play_bgm()
         self._show_banner()
-        self._preload_neighbors()
         self._loading = False
         self._pending_map = None
         self.fade = 1.0        # 黑场淡入新地图
@@ -736,35 +567,17 @@ class Game:
         self._banner = (name, street)
         self._banner_timer = settings.BANNER_TIME
 
-    def _preload_neighbors(self) -> None:
-        """把当前图所有可通行传送门的目标图后台预热进 LRU 缓存，下次切图秒开。"""
-        targets = {p["target_id"] for p in self._usable_portals()}
-        targets.discard(self.assets.map_id)
-        if targets:
-            self.assets.preload_neighbors(targets)
-
-    def _portal_position(self, portal_name: Optional[str]):
-        """目标地图出生点：优先指定 portal，其次 sp 入口。"""
-        for p in self.assets.portals:
-            if portal_name and p.get("name") == portal_name:
-                return float(p["x"]), float(p["y"])
-        for p in self.assets.portals:
-            if p.get("type") == 0:      # sp
-                return float(p["x"]), float(p["y"])
-        return float(self.assets.bounds["left"]), float(self.assets.bounds["top"])
-
     # ── 存档 ─────────────────────────────────────────────────────────
     def _save_game(self) -> None:
         """收集当前游戏状态，非同步写入本地存档（不阻塞主循环）。"""
         try:
             self.save_manager.request_save(SaveManager.collect_data(
-                self.player, self.combat, self.assets.map_id))
+                self.ctx.world.player, self.ctx.world.combat, self.assets.map_id))
         except Exception:
             pass
 
     # ── 更新 ───────────────────────────────────────────────────────
     def _update(self, dt: float) -> None:
-        self._portal_pulse += dt
         if self._banner_timer > 0:
             self._banner_timer -= dt
         # 黑场淡入计时（切图 / 重生后用真实 dt 递减）
@@ -785,137 +598,64 @@ class Game:
             return
 
         # 对话框不再暂停世界；走远 / 切图自动收起
-        if self.ui.dialog_visible and self._talk_npc is not None:
+        if self.ctx.ui.dialog_visible and self._talk_npc is not None:
             r = self._talk_npc.rect()
-            if abs(self.player.x - r.centerx) > 140:
-                self.ui.hide_dialog()
+            if abs(self.ctx.world.player.x - r.centerx) > 140:
+                self.ctx.ui.hide_dialog()
                 self._talk_npc = None
         # 任务对话框同样在走远后收起
-        if self.ui.quest_visible and self._quest_flow is not None:
+        if self.ctx.ui.quest_visible and self._quest_flow is not None:
             r = self._quest_flow["npc"].rect()
-            if abs(self.player.x - r.centerx) > 140:
-                self.ui.hide_quest()
+            if abs(self.ctx.world.player.x - r.centerx) > 140:
+                self.ctx.ui.hide_quest()
                 self._quest_flow = None
 
         # 出生保护计时
         if self.spawn_grace > 0:
             self.spawn_grace -= dt
 
-        # 玩家
-        self.player.update(dt, self.keys, self.physics, self.audio)
-
-        # 传送门检测
-        if not self.ui.quest_visible and not self.ui.dialog_visible:
-            if self._check_portal(dt):
-                return
-
-        # 掉出地图底部：回出生点并扣血（避免永远下坠）
-        if self.player.y > self.assets.map_height + 80:
-            self.player.damage(settings.FALL_OUT_DAMAGE)
-            self.combat.numbers.append(DamageNumber(
-                self.player.x, self.player.y - 40,
-                settings.FALL_OUT_DAMAGE, "blue"))
-            self._place_player_at_spawn()
-
-        # 攻击判定：远程（普攻与技能）起手一次性生成箭（近战仍在首帧结算）
-        if self.player.attacking:
-            if self.player.is_ranged():
-                if not self.player.attack_projectile_spawned:
-                    self.player.attack_projectile_spawned = True
-                    self.combat.spawn_arrows(self.player, self.player.pending_skill)
+        # 世界帧（玩家/怪物/箭/NPC/战斗/相机），弹窗时屏蔽传送门检测
+        portal_blocked = self.ctx.ui.quest_visible or self.ctx.ui.dialog_visible
+        portal = self.ctx.world.update(dt, self.keys, self.spawn_grace,
+                                   audio=self.ctx.audio, portal_blocked=portal_blocked)
+        if portal is not None:
+            if portal.get("same_map"):
+                self.ctx.world.enter_same_map(portal)
+                self.fade = 1.0
             else:
-                self.combat.player_attack(self.player, self.monsters)
-
-        # 经验结算（击杀累积后逐条发放，可升级；升级播官方特效不弹窗）
-        while self.combat.pending_exp:
-            amount = self.combat.pending_exp.pop(0)
-            if self.player.gain_exp(amount):
-                self.audio.play("LevelUp", 0.6)
-                # 特效按角色锚点居中，整体抬高些更接近原版观感
-                self.combat.effects.append(Effect(
-                    self.assets.levelup_frames(), self.player.x, self.player.y - 45))
-
-        # 怪物
-        self.hits.clear()
-        no_aggro = self.spawn_grace > 0
-        for mob in self.monsters:
-            mob.update(dt, self.player.x, self.player.y, self.hits, self.audio,
-                       no_aggro=no_aggro)
-        # 移除已消失的怪物；死亡者排入重生队列（mobTime>0 用其值，否则默认延迟）
-        alive: List[Monster] = []
-        for m in self.monsters:
-            if m.dead and m.remove_after <= 0:
-                delay = (m.mob_time / 1000.0 if m.mob_time > 0
-                         else settings.MOB_RESPAWN_DELAY)
-                self._respawn_queue.append((delay, m.life_data))
-            else:
-                alive.append(m)
-        self.monsters = alive
-        self._tick_respawns(dt)
-        self.combat.apply_mob_hits(self.player, self.hits)
-
-        # 飞行中的箭（在怪物移动之后结算，命中数受 mobCount 限制）
-        self.combat.update_arrows(dt, self.monsters, self.player)
-
-        # NPC
-        for npc in self.npcs:
-            npc.update(dt)
-
-        # 拾取：普通掉落需按 Z 手动拾取（见 _try_pickup）；吸附中的在 combat.update 内自动收取
+                self._enter_map(portal["target_id"], portal.get("targetName"))
+            return
 
         # 死亡检测
-        if self.player.hp <= 0:
+        if self.ctx.world.player.hp <= 0:
             self.dead = True
-            self.ui.show_death()
-            self.audio.play("GameIn", 0.4)
-
-        if self.combat.update(dt, self.player):
-            self.audio.play("PickUpItem", 0.5)
-        self.camera.center_on(self.player.x, self.player.y)
+            self.ctx.ui.show_death()
+            self.ctx.audio.play("GameIn", 0.4)
 
     # ── 绘制 ───────────────────────────────────────────────────────
     def _draw(self) -> None:
         if self._loading:
             self._draw_loading()
             return
-        # 地图
-        self.canvas.blit(
-            self.assets.map_surface, (0, 0),
-            pygame.Rect(self.camera.img_x, self.camera.img_y,
-                        settings.VIEW_W, settings.VIEW_H))
-        # 传送门（地图之上，实体之下）
-        self._draw_portals(self.canvas)
-        # 掉落物（地图之上，实体之下）
-        self.combat.draw(self.canvas, self.camera)
-        # NPC / 怪物（NPC 头顶画任务灯泡）
-        for npc in self.npcs:
-            npc.draw(self.canvas, self.camera, self._npc_marker(npc))
-        for mob in self.monsters:
-            mob.draw(self.canvas, self.camera)
-        # 玩家
-        if not self.dead:
-            self.player.draw(self.canvas, self.camera)
-        # 飞行中的箭（实体之上）
-        self.combat.draw_arrows(self.canvas, self.camera)
-        # 命中火花 / 升级特效（实体之上）
-        self.combat.draw_effects(self.canvas, self.camera)
+        # 世界实体（地图/传送门/掉落/NPC/怪物/玩家/箭/特效）
+        self.ctx.world.draw(self.canvas, self._npc_marker, player_visible=not self.dead)
         # HUD / 面板 / 对话框 / 死亡
-        self.ui.draw_hud(self.canvas, self.player, self.combat)
-        self.minimap.draw(self.canvas, self.player.x, self.player.y,
-                          self.player.facing_right, self.monsters, self.npcs)
+        self.ctx.ui.draw_hud(self.canvas, self.ctx.world.player, self.ctx.world.combat)
+        self.ctx.world.minimap.draw(self.canvas, self.ctx.world.player.x, self.ctx.world.player.y,
+                          self.ctx.world.player.facing_right, self.ctx.world.monsters, self.ctx.world.npcs)
         # 地图名名牌：小地图可见时下移避让，否则右上角 8px
         name_y = (settings.MINIMAP_MARGIN + settings.MINIMAP_H + 8
-                  if self.minimap.visible else 8)
-        self.ui.draw_map_name(self.canvas, self.assets.map_name(), name_y)
-        self.panels.draw_quickslots(self.canvas, self.player)
-        self.panels.draw(self.canvas, self.player, self.combat.meso)
-        if self.shop_panel.visible:
-            self.shop_panel.draw(self.canvas, self.player, self.combat)
-        elif self.storage_panel.visible:
-            self.storage_panel.draw(self.canvas, self.player)
-        self.ui.draw_dialog(self.canvas, self.camera)
-        self.ui.draw_quest(self.canvas)
-        self.ui.draw_death(self.canvas)
+                  if self.ctx.world.minimap.visible else 8)
+        self.ctx.ui.draw_map_name(self.canvas, self.assets.map_name(), name_y)
+        self.ctx.panels.draw_quickslots(self.canvas, self.ctx.world.player)
+        self.ctx.panels.draw(self.canvas, self.ctx.world.player, self.ctx.world.combat.meso)
+        if self.ctx.shop_panel.visible:
+            self.ctx.shop_panel.draw(self.canvas, self.ctx.world.player, self.ctx.world.combat)
+        elif self.ctx.storage_panel.visible:
+            self.ctx.storage_panel.draw(self.canvas, self.ctx.world.player)
+        self.ctx.ui.draw_dialog(self.canvas, self.ctx.world.camera)
+        self.ctx.ui.draw_quest(self.canvas)
+        self.ctx.ui.draw_death(self.canvas)
 
         # 黑场淡入（切图 / 重生后从黑渐变到场景，避免瞬间弹出）
         if self.fade > 0.0:
@@ -980,46 +720,19 @@ class Game:
         self.canvas.blit(hint, hint_rect)
         self._present()
 
-    def _portal_frame_index(self, frames, t: float) -> int:
-        """依累积秒数定位动画帧：每帧显示其 delay 毫秒时长（循环播放）。"""
-        return Animation.frame_at(frames, t * 1000.0)
-
-    def _draw_portals(self, surface) -> None:
-        """画传送门：普通↑门用 pv 动画，同图瞬移门用 psh 缩小动画；隐藏门不画。"""
-        frames = self.assets.portal_frames()
-        shrink = self.assets.portal_shrink_frames()
-        if not frames:
-            return
-        idx = self._portal_frame_index(frames, self._portal_pulse)
-        sidx = self._portal_frame_index(shrink, self._portal_pulse)
-        standing = self._portal_at_feet()
-        for p in self._usable_portals():
-            if p.get("trigger") != "up" or p.get("hidden"):
-                continue
-            sx, sy = self.camera.to_screen(p["x"], p["y"])
-            surf, origin, _ = (shrink[sidx] if p.get("same_map") else frames[idx])
-            rect = surf.get_rect()
-            rect.centerx = int(sx)
-            rect.bottom = int(sy) + 2
-            surface.blit(surf, rect.topleft)
-            # 玩家站在传送门上时画金色高亮光环
-            if standing is not None and standing["name"] == p["name"]:
-                pygame.draw.ellipse(surface, (255, 255, 140, 220),
-                                    (rect.centerx - 18, rect.bottom - 10, 36, 14), 3)
-
     def _npc_marker(self, npc) -> int:
         """NPC 任务灯泡：2=可交付 / 0=可接取 / 1=进行中 / -1=无任务。"""
-        quests = self.player.quests
+        quests = self.ctx.world.player.quests
         npc_id = npc.npc_id
         # 可交付优先
         for qid, d in self.quest_defs.items():
             if d.end_npc is not None and str(d.end_npc) == npc_id \
-                    and quests.is_accepted(qid) and quests.can_complete(qid, self.player):
+                    and quests.is_accepted(qid) and quests.can_complete(qid, self.ctx.world.player):
                 return 2
         # 可接取
         for qid, d in self.quest_defs.items():
             if d.start_npc is not None and str(d.start_npc) == npc_id \
-                    and not quests.started(qid) and quests.can_start(qid, self.player):
+                    and not quests.started(qid) and quests.can_start(qid, self.ctx.world.player):
                 return 0
         # 进行中（交付 NPC 是这位）
         for qid, d in self.quest_defs.items():
@@ -1062,17 +775,17 @@ class Game:
     def _shutdown(self) -> None:
         if not self._world_ready or not getattr(self, "_boot_done", False):
             # 世界未构建完成（开屏中途退出）：只清理已初始化的资源
-            if hasattr(self, "audio"):
-                self.audio.close()
+            if hasattr(self, "ctx"):
+                self.ctx.audio.close()
             if hasattr(self, "assets"):
                 self.assets.close()
             pygame.quit()
             return
         try:
             self.save_manager.flush(SaveManager.collect_data(
-                self.player, self.combat, self.assets.map_id))
+                self.ctx.world.player, self.ctx.world.combat, self.assets.map_id))
         except Exception:
             pass
-        self.audio.close()
+        self.ctx.audio.close()
         self.assets.close()
         pygame.quit()

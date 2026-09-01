@@ -1,6 +1,6 @@
 """背包取出：整堆消耗 / 装备散件 / 已穿装备可被移除（扔出用）。"""
 
-from game.inventory import Inventory, Item
+from game.systems.inventory import Inventory, Item
 
 
 def test_take_stack_removes_entry():

@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pygame
 
 from game import settings
-from game.inventory import make_item
+from game.systems.inventory import make_item
 
 DT = 1.0 / 60.0
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent

@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from . import settings
-from .jobs import resolve_skill_img, skill_ids_for_job
-from .localize import to_simplified
+from game import settings
+from game.core.jobs import resolve_skill_img, skill_ids_for_job
+from game.core.localize import to_simplified
 
 
 class SkillDef:

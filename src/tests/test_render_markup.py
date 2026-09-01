@@ -1,7 +1,7 @@
 """任务文本标签渲染：去掉颜色/选项标记、替换名称、处理裸数字与折行。"""
 from __future__ import annotations
 
-from game.quests import render_markup, wrap_lines
+from game.systems.quests import render_markup, wrap_lines
 
 
 def _npc(nid):

@@ -1,6 +1,6 @@
 """相机：center_on 把视口位置取整成整数像素，消除地图 blit 与实体绘制的 ±1px 抖动。"""
 
-from game.camera import Camera
+from game.core.camera import Camera
 
 
 def make_camera():

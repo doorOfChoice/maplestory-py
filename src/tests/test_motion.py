@@ -1,6 +1,6 @@
 """运动辅助：速度渐近（approach）、摩擦衰减（friction）与跳跃缓冲 / 土狼时间。"""
 
-from game.motion import approach, friction, JumpFeather
+from game.core.motion import approach, friction, JumpFeather
 
 
 def test_friction_decays_preserving_inertia():

@@ -1,6 +1,6 @@
 """链接续段行走模型：台阶跟走 / 前景坡道横跨 / 开放边缘。"""
 from game import settings
-from game.physics import Physics
+from game.core.physics import Physics
 
 R = settings.PLAYER_BODY_HALF_W
 SU = settings.PLAYER_STEP_UP

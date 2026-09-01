@@ -10,10 +10,10 @@ from typing import List, Optional, Tuple
 
 import pygame
 
-from . import settings
-from .animation import Animation
-from .assets import Assets
-from .combat import roll_damage
+from game import settings
+from game.core.animation import Animation
+from game.render.assets import Assets
+from game.systems.combat import roll_damage
 
 
 def parse_mob_status_skills(skill_node) -> List[Tuple[str, int, int]]:

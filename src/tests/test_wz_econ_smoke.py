@@ -9,7 +9,7 @@ import pygame
 import pytest
 
 from game import settings
-from game import shop as shop_mod
+from game.systems import shop as shop_mod
 
 needs_wz = pytest.mark.skipif(
     not (settings.WZ_DIR / "Item.wz").exists(), reason="需要 WZ 资产")
@@ -19,7 +19,7 @@ needs_wz = pytest.mark.skipif(
 def test_item_price_and_equip_tuc_readable():
     pygame.init()
     pygame.display.set_mode((8, 8))
-    from game.assets import Assets
+    from game.render.assets import Assets
     assets = Assets(settings.TRAINER_SPAWN_MAP)
     try:
         # 药水 / 装备 WZ price 字段可读

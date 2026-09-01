@@ -52,8 +52,13 @@ uv run python -m game.main   # 启动游戏
 ## 结构
 
 ```
-src/wzpy/   函数库：WZ 解析 / 解密 / 渲染器（可独立复用）
-src/game/   应用层：循环 / 物理 / 实体 / 战斗 / 技能 / 背包 / 任务 / UI / 存档
+src/wzpy/    函数库：WZ 解析 / 解密 / 渲染器（可独立复用）
+src/game/    应用层（按职责分四层子包 + 顶层编排，依赖无环）：
+  core/    纯逻辑/工具（physics / stats / jobs / animation / travel …）
+  entities/  玩家 / 怪物 / NPC
+  systems/   战斗 / 技能 / 任务 / 背包 / 商店 / 卷轴 …
+  render/    资源 / UI / 面板 / 小地图 / 音效 / 特效
+  顶层      game.py（主循环）context.py（组合根）world.py（单图场景）settings.py
 src/tests/  pytest 整合测试（合成数据，无需 WZ 文件）
 ```
 

@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from game.combat import Combat, DropItem
+from game.systems.combat import Combat, DropItem
 
 
 def test_attracted_drop_reaches_player_fast():

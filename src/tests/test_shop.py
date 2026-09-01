@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from game import settings
-from game.inventory import Inventory, Item
-from game.shop import buy, sell, sell_price, shops_of, item_price
+from game.systems.inventory import Inventory, Item
+from game.systems.shop import buy, sell, sell_price, shops_of, item_price
 
 
 def test_buy_deducts_meso_and_adds_item():

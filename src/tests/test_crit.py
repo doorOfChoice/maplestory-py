@@ -4,7 +4,7 @@ from __future__ import annotations
 import random
 
 from game import settings
-from game.stats import roll_damage
+from game.core.stats import roll_damage
 
 
 # 攻击区间 (lo, hi)：命中 100（无怪防、无等级差）

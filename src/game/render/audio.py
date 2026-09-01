@@ -13,7 +13,7 @@ from typing import Dict, Optional
 
 import pygame
 
-from .assets import Assets
+from game.render.assets import Assets
 
 
 class Audio:

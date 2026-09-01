@@ -1,7 +1,7 @@
 """伤害浮动：同一基础攻击力每次命中数值不同，且在 ±10% 范围内。"""
 from __future__ import annotations
 
-from game.combat import roll_damage
+from game.systems.combat import roll_damage
 
 
 def test_roll_damage_varies_within_range():

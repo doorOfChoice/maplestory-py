@@ -1,7 +1,7 @@
 """Buff 与状态异常：持续时间增益/减益的行为验证（纯数据，无 pygame）。"""
 from __future__ import annotations
 
-from game.buffs import BuffList, StatusList
+from game.core.buffs import BuffList, StatusList
 
 
 def test_buff_apply_and_mod_sum():

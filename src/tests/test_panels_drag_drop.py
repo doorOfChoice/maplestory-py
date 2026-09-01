@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pygame
 
-from game.inventory import Inventory, Item
-from game.panels import Panels
+from game.systems.inventory import Inventory, Item
+from game.render.panels import Panels
 
 
 class FakeUI:

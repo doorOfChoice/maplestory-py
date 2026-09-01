@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Tuple
 
-from . import settings
+from game import settings
 
 
 class Camera:

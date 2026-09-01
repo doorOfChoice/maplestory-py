@@ -9,7 +9,7 @@ from typing import List, Tuple
 
 import pygame
 
-from .animation import Animation
+from game.core.animation import Animation
 
 
 class Effect:

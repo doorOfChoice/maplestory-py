@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from game import settings
-from game.inventory import Inventory, Item
+from game.systems.inventory import Inventory, Item
 
 
 def test_bag_to_storage_and_back_roundtrip():
@@ -70,7 +70,7 @@ def test_wheel_down_scrolls_bag_list_forward():
     from types import SimpleNamespace
     import pygame
     pygame.init()
-    from game.storage_panel import StoragePanel
+    from game.render.storage_panel import StoragePanel
 
     class UI:
         font = font_small = font_tiny = None

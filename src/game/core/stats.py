@@ -19,7 +19,7 @@ from __future__ import annotations
 import random
 from typing import Dict, Mapping, Optional, Tuple
 
-from . import settings
+from game import settings
 
 STAT_KEYS = ("str", "dex", "int", "luk")
 STAT_LABELS = {"str": "力量", "dex": "敏捷", "int": "智力", "luk": "幸运"}

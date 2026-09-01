@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from game.jobs import JOBS, can_advance, is_ranged_weapon, resolve_skill_img
+from game.core.jobs import JOBS, can_advance, is_ranged_weapon, resolve_skill_img
 
 
 def test_resolve_skill_img_by_length():

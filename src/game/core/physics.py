@@ -22,7 +22,7 @@ from __future__ import annotations
 import bisect
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import settings
+from game import settings
 
 
 class Foothold:

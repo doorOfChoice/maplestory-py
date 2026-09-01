@@ -1,9 +1,9 @@
 """怪物异常技能：skill 节点解析（毒/晕/减速）+ 接触命中概率触发。"""
 from __future__ import annotations
 
-from game.buffs import StatusList
-from game.combat import Combat
-from game.monster import parse_mob_status_skills
+from game.core.buffs import StatusList
+from game.systems.combat import Combat
+from game.entities.monster import parse_mob_status_skills
 
 
 class Prop:

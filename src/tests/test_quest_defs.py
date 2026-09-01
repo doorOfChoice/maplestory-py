@@ -17,14 +17,14 @@ needs_wz = pytest.mark.skipif(
 def _assets():
     pygame.init()
     pygame.display.set_mode((8, 8))
-    from game.assets import Assets
+    from game.render.assets import Assets
     return Assets(settings.MAP_ID)
 
 
 @needs_wz
 def test_selective_load_returns_only_requested_qids():
     """传入 qids 时结果集恰好是这些任务（存在的那些）。"""
-    from game.quests import load_quest_defs
+    from game.systems.quests import load_quest_defs
     assets = _assets()
     try:
         defs = load_quest_defs(assets, {"2088"})
@@ -37,7 +37,7 @@ def test_selective_load_returns_only_requested_qids():
 @needs_wz
 def test_selective_load_matches_full_parse():
     """按需解析出的 QuestDef 与全量解析逐字段一致。"""
-    from game.quests import load_quest_defs
+    from game.systems.quests import load_quest_defs
     assets = _assets()
     try:
         part = load_quest_defs(assets, settings.ENABLED_QUESTS)

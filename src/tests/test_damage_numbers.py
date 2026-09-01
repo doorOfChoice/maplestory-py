@@ -1,7 +1,7 @@
 """官方伤害数字：数字集选择（小/大号、Miss）、颜色映射与原版动画曲线。"""
 from __future__ import annotations
 
-from game.combat import DamageNumber
+from game.systems.combat import DamageNumber
 
 
 def test_small_digits_below_thousand():

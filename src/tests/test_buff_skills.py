@@ -1,10 +1,10 @@
 """Buff 技能施放接线：cast 出含 time 字段的技能 → player.buffs 生效、属性变化。"""
 from __future__ import annotations
 
-from game.inventory import Inventory
-from game.player import Player
-from game.skills import SkillBook, SkillDef
-from game.stats import base_stats
+from game.systems.inventory import Inventory
+from game.entities.player import Player
+from game.systems.skills import SkillBook, SkillDef
+from game.core.stats import base_stats
 
 
 class StubAssets:

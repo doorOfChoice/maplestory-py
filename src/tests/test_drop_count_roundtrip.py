@@ -2,8 +2,8 @@
 
 from types import SimpleNamespace
 
-from game.combat import Combat
-from game.inventory import Inventory, Item
+from game.systems.combat import Combat
+from game.systems.inventory import Inventory, Item
 
 
 class FakeAssets:

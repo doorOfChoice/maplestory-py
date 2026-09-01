@@ -11,8 +11,8 @@ from __future__ import annotations
 import random
 from typing import Dict, Optional
 
-from . import settings
-from .inventory import Item
+from game import settings
+from game.systems.inventory import Item
 
 # ── 卷轴配置（8 位补零 id → 名称 / 目标栏位 / 成功率% / 加成区间 / 词条）────
 SCROLLS: Dict[str, Dict] = {

@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from game import settings
-from game.physics import Physics
-from game.player import Player
+from game.core.physics import Physics
+from game.entities.player import Player
 
 
 def fh(fid, layer, x1, y1, x2, y2, prev=-1, next=-1, platform=0):
@@ -32,7 +32,7 @@ class Keys:
 
 def _stub_init(self, assets, quest_defs=None):
     """最小初始化：只补 update 循环用到的状态字段，避免依赖 WZ。"""
-    from game.inventory import Inventory
+    from game.systems.inventory import Inventory
     self.inventory = Inventory()
     self.skills = _StubSkills()
     self.quests = {}

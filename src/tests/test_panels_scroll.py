@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pygame
 
-from game.inventory import Inventory, Item
-from game.panels import Panels, INV_SLOTS, INV_COLS, SKL_ROWS
+from game.systems.inventory import Inventory, Item
+from game.render.panels import Panels, INV_SLOTS, INV_COLS, SKL_ROWS
 
 
 class FakeUI:

@@ -11,9 +11,9 @@ from typing import List, Optional, Tuple
 
 import pygame
 
-from . import settings
-from .inventory import item_kind
-from .panels import _ellipsize, draw_menu_bg
+from game import settings
+from game.systems.inventory import item_kind
+from game.render.panels import _ellipsize, draw_menu_bg
 
 PANEL_W, PANEL_H = 600, 330
 TITLE_H = 26

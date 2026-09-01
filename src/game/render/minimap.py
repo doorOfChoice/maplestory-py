@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pygame
 
-from . import settings
+from game import settings
 
 
 class MiniMap:

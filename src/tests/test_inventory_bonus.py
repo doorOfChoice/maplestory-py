@@ -1,7 +1,7 @@
 """装备词条键名映射：player 侧 bonus() 吃到 WZ 的 incSTR/incHP 等词条键。"""
 from __future__ import annotations
 
-from game.inventory import Inventory, Item
+from game.systems.inventory import Inventory, Item
 
 
 def _equip(**info) -> Item:

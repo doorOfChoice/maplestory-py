@@ -6,9 +6,55 @@ import os
 import tempfile
 from pathlib import Path
 
-from game.inventory import Inventory, Item
-from game.quests import QuestLog, QuestDef
-from game.save_manager import SaveManager
+from game.systems.inventory import Inventory, Item
+from game.systems.quests import QuestLog, QuestDef
+from game.save_manager import SaveManager, SaveRegistry, REGISTRY
+
+
+def test_save_registry_custom_component_roundtrip():
+    """新增可存档组件：register 一次后 collect 自动包含、restore 自动还原。"""
+    reg = SaveRegistry()
+
+    class Widget:
+        def __init__(self):
+            self.n = 0
+
+    class P:
+        def __init__(self):
+            self.widget = Widget()
+
+    reg.register("widget", lambda p, c: {"n": p.widget.n},
+                 lambda p, c, d: setattr(p.widget, "n", d["n"]))
+
+    p = P()
+    p.widget.n = 7
+    data = reg.extend({}, p, object())
+    assert data["widget"] == {"n": 7}
+
+    p2 = P()
+    reg.restore(p2, object(), data)
+    assert p2.widget.n == 7
+
+
+def test_default_registry_collects_core_components():
+    """默认注册表：collect_data 会收集 inventory/skills/quests/meta。"""
+    class D:
+        def to_dict(self):
+            return {"d": 1}
+
+    class P:
+        inventory = D()
+        skills = D()
+        quests = D()
+
+    class C:
+        meso = 10
+        total_kills = 5
+
+    data = REGISTRY.extend({}, P(), C())
+    assert set(data) == {"inventory", "skills", "quests", "meta"}
+    assert data["meta"] == {"meso": 10, "total_kills": 5}
+
 
 
 def test_inventory_to_from_dict_roundtrip():
@@ -53,7 +99,7 @@ def test_inventory_to_from_dict_empty():
 
 def test_skillbook_to_from_dict_roundtrip():
     """SkillBook → dict → SkillBook，sp 與 levels 一致。"""
-    from game.skills import SkillBook
+    from game.systems.skills import SkillBook
     class FakeAssets:
         class FakeWz:
             class Root:

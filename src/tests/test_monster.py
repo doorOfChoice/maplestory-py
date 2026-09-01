@@ -2,8 +2,8 @@
 
 import pygame
 
-from game.monster import Monster
-from game.physics import Physics
+from game.entities.monster import Monster
+from game.core.physics import Physics
 
 
 def fh(fid, layer, x1, y1, x2, y2, prev=-1, next=-1, platform=0):

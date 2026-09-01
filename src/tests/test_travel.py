@@ -1,7 +1,7 @@
 """地图通行纯函数：传送门目标解析、触发方式分类、可用性过滤（合成数据，不依赖 WZ）。"""
 from __future__ import annotations
 
-from game.travel import portal_target, portal_trigger, portal_hidden, usable_portals
+from game.core.travel import portal_target, portal_trigger, portal_hidden, usable_portals
 
 
 def portal(ptype, tm=999999999, name="p"):

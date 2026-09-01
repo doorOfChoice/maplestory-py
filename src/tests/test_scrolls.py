@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from game import settings
-from game.inventory import Inventory, Item
-from game.scrolls import SCROLLS, apply_scroll, is_scroll_id, scroll_fee
+from game.systems.inventory import Inventory, Item
+from game.systems.scrolls import SCROLLS, apply_scroll, is_scroll_id, scroll_fee
 
 
 def _weapon() -> Item:

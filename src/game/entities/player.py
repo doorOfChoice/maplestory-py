@@ -10,18 +10,18 @@ from typing import List, Optional, Tuple
 
 import pygame
 
-from . import settings
-from . import stats as stats_mod
-from .animation import Animation
-from .assets import Assets
-from .buffs import BuffList, StatusList
-from .physics import Physics
-from .inventory import Inventory, make_item
-from .jobs import JOBS, is_ranged_weapon
-from .skills import SkillBook
-from .stats import base_stats
-from .quests import QuestLog
-from .motion import approach, friction, JumpFeather
+from game import settings
+from game.core import stats as stats_mod
+from game.core.animation import Animation
+from game.render.assets import Assets
+from game.core.buffs import BuffList, StatusList
+from game.core.physics import Physics
+from game.systems.inventory import Inventory, make_item
+from game.core.jobs import JOBS, is_ranged_weapon
+from game.systems.skills import SkillBook
+from game.core.stats import base_stats
+from game.systems.quests import QuestLog
+from game.core.motion import approach, friction, JumpFeather
 
 POSE_IDLE = "stand1"
 POSE_RUN = "walk1"
@@ -159,10 +159,9 @@ class Player:
         self.refresh_equips()
 
     def is_ranged(self) -> bool:
-        """远程职业且手持弓/弩。"""
+        """远程判定：手持弓/弩类武器（数据驱动，不绑定具体职业）。"""
         weapon = self.inventory.equipped.get("weapon")
-        return (self.job == settings.BOWMAN_JOB and weapon is not None
-                and is_ranged_weapon(weapon.id))
+        return weapon is not None and is_ranged_weapon(weapon.id)
 
     def refresh_equips(self) -> None:
         """装备栏变更后同步外观与派生数值（equips 列表驱动角色渲染）。"""

@@ -7,14 +7,68 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 from pathlib import Path
-from typing import Any, Optional
+from typing import Callable, Dict, Optional
 
-from . import settings
-from . import stats as stats_mod
-from .jobs import JOBS
+from game import settings
+from game.core import stats as stats_mod
+from game.core.jobs import JOBS
+
+
+class SaveRegistry:
+    """存档组件注册表：新增可存档系统只需 register，无需改动 collect_data。
+
+    每个条目描述一个「命名子组件」：
+      · collect  从 (player, combat) 快照中抽取 dict（序列化）
+      · apply    把 dict 还原回目标对象（反序列化）
+
+    collect_data 遍历所有登记条目拼接；restore 逐个还原。加载路径与
+    组件自身 to_dict/from_dict 契约一致，可独立测试、可插拔。
+    """
+
+    def __init__(self) -> None:
+        self._collect: Dict[str, Callable[[object, object], dict]] = {}
+        self._apply: Dict[str, Callable[[object, object, dict], None]] = {}
+
+    def register(self, key: str,
+                 collect: Callable[[object, object], dict],
+                 apply: Callable[[object, object, dict], None]) -> None:
+        """登记一个组件。collect 抽 dict；apply 把 dict 写回组件。"""
+        self._collect[key] = collect
+        self._apply[key] = apply
+
+    def extend(self, base: dict, player, combat) -> dict:
+        """把当前登记的所有组件快照合并进 base，回传 base。"""
+        for key, fn in self._collect.items():
+            base[key] = fn(player, combat)
+        return base
+
+    def restore(self, player, combat, data: dict) -> None:
+        """按登记把 data 里对应键还原进组件（缺键则跳过）。"""
+        for key, fn in self._apply.items():
+            if key in data:
+                fn(player, combat, data[key])
+
+
+# 内置存档组件：背包 / 技能 / 任务 / 世界元数据（金币·击杀）。
+REGISTRY = SaveRegistry()
+REGISTRY.register(
+    "inventory",
+    lambda p, c: p.inventory.to_dict(),
+    lambda p, c, d: p.inventory.from_dict(d, getattr(p, "assets", None)))
+REGISTRY.register(
+    "skills", lambda p, c: p.skills.to_dict(),
+    lambda p, c, d: p.skills.from_dict(d))
+REGISTRY.register(
+    "quests", lambda p, c: p.quests.to_dict(),
+    lambda p, c, d: p.quests.from_dict(d))
+REGISTRY.register(
+    "meta",
+    lambda p, c: {"meso": c.meso, "total_kills": c.total_kills},
+    lambda p, c, d: (setattr(c, "meso", d.get("meso", 0)),
+                     setattr(c, "total_kills", d.get("total_kills", 0))))
+
 
 
 class SaveManager:
@@ -104,8 +158,12 @@ class SaveManager:
 
     @staticmethod
     def collect_data(player, combat, map_id: str) -> dict:
-        """收集所有需要存档的游戏状态为 dict。"""
-        return {
+        """收集所有需要存档的游戏状态为 dict。
+
+        玩家核心字段与地图直接组合，其余可存档组件由 REGISTRY 自动拼接，
+        新增系统时注册即可，无需改动本方法。
+        """
+        data = {
             "version": 4,
             "player": {
                 "level": player.level,
@@ -122,11 +180,5 @@ class SaveManager:
                 "y": player.y,
                 "facing_right": player.facing_right,
             },
-            "inventory": player.inventory.to_dict(),
-            "skills": player.skills.to_dict(),
-            "quests": player.quests.to_dict(),
-            "meta": {
-                "meso": combat.meso,
-                "total_kills": combat.total_kills,
-            },
         }
+        return REGISTRY.extend(data, player, combat)

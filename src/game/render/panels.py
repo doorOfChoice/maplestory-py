@@ -22,12 +22,12 @@ from typing import List, Optional, Tuple
 
 import pygame
 
-from . import settings
-from .inventory import SLOT_ORDER, Item, islot_to_slot
-from .jobs import JOBS
-from .quests import render_markup
-from .scrolls import SCROLLS, apply_scroll, is_scroll_id
-from .stats import STAT_LABELS, wear_block
+from game import settings
+from game.systems.inventory import SLOT_ORDER, Item, islot_to_slot
+from game.core.jobs import JOBS
+from game.systems.quests import render_markup
+from game.systems.scrolls import SCROLLS, apply_scroll, is_scroll_id
+from game.core.stats import STAT_LABELS, wear_block
 
 SLOT_NAMES = {
     "cap": "帽子", "face": "脸饰", "earr": "耳环", "top": "上衣",

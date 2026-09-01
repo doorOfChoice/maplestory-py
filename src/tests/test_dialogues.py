@@ -1,7 +1,7 @@
 """NPC 寒暄台词：每个 NPC 有专属内容，未收录 NPC 回退到通用池，重复对话有变化。"""
 from __future__ import annotations
 
-from game import dialogues
+from game.systems import dialogues
 
 
 def test_known_npcs_get_distinct_dialogues():

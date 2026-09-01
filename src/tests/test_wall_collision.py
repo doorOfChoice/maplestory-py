@@ -1,6 +1,6 @@
 """竖直墙阻挡 = 身体盒规则的行为测试。"""
 from game import settings
-from game.physics import Physics
+from game.core.physics import Physics
 
 R = settings.PLAYER_BODY_HALF_W
 EPS = settings.WALL_FEET_EPS

@@ -14,8 +14,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from .assets import Assets
-from .localize import to_simplified
+from game.render.assets import Assets
+from game.core.localize import to_simplified
 
 # 任务状态
 Q_AVAILABLE = "available"    # 可接取（条件满足，由 NPC 提供）
@@ -467,7 +467,7 @@ class QuestLog:
     # ── 内部 ────────────────────────────────────────────────────────
     @staticmethod
     def _give_item(player, item_id: int, count: int) -> None:
-        from .inventory import make_item
+        from game.systems.inventory import make_item
         key = f"{int(item_id):08d}"
         player.inventory.add(make_item(key, player.assets, count))
 

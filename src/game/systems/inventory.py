@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from . import settings
+from game import settings
 
 
 # islot（Character.wz info/islot，两字符令牌的拼接，如 "WpSi"/"MaPn"）

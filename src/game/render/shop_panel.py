@@ -12,10 +12,10 @@ from typing import List, Optional, Tuple
 
 import pygame
 
-from . import shop as shop_mod
-from .inventory import item_kind, make_item
-from .panels import _ellipsize, draw_menu_bg
-from .scrolls import SCROLLS, is_scroll_id
+from game.systems import shop as shop_mod
+from game.systems.inventory import item_kind, make_item
+from game.render.panels import _ellipsize, draw_menu_bg
+from game.systems.scrolls import SCROLLS, is_scroll_id
 
 PANEL_W, PANEL_H = 620, 340
 TITLE_H = 26

@@ -1,7 +1,7 @@
 """开屏动画渲染：纯 pygame 绘制，不依赖 WZ / 显示，可在无头环境验证。"""
 import pygame
 
-from game.splash import Splash
+from game.render.splash import Splash
 
 pygame.font.init()
 

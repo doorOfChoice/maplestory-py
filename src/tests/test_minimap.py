@@ -2,7 +2,7 @@
 import pygame
 
 from game import settings
-from game.minimap import MiniMap
+from game.render.minimap import MiniMap
 
 W = settings.MINIMAP_W
 H = settings.MINIMAP_H

@@ -18,8 +18,8 @@ from typing import List, Optional, Tuple
 
 import pygame
 
-from . import settings
-from .fonts import load_cjk_font, render_text
+from game import settings
+from game.core.fonts import load_cjk_font, render_text
 
 
 def _load_font(size: int) -> pygame.font.Font:

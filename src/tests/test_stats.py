@@ -4,10 +4,7 @@ from __future__ import annotations
 import random
 
 from game import settings
-from game.stats import (
-    allocate, attack, attack_range, auto_allocate, base_stats, defense,
-    exp_to_next, max_hp, max_mp, roll_damage, wear_block,
-)
+from game.core.stats import allocate, attack, attack_range, auto_allocate, base_stats, defense, exp_to_next, max_hp, max_mp, roll_damage, wear_block
 
 
 def test_allocate_adds_stat_and_consumes_ap():

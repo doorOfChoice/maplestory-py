@@ -31,7 +31,7 @@ pyproject.toml 已设定 pytest 的 `pythonpath = ["src"]` 与 `testpaths = ["sr
 ```
 WZ (.wz) → wzpy: WzFile.open → 解密 → 目录树 → 惰性属性解析
         → Renderer (Map/Mob/Character) → PIL Image
-        → src/game/assets.py: pil_to_surface 缓存 → pygame Surface
+        → src/game/render/assets.py: pil_to_surface 缓存 → pygame Surface
         → 场景绘制（canvas → camera → display，固定 60 FPS）
 ```
 
@@ -42,21 +42,22 @@ WZ (.wz) → wzpy: WzFile.open → 解密 → 目录树 → 惰性属性解析
 ### 关键设计决定
 
 - **坐标系统**：沿用 WZ 世界坐标（y 向下为正），角色以 navel 为锚点，脚底 = navel + `FEET_OFFSET`（20px）
-- **物理**（src/game/physics.py）：自制的 MS 式 foothold 行走系统，非回合制碰撞 —— 落地只发生在「脚底本帧跨越 foothold 线」时；爬墙只沿当前 foothold 的 prev/next 链；含梯子/绳、蹬墙跳
+- **物理**（src/game/core/physics.py）：自制的 MS 式 foothold 行走系统，非回合制碰撞 —— 落地只发生在「脚底本帧跨越 foothold 线」时；爬墙只沿当前 foothold 的 prev/next 链；含梯子/绳、蹬墙跳
 - **WZ 资产只读**：本项目只读 `wz/`，永不写入
 - **惰性解析**：WZ 影像首次访问才解析，并积极缓存
 - **非模态对话**：NPC/任务对话不暂停世界
 - **常量集中**：所有物理/战斗/背包常量集中在 `src/game/settings.py`（含文件头说明）
+- **分层子包**：`src/game/` 内按职责分四层 —— `core/`（纯逻辑/工具：physics/stats/jobs/animation/…）、`entities/`（player/monster/npc）、`systems/`（combat/skills/quests/inventory/…）、`render/`（assets/ui/panels/minimap/…）；顶层留编排（`game.py`/`context.py`/`world.py`/`settings.py`/…）。依赖方向 `entities→core/render`、`systems→core/entities/render`、`render→core`，保持无环。
 
 ## 样式约定
 
 - **语言**：模块 docstring、类别说明、行内注释一律使用**简体中文**；文件采布局注释分隔（`# ── 区块 ──`、`# ═══`）
 - **`from __future__ import annotations`**：每个文件顶部必加
-- **导入顺序**：标准库 → 第三方 → 本项目，以空行分隔；`src/game/` 内用相对导入（`from . import settings`），跨包用绝对导入（`from wzpy.wz_file import WzFile`）；禁用 `import *`
+- **导入顺序**：标准库 → 第三方 → 本项目，以空行分隔；本项目内用**绝对导入**（`from game import settings`、`from game.core import stats`；跨包 `from wzpy.wz_file import WzFile`）；禁用 `import *`
 - **命名**：
   - 类别 `PascalCase`、函数/方法 `snake_case`、模块常量 `UPPER_SNAKE_CASE`、私有成员前缀单下划线 `_`、文件名 `snake_case.py`
 - **类型标注**：所有函数签名都应有类型标注与返回类型；用 Python 3.10+ union 语法（`Optional[x]` 等）；可变默认值用 `dataclasses.field(default_factory=...)`；物理热点类别用 `__slots__`
-- **docstring**：模块层描述用途、坐标约定、设计哲学（见 `src/game/settings.py`、`src/game/physics.py` 示例）
+- **docstring**：模块层描述用途、坐标约定、设计哲学（见 `src/game/settings.py`、`src/game/core/physics.py` 示例）
 - **行长**：约 100~120 字符为上限，勿硬折
 - **缩进**：4 空格
 - **不写无意义注释**，也不为代码注释过度铺陈；除非必要，不加注释

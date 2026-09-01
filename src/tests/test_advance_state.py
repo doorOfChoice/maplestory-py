@@ -7,8 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from game.save_manager import SaveManager
-from game.skills import SkillBook
-from game.skills import SkillDef
+from game.systems.skills import SkillBook
+from game.systems.skills import SkillDef
 
 
 def fake_player(job: int = 3000) -> SimpleNamespace:

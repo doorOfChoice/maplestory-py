@@ -4,7 +4,7 @@ from __future__ import annotations
 import pygame
 import pytest
 
-from game.combat import Arrow, Combat
+from game.systems.combat import Arrow, Combat
 
 pygame.init()
 
@@ -20,6 +20,8 @@ class FakeTarget:
         self.sprite_h = h
         self.exp = 0
         self.mob_id = "9999999"
+        self.pd = 0
+        self.level = 0
         self.hits = 0
 
     def rect(self) -> pygame.Rect:

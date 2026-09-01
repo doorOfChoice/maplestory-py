@@ -63,6 +63,14 @@ def can_advance(player, jobdef: JobDef) -> bool:
             and player.level >= jobdef.advance_lv)
 
 
+def job_for_trainer(npc_id) -> Optional["JobDef"]:
+    """回传以 npc_id 为导师的职业定义（用于转职对话；无则 None）。"""
+    for jd in JOBS.values():
+        if jd.trainer_npc is not None and str(jd.trainer_npc) == str(npc_id):
+            return jd
+    return None
+
+
 def skill_ids_for_job(assets, code: int) -> List[str]:
     """枚举职业技能树的全部技能 id（需 WZ，integration 用）。"""
     jobdef = JOBS.get(code)

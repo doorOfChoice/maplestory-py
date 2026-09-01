@@ -4,8 +4,8 @@ from __future__ import annotations
 import pygame
 
 from game import settings
-from game.monster import Monster
-from game.physics import Physics
+from game.entities.monster import Monster
+from game.core.physics import Physics
 from tests.test_monster import FakeAssets, fh, make
 
 

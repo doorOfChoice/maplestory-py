@@ -30,9 +30,9 @@ from wzpy.mob import MobRenderer
 from wzpy.character import CharacterRenderer, DEFAULT_EAR_TYPE
 from wzpy.properties import WzCanvasProperty, WzUolProperty
 
-from . import settings
-from .jobs import is_ranged_weapon, resolve_skill_img
-from .localize import to_simplified
+from game import settings
+from game.core.jobs import is_ranged_weapon, resolve_skill_img
+from game.core.localize import to_simplified
 
 # 攻击姿态回退顺序（玩家攻击用）
 ATTACK_POSES = ("swingO1", "swingO2", "swingO3", "stabO1", "stabO2")

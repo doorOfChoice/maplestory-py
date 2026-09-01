@@ -1,7 +1,7 @@
 """对话气泡定位：浮在 NPC 头顶、尖尾指向 NPC、贴边时夹紧不出屏。"""
 from __future__ import annotations
 
-from game.ui import compute_bubble_rect
+from game.render.ui import compute_bubble_rect
 
 
 def test_bubble_centers_above_npc():

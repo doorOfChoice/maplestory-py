@@ -14,8 +14,8 @@ from typing import Tuple
 
 import pygame
 
-from . import settings
-from .fonts import load_cjk_font
+from game import settings
+from game.core.fonts import load_cjk_font
 
 # 配色
 _BG_TOP = (18, 22, 34)
