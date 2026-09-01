@@ -8,13 +8,12 @@
 · consume_click()   鼠标是否被对话层消费（列表/按钮/气泡关闭）
 · consume_keydown() 回车/空格/Esc 是否被对话层消费
 · update()          走远自动收起各对话框
-· draw()            绘制任务选择列表覆盖层
 · close_all()       切图 / 重生 / 进入任务前清空
 · portal_blocked()  是否有对话框屏蔽传送门
 
-逻辑全部建于已抽出的声明式层：转职走 scripting.LuaSession 会话、任务列表走
-render.quest_alarm.QuestAlarmView、任务过滤走 quests.collect_npc_quests —— 本类
-只做编排与路由，不再硬编码任何对话文案。
+逻辑全部建于已抽出的声明式层：转职走 scripting.LuaSession 会话、多任务选择列表走
+render.ui.UI 的 UtilDlgEx 面板（与单任务对话框同款样式，由 UI.draw_quest 统一绘制）、
+任务过滤走 quests.collect_npc_quests —— 本类只做编排与路由，不再硬编码任何对话文案。
 """
 
 from __future__ import annotations
@@ -23,8 +22,6 @@ from typing import Any, List, Optional, Tuple
 
 import pygame
 
-from game import settings
-from game.render.quest_alarm import QuestAlarm, QuestAlarmView, QuestEntry, PANEL_W
 from game.systems import dialogues
 from game.systems.quests import collect_npc_quests, render_markup
 from game.systems.scripting import build_lua_session
@@ -50,10 +47,8 @@ class NpcDialogueController:
         self._advance_ctx: Optional[Any] = None
         self._advance_npc: Optional[object] = None
         self._advance_qid: Optional[str] = None
-        self._quest_menu_view: Optional[QuestAlarmView] = None   # 多任务选择列表
         self._quest_menu_items: List[object] = []
         self._quest_menu_npc: Optional[object] = None
-        self._quest_menu_rect: Optional[Tuple[int, int]] = None  # 列表左上角
 
     # ── 入口：找 NPC 并路由 ─────────────────────────────────────────
     def try_talk(self) -> None:
@@ -90,18 +85,15 @@ class NpcDialogueController:
 
         优先序：多任务列表 > 任务框按钮 > 商店/仓库按钮 > 点击气泡关闭。
         """
-        if self._quest_menu_view is not None:
-            if self._quest_menu_rect is not None:
-                idx = self._quest_menu_view.hit_index(
-                    self.assets, self._quest_menu_rect[0], self._quest_menu_rect[1],
-                    pos)
-                if idx is not None:
-                    item = self._quest_menu_items[idx]
-                    npc = self._quest_menu_npc
-                    self._close_quest_menu()
-                    self._open_npc_quest(npc, item)
-                else:
-                    self._close_quest_menu()
+        if self._quest_menu_items:
+            idx = self.ctx.ui.quest_list_hit(pos)
+            if idx is not None:
+                item = self._quest_menu_items[idx]
+                npc = self._quest_menu_npc
+                self._close_quest_menu()
+                self._open_npc_quest(npc, item)
+            elif not self.ctx.ui.quest_dialog_hit(pos):
+                self._close_quest_menu()   # 点面板外 → 收起列表
             return True
         btn = self.ctx.ui.quest_hit(pos)
         if btn is not None:
@@ -124,6 +116,10 @@ class NpcDialogueController:
 
     def consume_keydown(self, key: int) -> bool:
         """回车/空格/Esc 是否被对话层消费；否则交回 game.py（移动/商店等）。"""
+        if self._quest_menu_items:
+            if key == pygame.K_ESCAPE:
+                self._close_quest_menu()
+            return True
         if self.ctx.ui.quest_visible:
             qkey = None
             if key == pygame.K_ESCAPE:
@@ -165,17 +161,11 @@ class NpcDialogueController:
                 self._quest_flow = None
                 self._advance_session = None
                 self._advance_npc = None
-        if self._quest_menu_view is not None and self._quest_menu_npc is not None:
+        if self._quest_menu_items and self._quest_menu_npc is not None:
             if abs(player.x - self._quest_menu_npc.rect().centerx) > TALK_RANGE:
                 self._close_quest_menu()
 
     # ── 绘制 / 清理 / 查询 ──────────────────────────────────────────
-    def draw(self, surface) -> None:
-        if self._quest_menu_view is None or self._quest_menu_rect is None:
-            return
-        self._quest_menu_view.draw(surface, self.assets,
-                                   self._quest_menu_rect[0], self._quest_menu_rect[1])
-
     def close_all(self) -> None:
         self.ctx.ui.hide_dialog()
         self.ctx.ui.hide_quest()
@@ -208,22 +198,17 @@ class NpcDialogueController:
             self._show_quest_offer(item.qid)
 
     def _open_quest_menu(self, npc, items) -> None:
-        """多个可接/可交付任务 → 弹原版 QuestAlarm 列表选择。"""
-        entries = [QuestEntry(title=it.title, level=it.level) for it in items]
-        model = QuestAlarm(entries=entries, per_page=5)
-        self._quest_menu_view = QuestAlarmView(model)
+        """多个可接/可交付任务 → 用与单任务对话框同款的 UtilDlgEx 面板列选。"""
+        entries = [(it.title, it.level) for it in items]
+        self.ctx.ui.show_quest_list(npc.name, entries)
         self._quest_menu_items = list(items)
         self._quest_menu_npc = npc
-        n = len(model.visible())
-        self._quest_menu_rect = ((settings.VIEW_W - PANEL_W) // 2,
-                                 settings.VIEW_H // 2
-                                 - self._quest_menu_view.panel_height(n) // 2)
 
     def _close_quest_menu(self) -> None:
-        self._quest_menu_view = None
+        if self.ctx.ui.quest_entries:
+            self.ctx.ui.hide_quest()
         self._quest_menu_items = []
         self._quest_menu_npc = None
-        self._quest_menu_rect = None
 
     def _dialog_button(self, key: str) -> None:
         """NPC 对话按钮回调：打开商店 / 仓库面板。"""

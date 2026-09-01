@@ -115,7 +115,7 @@ class Player:
         self.max_hp = pd["max_hp"]
         self.mp = pd["mp"]
         self.max_mp = pd["max_mp"]
-        self.job = pd.get("job", 0)
+        self.job = pd.get("job") or 0
         self.stats = dict(pd.get("stats") or base_stats())
         self.ap = int(pd.get("ap") or 0)
         self.facing_right = pd.get("facing_right", True)

@@ -43,7 +43,7 @@ class MiniMap:
                 canvas: Optional[pygame.Surface] = None,
                 map_surface: Optional[pygame.Surface] = None) -> None:
         if mag:
-            self.mag = mag
+            self.mag = max(1, int(round(mag * settings.MINIMAP_MAG_EXTRA)))
         self.bounds = bounds
         self.map_width = map_width
         self.map_height = map_height
@@ -88,11 +88,15 @@ class MiniMap:
         return surf
 
     # ── 坐标换算 ─────────────────────────────────────────────────────
+    def view_size(self) -> Tuple[float, float]:
+        """世界窗口尺寸：不得超过整图尺寸（小图夹紧，防 subsurface 越界）。"""
+        return (min(settings.MINIMAP_W * self.mag, self.map_width),
+                min(settings.MINIMAP_H * self.mag, self.map_height))
+
     def view_world_rect(self, player_x: float,
                         player_y: float) -> Tuple[float, float, float, float]:
         """可见世界窗口 (left, top, w, h)，以玩家为中心并夹紧到地图。"""
-        vw = settings.MINIMAP_W * self.mag
-        vh = settings.MINIMAP_H * self.mag
+        vw, vh = self.view_size()
         left = max(self.bounds["left"],
                    min(player_x - vw / 2, self.bounds["right"] - vw))
         top = max(self.bounds["top"],
@@ -102,17 +106,22 @@ class MiniMap:
     def src_rect(self, player_x: float, player_y: float) -> pygame.Rect:
         """基础层上需截取的矩形（对应可见世界窗口）。"""
         left, top, vw, vh = self.view_world_rect(player_x, player_y)
+        bw, bh = self.base_layer.get_size()
         sx = int((left - self.bounds["left"]) * self.base_scale_x)
         sy = int((top - self.bounds["top"]) * self.base_scale_y)
-        sw = max(1, int(vw * self.base_scale_x))
-        sh = max(1, int(vh * self.base_scale_y))
-        return pygame.Rect(sx, sy, sw, sh)
+        sw = int(vw * self.base_scale_x)
+        sh = int(vh * self.base_scale_y)
+        sx = min(max(sx, 0), bw - 1)
+        sy = min(max(sy, 0), bh - 1)
+        return pygame.Rect(sx, sy, max(1, min(sw, bw - sx)),
+                           max(1, min(sh, bh - sy)))
 
     def world_to_panel(self, wx: float, wy: float,
                        view_left: float, view_top: float) -> Tuple[float, float]:
-        """世界坐标 → 面板内像素（1 面板像素 = mag 世界像素）。"""
-        return ((wx - view_left) / self.mag,
-                (wy - view_top) / self.mag)
+        """世界坐标 → 面板内像素（1 面板像素 = 窗口/面板 的世界像素）。"""
+        vw, vh = self.view_size()
+        return ((wx - view_left) * settings.MINIMAP_W / vw,
+                (wy - view_top) * settings.MINIMAP_H / vh)
 
     @property
     def panel_rect(self) -> pygame.Rect:

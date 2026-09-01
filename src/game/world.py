@@ -30,6 +30,19 @@ from game.core.physics import Physics
 from game.entities.player import Player
 
 
+def resolve_saved_spawn(physics: Physics, saved: Optional[Tuple[float, float]],
+                        fallback: Tuple[float, float]) -> Tuple[float, float]:
+    """存档坐标落地校验：saved 为 (x, 脚底 y)。坠落途中（穿地到线下很远）
+    写下的坐标在本帧无穿线可接、会一进图就继续掉出地面；spawn_surface 在容差
+    内找不到支撑面时判无效，回退出生门 fallback。"""
+    if saved is None:
+        return fallback
+    x, feet = saved
+    if physics.spawn_surface(x, feet) is not None:
+        return saved
+    return fallback
+
+
 class World:
     """单张地图场景：装配物理/相机/战斗/小地图，并推进实体与绘制。
 
@@ -54,8 +67,9 @@ class World:
         self.spawn_x, self.spawn_y = spawn[0], spawn[1]
         if save_data:
             pd = save_data["player"]
-            self.spawn_x = float(pd["x"])
-            self.spawn_y = float(pd["y"]) + settings.FEET_OFFSET
+            saved = (float(pd["x"]), float(pd["y"]) + settings.FEET_OFFSET)
+            self.spawn_x, self.spawn_y = resolve_saved_spawn(
+                self.physics, saved, (self.spawn_x, self.spawn_y))
 
         self.player = Player(assets, self.spawn_x, self.spawn_y,
                              quest_defs=quest_defs, save_data=save_data)
@@ -117,7 +131,7 @@ class World:
         p.attack_timer = 0.0
         p.drop_layers.clear()
         p.drop_timer = 0.0
-        fh = self.physics.grounded_surface(p.x, p.feet_y)
+        fh = self.physics.spawn_surface(p.x, p.feet_y)
         if fh is not None:
             p.y = fh.y_at(p.x) - settings.FEET_OFFSET
             p.on_ground = True

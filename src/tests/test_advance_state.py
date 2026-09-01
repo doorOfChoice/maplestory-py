@@ -75,3 +75,16 @@ def test_migrate_v1_defaults():
     # Lv5 新手：(5-1)×5=20 AP 按权重全进力量
     assert loaded["player"]["stats"]["str"] == 24
     assert loaded["player"]["ap"] == 0
+
+
+def test_migrate_null_job_normalized():
+    """job 为 null 的脏档（v4）载入时归一为 0（新手），不阻断转职门控。"""
+    data = SaveManager.collect_data(fake_player(job=None),
+                                    SimpleNamespace(meso=0, total_kills=0),
+                                    "100010000")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "save.json"
+        sm = SaveManager(path)
+        sm.flush(data)
+        loaded = sm.load()
+    assert loaded["player"]["job"] == 0

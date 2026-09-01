@@ -171,6 +171,22 @@ class Physics:
                     best, best_y = f, y_a
         return best
 
+    def spawn_surface(self, x: float, feet: float,
+                      tol: Optional[float] = None) -> Optional[Foothold]:
+        """出生点贴地：portal 标注的 y 常落在地面线上下数 px（WZ 作者摆位），
+        首帧没有下落穿线信息，故在容差内对覆盖 x 的面做双向最近吸附。
+        只在出生/传送落位使用，不参与常规行走/下落（保持单向平台语义）。"""
+        lim = settings.SPAWN_SNAP_TOL if tol is None else tol
+        best: Optional[Foothold] = None
+        best_d: Optional[float] = None
+        for f in self.footholds:
+            if f.x1 == f.x2 or not f.covers(x):
+                continue
+            d = abs(f.y_at(x) - feet)
+            if d <= lim and (best is None or d < best_d):
+                best, best_d = f, d
+        return best
+
     def top_landing(self, x: float, feet: float,
                     max_rise: float = 34.0) -> Optional[Foothold]:
         """绳/梯顶端出绳：找 x 处位于脚底上方 max_rise 内（或平齐）的支撑面，

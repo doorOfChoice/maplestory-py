@@ -33,10 +33,10 @@ FADE_TIME = 0.4                 # 地图切换 / 重生后的黑场淡入秒数
 
 # ── 角色物理（世界坐标，y 向下）────────────────────────────────────
 GRAVITY = 2200.0                 # px/s^2
-MOVE_SPEED = 150.0               # 地面水平速度 px/s
+MOVE_SPEED = 300.0               # 地面水平速度 px/s
 MOVE_ACCEL = 2600.0              # 地面水平加速度 px/s^2（速度缓动，避免瞬起瞬停）
 AIR_ACCEL = 0.55                 # 空中水平加速度倍率（对 MOVE_ACCEL 打折扣）
-JUMP_VELOCITY = -700.0           # 起跳初速度（向上为负）
+JUMP_VELOCITY = -900.0           # 起跳初速度（向上为负）
 COYOTE_TIME = 0.08               # 离开地面后仍可起跳的窗口（秒）
 JUMP_BUFFER_TIME = 0.12          # 落地前一瞬按跳仍生效的缓冲（秒）
 MAX_FALL_SPEED = 1600.0
@@ -60,6 +60,9 @@ PLAYER_BODY_HALF_W = 10.0
 WALL_FEET_EPS = 3.0
 # 链接续段的最大自动上/下步高差（≥原版一级台阶 25~35px；更高需跳跃）
 PLAYER_STEP_UP = 36.0
+# 出生点贴地吸附容差：WZ portal 标注 y 常落在 foothold 线上下数 px~数十 px，
+# 首帧没有穿线信息，落点在容差内取最近面双向吸附，防止一进图就穿地坠落
+SPAWN_SNAP_TOL = 60.0
 
 # ── 战斗 ─────────────────────────────────────────────────────────────
 ATTACK_RANGE = 58.0              # 攻击命中框向前延伸距离
@@ -161,6 +164,7 @@ MINIMAP_W = 178                # 小地图窗口宽
 MINIMAP_H = 120                # 小地图窗口高
 MINIMAP_MARGIN = 8             # 右上角留白
 MINIMAP_MAG_FALLBACK = 4       # 无 WZ miniMap.mag 时的缩放倍率
+MINIMAP_MAG_EXTRA = 2          # 额外拉远倍率：视野范围 ×该值（面板不变，看得更广）
 MINIMAP_BG_ALPHA = 150         # 底半透明深色透明度
 MINIMAP_PLATFORM_COLOR = (170, 190, 210)   # 平台线
 MINIMAP_ROPE_COLOR = (120, 140, 160)       # 绳/梯竖线

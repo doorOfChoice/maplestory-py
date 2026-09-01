@@ -253,7 +253,7 @@ def test_trainer_newbie_quest_def():
     defs = load_lua_quest_defs()
     d = defs.get("c_1012100_1")
     assert d is not None
-    assert d.name == "新手入门"
+    assert d.name == "新手入门1"
     assert d.start_npc == 1012100
     assert d.end_npc == 1012100
     assert d.jobs == [0]
@@ -279,13 +279,13 @@ def test_trainer_newbie_quest_lifecycle():
 
 
 def test_trainer_quests_merge_newbie_and_advance():
-    """新手对话转职教官时，新手任务与转职任务同时出现在可接列表。"""
+    """新手对话转职教官时，两条新手任务与转职任务同时出现在可接列表。"""
     defs = {**load_lua_quest_defs(), **build_advance_quest_defs()}
     log = QuestLog(defs)
     player = SimpleNamespace(level=5, job=0, x=0.0, y=0.0,
                              inventory=SimpleNamespace(etcs={}, consumes={}))
     items = collect_npc_quests(defs, log, "1012100", player)
-    assert [it.qid for it in items] == ["c_1012100_1", "adv_3000"]
+    assert [it.qid for it in items] == ["c_1012100_1", "c_1012100_2", "adv_3000"]
 
 
 def test_build_advance_quest_defs():

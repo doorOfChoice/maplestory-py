@@ -19,7 +19,7 @@ from game import settings
 from game.render.assets import Assets
 from game.render.effects import Effect
 from game.systems.quests import load_quest_defs, render_markup
-from game.systems.lua_quests import load_lua_quest_defs
+from game.systems.lua_quests import build_advance_quest_defs, load_lua_quest_defs
 from game.npc_dialogue import NpcDialogueController
 from game.save_manager import SaveManager
 from game.render.splash import Splash
@@ -105,10 +105,11 @@ class Game:
             # 任务数据：等待后台解析完成（只解析 ENABLED_QUESTS 精选任务）
             quest_thread.join()
             self.quest_defs = quest_box.get("defs") or {}
-            # 合并 Lua 自定义任务（content/npc/*.lua，覆盖同名 qid）
+            # 合并 Lua 自定义任务（content/npc/*.lua）与转职任务（script=advance）
             lua_defs = load_lua_quest_defs()
-            if lua_defs:
-                self.quest_defs = {**self.quest_defs, **lua_defs}
+            adv_defs = build_advance_quest_defs()
+            if lua_defs or adv_defs:
+                self.quest_defs = {**self.quest_defs, **lua_defs, **adv_defs}
 
             # 组合根：装配音效 / UI / 面板 / 单图场景（World），并完成互相接线
             self.ctx = GameContext.create(self.assets, self.quest_defs,
@@ -225,20 +226,19 @@ class Game:
                         self.ctx.audio.play("PickUpItem", 0.4)
                 elif pygame.K_1 <= event.key <= pygame.K_9:
                     self._cast_skill(event.key - pygame.K_1 + 1)
-                elif event.key in (pygame.K_SPACE, pygame.K_UP):
-                    if (event.key == pygame.K_UP and not self.keys.down
-                            and self.ctx.world.portal_at_feet() is not None):
-                        pass  # 站在传送门上按 ↑ → 交给 _check_portal 切图，不跳跃
+                elif event.key == pygame.K_UP:
+                    if not self.keys.down and self.ctx.world.portal_at_feet() is not None:
+                        pass  # 站在传送门上按 ↑ → 交给 _check_portal 切图
                     elif self.keys.down:
                         self.ctx.world.player.drop_through(self.ctx.world.physics)
+                    # ↑ 不再触发跳跃，仅用于传送门和爬绳（爬绳由 update 中 keys.up 驱动）
+                elif event.key == pygame.K_SPACE:
+                    if self.keys.down:
+                        self.ctx.world.player.drop_through(self.ctx.world.physics)
                     elif self.ctx.world.player.climbing:
-                        # 只有空格从绳上跳下；↑ 在绳上继续爬
-                        if event.key == pygame.K_SPACE:
-                            self.ctx.audio.play("Jump", 0.5)
-                            self.ctx.world.player.jump()
-                    elif (self.ctx.world.physics.rope_at(self.ctx.world.player.x, self.ctx.world.player.y) is None
-                          or event.key == pygame.K_SPACE):
-                        # 绳边按 ↑ 是爬绳意图，不起跳
+                        self.ctx.audio.play("Jump", 0.5)
+                        self.ctx.world.player.jump()
+                    else:
                         if self.ctx.world.player.on_ground:
                             self.ctx.audio.play("Jump", 0.5)
                         self.ctx.world.player.jump()
@@ -451,7 +451,6 @@ class Game:
             self.ctx.storage_panel.draw(self.canvas, self.ctx.world.player)
         self.ctx.ui.draw_dialog(self.canvas, self.ctx.world.camera)
         self.ctx.ui.draw_quest(self.canvas)
-        self._dialogue.draw(self.canvas)
         self.ctx.ui.draw_death(self.canvas)
 
         # 黑场淡入（切图 / 重生后从黑渐变到场景，避免瞬间弹出）
@@ -487,13 +486,30 @@ class Game:
         big = load_cjk_font(52)
         small = load_cjk_font(26)
         title = render_text(big, name, (255, 246, 214))
-        title.set_alpha(alpha)
-        tr = title.get_rect(center=(cx, cy))
-        surface.blit(title, tr)
+        self._blit_faded(surface, title, (cx, cy), alpha)
         if street:
             sub = render_text(small, street, (210, 210, 220))
-            sub.set_alpha(alpha)
-            surface.blit(sub, sub.get_rect(center=(cx, cy + 44)))
+            self._blit_faded(surface, sub, (cx, cy + 44), alpha)
+
+    @staticmethod
+    def _blit_faded(surface, text_surf, center: Tuple[int, int], alpha: int) -> None:
+        """按 alpha 淡入淡出地绘制带逐像素透明的文字 Surface。
+
+        不能用 Surface.set_alpha(int)：对 SRCALPHA 表面其行为未定义，真实显示
+        驱动下会用统一 alpha 覆盖逐像素 alpha，使本应透明的背景整块变实色（闪
+        色块）。这里在副本上用 BLEND_RGBA_MULT 只缩放 alpha 通道（背景 alpha=0
+        乘后仍为 0），既正确淡变又不污染 render_text 的缓存表面。
+        """
+        if alpha >= 255:
+            surface.blit(text_surf, text_surf.get_rect(center=center))
+            return
+        if alpha <= 0:
+            return
+        layer = text_surf.copy()
+        mod = pygame.Surface(layer.get_size(), pygame.SRCALPHA)
+        mod.fill((255, 255, 255, alpha))
+        layer.blit(mod, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        surface.blit(layer, layer.get_rect(center=center))
 
     def _present(self) -> None:
         """把 canvas 呈现到窗口。scale=1 时直接 blit（省去每帧全画面复制）。"""
@@ -582,7 +598,7 @@ class Game:
             self.save_manager.flush(SaveManager.collect_data(
                 self.ctx.world.player, self.ctx.world.combat, self.assets.map_id))
         except Exception:
-            pass
+            traceback.print_exc()
         self.ctx.audio.close()
         self.assets.close()
         pygame.quit()

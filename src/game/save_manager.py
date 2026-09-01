@@ -85,9 +85,19 @@ class SaveManager:
         if not self.path.exists():
             return None
         try:
-            return self.migrate(json.loads(self.path.read_text(encoding="utf-8")))
+            return self.sanitize(
+                self.migrate(json.loads(self.path.read_text(encoding="utf-8"))))
         except Exception:
             return None
+
+    @staticmethod
+    def sanitize(data: dict) -> dict:
+        """脏档防御：死亡瞬间写入的 hp=0 档，读入即满血复活，
+        否则进门立即触发死亡界面→原地重生→再死的循环。"""
+        player = data.setdefault("player", {})
+        if float(player.get("hp", 1)) <= 0:
+            player["hp"] = player.get("max_hp", 1)
+        return data
 
     @staticmethod
     def migrate(data: dict) -> dict:
@@ -110,6 +120,10 @@ class SaveManager:
         if data.get("version") < 4:
             data.setdefault("inventory", {}).setdefault("storage", [])
             data["version"] = 4
+        # 脏档防御：job 为 null 会让转职门控（job==0）永不成立，归一为新手
+        player = data.setdefault("player", {})
+        if player.get("job") is None:
+            player["job"] = 0
         return data
 
     def request_save(self, data: dict) -> None:

@@ -78,6 +78,32 @@ def test_src_rect_scales_with_mag():
     assert src.h == H
 
 
+def test_view_window_clamped_when_map_smaller_than_window():
+    """整图比小地图窗口还小：窗口夹紧为地图尺寸，不得越界。"""
+    m = make(map_w=300, map_h=200, mag=4)
+    left, top, vw, vh = m.view_world_rect(150, 100)
+    assert vw == 300 and vh == 200
+    assert left + vw <= m.bounds["right"]
+    assert top + vh <= m.bounds["bottom"]
+
+
+def test_src_rect_fits_base_layer_on_tiny_map():
+    """小图的 src 必须落在底图层内（subsurface 不抛 ValueError）。"""
+    m = make(map_w=300, map_h=200, mag=4)
+    src = m.src_rect(150, 100)
+    bw, bh = m.base_layer.get_size()
+    assert src.left >= 0 and src.top >= 0
+    assert src.right <= bw and src.bottom <= bh
+    m.base_layer.subsurface(src)
+
+
+def test_draw_on_tiny_map_no_crash():
+    """小图上完整走一遍 draw：不应崩溃。"""
+    m = make(map_w=300, map_h=200, mag=4)
+    canvas = pygame.Surface((settings.VIEW_W, settings.VIEW_H))
+    m.draw(canvas, 150, 100, True, [_Ent(160, 110)], [])
+
+
 def test_toggle_flips_visible():
     """toggle() 切换 visible 布尔值。"""
     m = make()

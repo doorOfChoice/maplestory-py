@@ -55,8 +55,10 @@ def _drive(game: Game, frames: int = 12) -> None:
 
 
 @pytest.fixture
-def game(monkeypatch):
+def game(monkeypatch, tmp_path):
     monkeypatch.setattr("game.game.Assets", FakeAssets)
+    # 隔离真实存档：boot 测试不应受玩家进度（如已完成的转职任务）影响
+    monkeypatch.setattr("game.settings.SAVE_FILE", tmp_path / "save.json")
     g = Game()
     yield g
     # 不调用 _shutdown：其 pygame.quit() 会使全局字体缓存失效，导致同一
@@ -121,12 +123,25 @@ def test_advancement_flow_uses_script(game):
     game._draw()   # 转职后正常出帧
 
 
+def test_advance_quest_registered_in_boot(game):
+    """启动装配后 quest_defs 含转职任务，Lv10 新手在导师处可见。"""
+    from game.systems.quests import collect_npc_quests
+    _boot(game)
+    player = game.ctx.world.player
+    player.job = 0
+    player.level = 10
+    assert "adv_3000" in game.quest_defs
+    items = collect_npc_quests(game.quest_defs, player.quests, "1012100", player)
+    assert "adv_3000" in [it.qid for it in items]
+
+
 def test_npc_quest_menu_select_opens_quest(game):
-    """多任务弹原版列表，点选条目进入对应任务的接取流程。"""
+    """多任务弹与单任务对话框同款的 UtilDlgEx 列表，点选条目进入对应任务接取流程。"""
     from game.systems.quests import QuestDef, collect_npc_quests, QuestLog
     _boot(game)
     npc = _fake_npc()
     player = game.ctx.world.player
+    player.level = 10
     defs = {
         "1": QuestDef(qid="1", name="弓箭手入门", start_npc=1012100, lvmin=10),
         "2": QuestDef(qid="2", name="打菇菇", start_npc=1012100, lvmin=5),
@@ -139,7 +154,8 @@ def test_npc_quest_menu_select_opens_quest(game):
     items = collect_npc_quests(defs, player.quests, "1012100", player)
     assert [it.qid for it in items] == ["1", "2"]
     dlg._open_quest_menu(npc, items)
-    assert dlg._quest_menu_view is not None
+    assert game.ctx.ui.quest_visible
+    assert game.ctx.ui.quest_entries == [("弓箭手入门", 10), ("打菇菇", 5)]
     game._draw()   # 出菜单帧不崩溃
     dlg._open_npc_quest(npc, items[1])
     assert dlg._quest_flow == {"npc": npc, "quest": "2", "stage": "offer"}
