@@ -7,11 +7,13 @@ from __future__ import annotations
 import shutil
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from lupa import LuaRuntime
 
 from game.systems.lua_quests import _ints, _lines, _pairs, _quest_to_def, load_lua_quest_defs
+from game.systems.quests import QuestDef, QuestLog, collect_npc_quests
 
 pytest.importorskip("lupa")
 
@@ -220,3 +222,27 @@ return M
         assert "c_1012100_3" in defs
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_collect_npc_quests_merges_lua_and_wz():
+    """collect_npc_quests 能同时找到官方和自定义任务（qid 不冲突）。"""
+    wz_defs = {
+        "1000": QuestDef(qid="1000", name="WZ任务", start_npc=1012100,
+                         end_npc=1012100, lvmin=1,
+                         accept_lines=["a"], complete_lines=["c"]),
+    }
+    lua_defs = {
+        "c_1012100_1": QuestDef(qid="c_1012100_1", name="Lua任务",
+                                start_npc=1012100, end_npc=1012100,
+                                lvmin=1,
+                                accept_lines=["b"], complete_lines=["d"]),
+    }
+    defs = {**wz_defs, **lua_defs}
+    log = QuestLog(defs)
+    player = SimpleNamespace(level=10, job=0, x=0.0, y=0.0,
+                             inventory=SimpleNamespace(etcs={}, consumes={}))
+    items = collect_npc_quests(defs, log, "1012100", player)
+    assert len(items) == 2
+    qids = [it.qid for it in items]
+    assert "1000" in qids
+    assert "c_1012100_1" in qids

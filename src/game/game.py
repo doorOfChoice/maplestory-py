@@ -19,6 +19,7 @@ from game import settings
 from game.render.assets import Assets
 from game.render.effects import Effect
 from game.systems.quests import load_quest_defs, render_markup
+from game.systems.lua_quests import load_lua_quest_defs
 from game.npc_dialogue import NpcDialogueController
 from game.save_manager import SaveManager
 from game.render.splash import Splash
@@ -104,6 +105,10 @@ class Game:
             # 任务数据：等待后台解析完成（只解析 ENABLED_QUESTS 精选任务）
             quest_thread.join()
             self.quest_defs = quest_box.get("defs") or {}
+            # 合并 Lua 自定义任务（content/npc/*.lua，覆盖同名 qid）
+            lua_defs = load_lua_quest_defs()
+            if lua_defs:
+                self.quest_defs = {**self.quest_defs, **lua_defs}
 
             # 组合根：装配音效 / UI / 面板 / 单图场景（World），并完成互相接线
             self.ctx = GameContext.create(self.assets, self.quest_defs,
