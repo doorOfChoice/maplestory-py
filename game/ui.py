@@ -64,6 +64,9 @@ DLG_LINE_H = 20
 # 状态栏右侧一排官方按钮
 BAR_BUTTONS = ("BtShop", "BtMenu", "BtShort", "BtNPT")
 
+# 对话气泡按钮（商店 / 仓库入口）标签
+DIALOG_BUTTON_LABELS = {"shop": "购买", "storage": "存取"}
+
 
 class UI:
     def __init__(self, assets):
@@ -78,6 +81,9 @@ class UI:
         self.death_visible = False
         # 上一帧对话框（气泡）占位矩形，供鼠标点击命中判断
         self.dialog_rect: Optional[pygame.Rect] = None
+        # ── 对话框按钮（商店/仓库入口）────────────────────────────
+        self._dialog_button_keys: List[str] = []
+        self.dialog_buttons: List[Tuple[pygame.Rect, str]] = []
         # ── 任务对话框（模块化，带选项按钮）────────────────────
         self.quest_visible = False
         self.quest_title = ""
@@ -95,21 +101,37 @@ class UI:
 
     # ── 对话框 ─────────────────────────────────────────────────────
     def show_dialog(self, npc_name: str, lines: List[str],
-                    anchor=None) -> None:
-        """anchor: 对话中的 NPC 实体（气泡浮其头顶）；None 则屏幕底部居中。"""
+                    anchor=None, buttons: Optional[List[str]] = None) -> None:
+        """anchor: 对话中的 NPC 实体（气泡浮其头顶）；None 则屏幕底部居中。
+
+        buttons: 气泡底部的按钮键列表（如 ['shop', 'storage']），供商店/仓库入口。
+        """
         self.dialog_lines = [npc_name] + lines
         self.dialog_visible = True
         self.dialog_anchor = anchor
+        self._dialog_button_keys = list(buttons or [])
+        self.dialog_buttons = []
 
     def hide_dialog(self) -> None:
         self.dialog_visible = False
         self.dialog_lines = []
         self.dialog_rect = None
         self.dialog_anchor = None
+        self._dialog_button_keys = []
+        self.dialog_buttons = []
 
     def dialog_hit(self, pos) -> bool:
         return (self.dialog_visible and self.dialog_rect is not None
                 and self.dialog_rect.collidepoint(pos))
+
+    def dialog_button_hit(self, pos) -> Optional[str]:
+        """命中对话框按钮 → 返回按钮键（shop/storage），否则 None。"""
+        if not self.dialog_visible:
+            return None
+        for rect, key in self.dialog_buttons:
+            if rect.collidepoint(pos):
+                return key
+        return None
 
     # ── 任务对话框 ─────────────────────────────────────────────────
     def show_quest(self, title: str, lines: List[str],
@@ -351,8 +373,11 @@ class UI:
                         + [self.font_big.size(title)[0]] or [0])
         bw = fit_bubble_width(content_w, vw)
 
+        keys = getattr(self, "_dialog_button_keys", [])
+        self.dialog_buttons = []
         pad_top, line_h, pad_bottom = 12, 19, 14
-        h = pad_top + 21 + len(wrapped) * line_h + pad_bottom
+        strip_h = 26 if keys else 0
+        h = pad_top + 21 + len(wrapped) * line_h + pad_bottom + strip_h
         balloon = self._balloon(bw, h)
         tail = self._balloon_tail()
         tail_h = tail.get_height() if tail is not None else 0
@@ -386,8 +411,32 @@ class UI:
             surface.blit(shadow, (x + 17, ty + 1))
             surface.blit(text, (x + 16, ty))
             ty += line_h
-        # 原版风格：泡内右下角黄色 ▼ 闪烁指示（Enter/Esc/点击关闭）
-        if int(pygame.time.get_ticks() / 500) % 2 == 0:
+
+        # 底部按钮（商店 / 仓库入口）
+        if keys:
+            by = y + pad_top + 21 + len(wrapped) * line_h + 4
+            bx = x + bw - 10
+            for key in reversed(keys):
+                img = self._img("StatusBar.img", "BtShop/normal/0") if key == "shop" else None
+                if img is not None:
+                    bw_ = img.get_width()
+                    bh_ = img.get_height()
+                    surface.blit(img, (bx - bw_, by))
+                    self.dialog_buttons.append(
+                        (pygame.Rect(bx - bw_, by, bw_, bh_), key))
+                    bx -= bw_ + 6
+                else:
+                    label = DIALOG_BUTTON_LABELS.get(key, key)
+                    txt = self.font_small.render(label, True, (255, 255, 255))
+                    bw_ = txt.get_width() + 16
+                    br = pygame.Rect(bx - bw_, by, bw_, 20)
+                    pygame.draw.rect(surface, (70, 80, 96), br, border_radius=4)
+                    pygame.draw.rect(surface, (150, 160, 178), br, 1, border_radius=4)
+                    surface.blit(txt, (br.x + 8, br.y + 3))
+                    self.dialog_buttons.append((br, key))
+                    bx -= bw_ + 8
+        # 原版风格：泡内右下角黄色 ▼ 闪烁指示（无按钮时显示，Enter/Esc/点击关闭）
+        elif int(pygame.time.get_ticks() / 500) % 2 == 0:
             bx0, by0 = x + bw - 20, y + h - pad_bottom + 1
             pygame.draw.polygon(surface, (255, 233, 107),
                                 [(bx0, by0), (bx0 + 10, by0), (bx0 + 5, by0 + 6)])
