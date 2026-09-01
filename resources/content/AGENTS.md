@@ -2,13 +2,13 @@
 
 本目录是「规则引擎文本」的家：每个 NPC 的对话/任务流程用 **Lua** 写成一份脚本。
 **改台词、改分支、给不同 NPC 定义不同任务，只改本目录的 `.lua`；不碰 Python。**
-Python 层（`src/game/systems/scripting.py` + `src/game/systems/script_api.py`）负责把上下文
+Python 层（`src/game/systems/scripting.py` + `src/game/systems/script_api.py` + `src/game/systems/lua_quests.py`）负责把上下文
 灌进来、执行 Lua、并把 `snapshot()` 回报的内容渲染到原版 UI。
 
 ## 文件与命名
 
 - 一个场景/一份脚本 = 一个 `.lua` 文件，按用途命名：`advance.lua`（转职）、
-  `npc/<npc_id>.lua`（后续每个 NPC 一份，如 `npc/1012100.lua`）。
+  `npc/<npc_id>.lua`（每个 NPC 一份自定义任务，如 `npc/1012119.lua`）。
 - 脚本是 Lua **模块**：最后必须 `return M`（一个导出工厂的表）。
 - 沙箱运行时通过 `scripting.build_lua_session("advance", ...)` 加载
   `resources/content/advance.lua`；文件名即脚本名，不含 `.lua` 后缀。
@@ -75,6 +75,19 @@ session.done                   → bool，会话是否结束（终态置 true）
 | `can_advance()` | boolean | 无。判定当前玩家能否转职为 `ctx.jobdef` |
 | `advance_job()` | nil | 改真身职业（附技能/武器），并置宿主 `ctx.advanced = true` |
 
+### 发奖（仅当宿主 ctx 携带 `world` 时才注册）
+> 转职脚本的宿主上下文没有 `world`，故 `give_reward` 在转职脚本里**不存在**；
+> 给 NPC 写任务/自定义脚本时宿主会传 `world`，届时可用。
+
+| 函数 | 参数 | 返回 | 说明 |
+|---|---|---|---|
+| `give_reward(exp, meso, items)` | number/table | boolean | 直接给玩家发奖励：经验、金币、物品；三参数均可省略（传 0 / nil / 空表跳过） |
+
+- `exp` / `meso`：number，大于 0 才发放。
+- `items`：嵌套数组 `[[item_id, count], ...]`，如 `{{2000000, 3}}` = 物品 2000000 给 3 个；
+  `count` 为负表示**收回**该物品。
+- 成功返回 `true`。自定义脚本可在发奖后依返回值切换对话分支。
+
 ### 任务（仅当宿主 ctx 携带 `world` / `quest_defs` 时才注册）
 > 目前 `advance.lua` 的宿主上下文**没有**这两者，故下述任务函数在转职脚本里**不存在**；
 > 给 NPC 写任务脚本时，宿主会传相关上下文，届时可用。
@@ -121,12 +134,89 @@ end
   `self.done` 存在 `self` 上。
 - 需要插值/格式化用 Lua 字符串拼接 `..` 或 `string.format("（当前 Lv%d...）", ...)`。
 - 一个状态一个 `lines` 数组；语义要拆分就多写几行。
-- 文案数字/奖励等**数值不要写死在 Lua**——任务数值在任务数据表，脚本只通过
-  `quest_info`/`ctx` 取。
+- 官方任务的奖励/文案数值**不要写死在 Lua**——任务数值在任务数据表，脚本只通过
+  `quest_info`/`ctx` 取；**自定义发奖**则相反，直接调 `give_reward(exp, meso, items)`
+  把数值写在脚本里（这是自定义内容与官方任务的最大区别）。
 - 改完可用 `uv run python -m game.main` 进游戏试；或跑单测
   `uv run pytest src/tests/test_lua_advance.py`（转职脚本路径）。
 - 新增 `.lua` 后，宿主调用侧需传对应的 `build_lua_session("<脚本名>", ...)`；
   脚本名要一致。
+
+## 自定义任务脚本（npc/<npc_id>.lua）
+
+每个 NPC 可在 `npc/<npc_id>.lua` 里定义**多个自定义任务**，启动时由
+`lua_quests.load_lua_quest_defs()` 扫描 `resources/content/npc/` 加载并翻译成
+`QuestDef` 合并进 `quest_defs` —— 与官方任务（Quest.wz）走同一套状态机/存档/头顶灯泡/多任务列表。
+
+### quests(ctx) 函数契约
+
+脚本导出 `M.quests(ctx)`，返回**任务数组**（每个元素是任务定义表）：
+
+```lua
+local M = {}
+
+function M.quests(ctx)
+  return {
+    {
+      name = "收集红药水",
+      lvmin = 1,
+      end_items = {{2000000, 10}},  -- 收集 10 个红药水
+      reward_exp = 200,
+      reward_money = 1000,
+      accept_lines = {"你要帮我收集 #t2000000# 吗？"},
+      accept_yes = {"太好了！收集 10 个红药水就来找我吧。"},
+      accept_no = {"好吧，改变主意了再来。"},
+      complete_lines = {"你收集够了！要领取奖励吗？"},
+      complete_yes = {"这是你的奖励！"},
+      complete_stop = {"还差一些，继续加油！"},
+    },
+    -- 可再写第二个任务...
+  }
+end
+
+return M
+```
+
+要点：
+- **`start_npc` / `end_npc` 由文件名决定**（`npc/1012119.lua` → NPC 1012119），脚本内不必写；
+  需要「接 A 交给 B」时可在任务表里显式写 `start_npc = ...` / `end_npc = ...` 覆盖。
+- **任务 id 自动加 `c_` 前缀**：`c_<npc_id>_<序号>`（序号从 1 起），无需也不应在脚本里指定 qid。
+- 与官方任务**共存**：同一 NPC 既有官方任务又有自定义任务时，`collect_npc_quests` 会把两者
+  都收进接取列表（可交付的排前面）。
+
+### 任务定义字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `name` | string | 任务名（必填，缺失则该条任务跳过） |
+| `lvmin` / `lvmax` | number | 接取等级下限 / 上限（0 = 不限） |
+| `jobs` | 数组[number] | 职业限制，空 = 不限 |
+| `start_items` | 数组[[id,count]] | 接取时需持有该物品 |
+| `prereq` | 数组[[qid,state]] | 前置任务（state 2=已完成 / 1=已接取） |
+| `kills` | 数组[[mob,count]] | 完成需击杀怪物 |
+| `end_items` | 数组[[item,count]] | 完成需收集物品 |
+| `accept_items` | 数组[[item,count]] | 接取时赠送物品 |
+| `reward_exp` / `reward_money` | number | 完成奖励经验 / 金币 |
+| `reward_items` | 数组[[item,count]] | 完成奖励物品，负数=收回 |
+| `next_quest` | number | 完成后解锁的后续任务（可选） |
+| `accept_lines` | 数组[string] | 接取询问文本 |
+| `accept_yes` / `accept_no` | 数组[string] | 接取确认 / 拒绝文本 |
+| `complete_lines` | 数组[string] | 完成询问文本 |
+| `complete_yes` | 数组[string] | 领取奖励文本 |
+| `complete_stop` | 数组[string] | 条件未满足时的提示 |
+| `desc0` / `desc1` / `desc2` | string | 任务日志描述（可选） |
+
+对话文本支持官方标记（`render_markup`）：`#t<id>#` 物品名、`#o<id>#` 怪物名、`#m<id>#` 地图名、`#p<id>#` NPC 名、`#b/#r/#k` 颜色、`\n` 换行。
+
+### ctx 参数
+
+当前加载发生在启动期（玩家尚未构建），`ctx` 恒为 `nil`。任务条件一律写在定义字段里
+（`lvmin` / `kills` / `end_items` 等），由 `QuestLog` 判定，脚本内**不要**依赖 `ctx`。
+
+### 沙箱与失败隔离
+
+- 与转职脚本同一沙箱：禁用 `os`/`io`/`package`/`debug`/`dofile`/`loadfile`。
+- 单个脚本加载失败或单条任务翻译失败，只跳过该条并记录 warning，不影响其它 NPC/任务。
 
 ## 参照实现
 
