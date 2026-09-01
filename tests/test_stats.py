@@ -72,15 +72,15 @@ def test_roll_damage_bounds():
     """伤害 = atk×倍率×rand(0.95~1.05) − 怪物PDD×(1−LUK/100)，下限 1。"""
     rng = random.Random(7)
     for _ in range(50):
-        d = roll_damage(100, 1.9, 30, 4, rng)
+        d, _crit = roll_damage(100, 1.9, 30, 4, rng)
         assert 100 * 1.9 * 0.95 - 30 <= d <= 100 * 1.9 * 1.05
-    assert roll_damage(1, 0.1, 9999, 0, rng) == 1
+    assert roll_damage(1, 0.1, 9999, 0, rng) == (1, False)
 
 
 def test_roll_damage_luk_reduces_mitigation():
     """LUK 越高，怪物 PDD 减免越多（同随机种子对比）。"""
-    d_low = roll_damage(100, 1.0, 50, 0, random.Random(5))
-    d_high = roll_damage(100, 1.0, 50, 100, random.Random(5))
+    d_low, _ = roll_damage(100, 1.0, 50, 0, random.Random(5))
+    d_high, _ = roll_damage(100, 1.0, 50, 100, random.Random(5))
     assert d_high > d_low
 
 

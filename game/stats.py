@@ -68,10 +68,17 @@ def attack(stats: Mapping[str, int], pad: int, ranged: bool) -> int:
 
 
 def roll_damage(atk: int, mult: float, mob_pd: int, luk: int,
-                rng: random.Random) -> int:
-    """单次命中伤害：atk×倍率×随机(0.95~1.05)，再扣怪物 PDD（LUK 减免）。"""
+                rng: random.Random, crit_rate: float = 0.0) -> Tuple[int, bool]:
+    """单次命中伤害：atk×倍率×随机(0.95~1.05)，再扣怪物 PDD（LUK 减免）。
+
+    crit_rate 为暴击率（%）：rng 判定命中则伤害 ×CRIT_MULT。
+    返回 (伤害, 是否暴击)；伤害下限 1。
+    """
     raw = int(atk * mult * rng.uniform(0.95, 1.05))
-    return max(1, raw - int(mob_pd * (1 - luk / 100.0)))
+    crit = crit_rate > 0 and rng.random() * 100.0 < crit_rate
+    if crit:
+        raw = int(raw * settings.CRIT_MULT)
+    return max(1, raw - int(mob_pd * (1 - luk / 100.0))), crit
 
 
 def defense(stats: Mapping[str, int], equip_pdd: int) -> int:

@@ -569,6 +569,8 @@ class Game:
         self.player.hurt_timer = 0.0
         self.player.invuln_timer = 0.0
         self.player.feather.consume()
+        self.player.buffs.clear()
+        self.player.statuses.clear()
         self.fade = 1.0        # 重生黑场淡入
         self._place_player_at_spawn()
         self._spawn_life()

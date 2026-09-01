@@ -29,6 +29,10 @@ POSE_JUMP = "jump"
 POSE_LADDER = "ladder"
 POSE_ROPE = "rope"
 
+# 技能 WZ level 表字段 → buff 词条（game/buffs.py 的 mods 键）
+BUFF_MOD_MAP = {"attack": "atk", "dex": "dex",
+                "criticalrate": "crit", "hp": "hp"}
+
 
 class Player:
     def __init__(self, assets: Assets, spawn_x: float, spawn_y: float,
@@ -173,6 +177,29 @@ class Player:
         return base + self.skills.passive_mods().get("atk", 0) \
             + self.buffs.mod_sum("atk")
 
+    def crit_rate(self) -> float:
+        """暴击率（%）：被动技能 + buff 的 crit 词条之和。"""
+        return float(self.skills.passive_mods().get("crit", 0)
+                     + self.buffs.mod_sum("crit"))
+
+    def _apply_buff_skill(self, skill_data: dict) -> bool:
+        """buff 技能接线：WZ level 表含 time 字段时上 buff 并返回 True。
+
+        mods 从 level 表映射：attack→atk、dex→dex、criticalrate→crit、hp→hp。
+        """
+        d = skill_data.get("def")
+        lv = int(skill_data.get("level", 0))
+        if d is None or lv <= 0:
+            return False
+        seconds = d.stat(lv, "time", 0)
+        if seconds <= 0:
+            return False
+        mods = {key: d.stat(lv, src, 0)
+                for src, key in BUFF_MOD_MAP.items()}
+        mods = {k: v for k, v in mods.items() if v}
+        self.buffs.apply(str(skill_data["id"]), d.name, float(seconds), mods)
+        return True
+
     def defense_value(self) -> int:
         """物理防御力：装备 PDD 总和 + DEX//10 + 被动/buff 加值。"""
         return stats_mod.defense(self.total_stats(), self.inventory.defense()) \
@@ -297,7 +324,10 @@ class Player:
             self.vy = 60.0
 
     def start_attack(self, skill_data: Optional[dict] = None) -> bool:
-        """发起攻击；skill_data 非空时为技能攻击（先扣 MP/HP 消耗）。"""
+        """发起攻击；skill_data 非空时为技能攻击（先扣 MP/HP 消耗）。
+
+        buff 技能（level 表含 time）不进入攻击：扣消耗后直接上 buff。
+        """
         if self.attacking or self.hurt_timer > 0 or self.statuses.locked():
             return False
         if skill_data is not None:
@@ -306,6 +336,8 @@ class Player:
                 return False
             self.mp -= skill_data["mp_con"]
             self.hp = max(1, self.hp - skill_data["hp_con"])
+            if self._apply_buff_skill(skill_data):
+                return True
             self.pending_skill = skill_data
         else:
             self.pending_skill = None

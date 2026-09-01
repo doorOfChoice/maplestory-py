@@ -121,6 +121,10 @@ CRIT_MULT = 1.5                  # 暴击伤害倍率
 POISON_TICK = 1.0                # 中毒结算间隔（秒）
 SLOW_MULT = 0.5                  # 减速期间移速倍率
 
+# 怪物异常技能 id（Skill.wz/MobSkill.img，官方客户端映射）→ 玩家异常种类。
+# 123=stun(眩晕) 125=poison(中毒) 126=slow(减速)；其余 mob skill 忽略。
+MOB_STATUS_SKILLS = {"123": "stun", "125": "poison", "126": "slow"}
+
 # ── 商店 / 仓库 / 卷轴（game/shop.py、inventory.py）──────────────────
 SELL_RATE = 0.5                  # 出售价 = 买价 × 该系数
 STORAGE_CAP = 48                 # 仓库格数上限
