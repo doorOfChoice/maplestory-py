@@ -1,8 +1,11 @@
 """宿主 API：把可交给 Lua 调用的「名字 → 可调用对象」打包成一张注册表。
 
 内容脚本（content/*.lua）只引用这些名字，不 import 任何游戏模块；因此改台词/流程
-只动 .lua，改数值/奖励只动数据表。所有函数闭包持有宿主上下文 ``ctx``（SimpleNamespace）：
+只动 .lua，自定义发奖数值直接写在 Lua（give_reward）。所有函数闭包持有宿主上下文
+``ctx``（SimpleNamespace）：
 - 转职：can_advance() / advance_job()（改真身并置 ctx.advanced）
+- 发奖（当 ctx 携带 world 时注册）：give_reward(exp, meso, items)——直接给玩家发奖励，
+  items 为 [[item_id, count], ...]，负数=收回
 - 任务（当 ctx 携带 world/quest_defs 时注册）：quest_available / quest_completable /
   quest_state / accept_quest / complete_quest / quest_info（薄封装，复用 quests.py 逻辑）
 
@@ -36,8 +39,30 @@ def make_globals(ctx: Any) -> Dict[str, Callable]:
 
     globals_: Dict[str, Callable] = {"can_advance": can_advance, "advance_job": advance_job}
 
-    # 任务相关：仅当 ctx 携带世界/任务表时注册（转职上下文无需，避免死代码）
+    # 发奖：仅当 ctx 携带世界时注册（转职上下文无 world → 不注册，调用即报错）
     world = getattr(ctx, "world", None)
+    if world is not None:
+        from game.systems.quests import QuestLog
+
+        def give_reward(exp=0, meso=0, items=None) -> bool:
+            """按 Lua 指定直接发奖：exp/金币/物品；物品负数量=收回。"""
+            player = world.player
+            if items is not None:
+                for i in range(1, len(items) + 1):
+                    item_id, count = items[i][1], items[i][2]
+                    if count < 0:
+                        QuestLog._take_item(player, int(item_id), -int(count))
+                    else:
+                        QuestLog._give_item(player, int(item_id), int(count))
+            if exp:
+                player.gain_exp(int(exp))
+            if meso:
+                world.combat.meso += int(meso)
+            return True
+
+        globals_["give_reward"] = give_reward
+
+    # 任务相关：仅当 ctx 携带世界/任务表时注册（转职上下文无需，避免死代码）
     defs = getattr(ctx, "quest_defs", None)
     if world is not None and defs is not None:
         quests = world.player.quests

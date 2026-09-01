@@ -248,6 +248,46 @@ def test_collect_npc_quests_merges_lua_and_wz():
     assert "c_1012100_1" in qids
 
 
+def test_trainer_newbie_quest_def():
+    """转职教官 1012100 的新手任务：新手专属、击杀蓝宝、有奖励。"""
+    defs = load_lua_quest_defs()
+    d = defs.get("c_1012100_1")
+    assert d is not None
+    assert d.name == "新手入门"
+    assert d.start_npc == 1012100
+    assert d.end_npc == 1012100
+    assert d.jobs == [0]
+    assert d.kills == [(100101, 10)]
+    assert d.reward_exp == 200
+    assert d.reward_money == 200
+
+
+def test_trainer_newbie_quest_lifecycle():
+    """新手任务接取后可随击杀推进，凑满 10 只蓝宝即可完成。"""
+    defs = {**load_lua_quest_defs(), **build_advance_quest_defs()}
+    log = QuestLog(defs)
+    player = SimpleNamespace(level=5, job=0, x=0.0, y=0.0,
+                             inventory=SimpleNamespace(etcs={}, consumes={}))
+    assert log.accept("c_1012100_1", player)
+    for _ in range(5):
+        log.on_kill(100101)
+    assert not log.can_complete("c_1012100_1", player)
+    for _ in range(5):
+        log.on_kill(100101)
+    assert log.can_complete("c_1012100_1", player)
+    assert log.kill_progress("c_1012100_1", 100101) == 10
+
+
+def test_trainer_quests_merge_newbie_and_advance():
+    """新手对话转职教官时，新手任务与转职任务同时出现在可接列表。"""
+    defs = {**load_lua_quest_defs(), **build_advance_quest_defs()}
+    log = QuestLog(defs)
+    player = SimpleNamespace(level=5, job=0, x=0.0, y=0.0,
+                             inventory=SimpleNamespace(etcs={}, consumes={}))
+    items = collect_npc_quests(defs, log, "1012100", player)
+    assert [it.qid for it in items] == ["c_1012100_1", "adv_3000"]
+
+
 def test_build_advance_quest_defs():
     """有导师的职业生成转职任务：script=advance，接取条件为前置职业（lvmin 不限等级）。"""
     defs = build_advance_quest_defs()

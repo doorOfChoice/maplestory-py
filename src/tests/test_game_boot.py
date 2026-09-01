@@ -9,6 +9,7 @@ _update / _draw / _enter_map / respawn），是刻意的「冒烟" harness——
 from __future__ import annotations
 
 import os
+import time
 from types import SimpleNamespace
 
 import pygame
@@ -23,12 +24,20 @@ from tests.fake_assets import FakeAssets
 pygame.init()
 
 
-def _boot(game: Game, frames: int = 2000) -> None:
-    """推进开屏帧直到世界构建完成（含防卡死上限），并完成主线程就绪。"""
-    for _ in range(frames):
+def _boot(game: Game, timeout: float = 30.0) -> None:
+    """推进开屏帧直到世界构建完成（墙钟超时防卡死），并完成主线程就绪。
+
+    世界在后台线程构建，主线程空转画 splash 会独占 GIL 而饿死该线程，
+    故每帧短暂 sleep 让出 GIL，并以墙钟而非帧数判定超时。
+    """
+    deadline = time.monotonic() + timeout
+    while not game._world_ready:
+        game._bootstrap_frame(0.016)
         if game._world_ready:
             break
-        game._bootstrap_frame(0.016)
+        if time.monotonic() > deadline:
+            break
+        time.sleep(0.001)
     assert game._world_ready, "世界构建未在超时内完成"
     if not getattr(game, "_boot_done", False):
         game._finish_bootstrap()
