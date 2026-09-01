@@ -278,6 +278,8 @@ def _collect_stop(stop_node) -> List[str]:
 
 # 名称标记：\x23 为 ASCII '#'
 _NAME_RE = re.compile(r"#([ptmoi])(\d+)#")
+# 裸数字标记（如 desc 里残留的 #4000004#）：未带字母前缀，尽力按物品名解析
+_BARE_NUM_RE = re.compile(r"#(\d+)#")
 # 选项标记：#L0# ... #l（整体去掉）
 _CHOICE_RE = re.compile(r"#L\d+#|#l")
 # 颜色标记：#b #r #g #d #k 等
@@ -306,10 +308,17 @@ def render_markup(text: str, assets: Optional[Assets] = None,
             return mob_name(nid) or f"#{nid}"
         return f"#{nid}"
 
+    def _bare(m: re.Match) -> str:
+        nid = int(m.group(1))
+        if item_name is not None:
+            return item_name(nid) or str(nid)
+        return str(nid)
+
     out = text.replace("\\r\\n", "\n").replace("\\n", "\n")
     out = _CHOICE_RE.sub("", out)
     out = _COLOR_RE.sub("", out)
     out = _NAME_RE.sub(_sub, out)
+    out = _BARE_NUM_RE.sub(_bare, out)
     return out.strip()
 
 

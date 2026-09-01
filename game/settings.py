@@ -144,7 +144,7 @@ FALLBACK_PRICES = {
 # ── 职业 / 转职 ──────────────────────────────────────────────────────
 BOWMAN_JOB = 3000                # 弓箭手 1 转职业码
 BOWMAN_STARTER_BOW = "1452002"   # 转职附赠木弓（需求 Lv10；短弓 1452000 需 Lv25/DEX80）
-BOWMAN_TRAINER_NPC = "1012100"   # 导师赫麗娜
+BOWMAN_TRAINER_NPC = "1012100"   # 导师赫丽娜
 TRAINER_SPAWN_MAP = "100010000"  # 导师注入的地图（出生图：弓箭手村东部小山）
 TRAINER_SPAWN = (-520.0, 455.0)  # 导师站立点（出生 portal 旁地面 foothold，脚底坐标）
 
