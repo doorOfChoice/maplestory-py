@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import random
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import pygame
 
@@ -14,6 +14,33 @@ from . import settings
 from .animation import Animation
 from .assets import Assets
 from .combat import roll_damage
+
+
+def parse_mob_status_skills(skill_node) -> List[Tuple[str, int, int]]:
+    """解析 mob 的 skill 节点 → [(skill_id, level, prob)]，只保留毒/晕/减速三类。
+
+    节点结构：skill/<skill_id>/level（技能等级）、/prob（触发概率 %）。
+    未知 skill id 忽略；无 level 或等级为 0 的条目忽略。
+    """
+    out: List[Tuple[str, int, int]] = []
+    if skill_node is None:
+        return out
+    for entry in skill_node.children():
+        sid = entry.name
+        if sid not in settings.MOB_STATUS_SKILLS:
+            continue
+        try:
+            level = int(getattr(entry.get("level"), "value", None) or 0)
+        except (TypeError, ValueError):
+            level = 0
+        if level <= 0:
+            continue
+        try:
+            prob = int(getattr(entry.get("prob"), "value", None) or 0)
+        except (TypeError, ValueError):
+            prob = 100
+        out.append((sid, level, prob))
+    return sorted(out)
 
 
 class Monster:
@@ -56,6 +83,9 @@ class Monster:
         self.pd = int(stats.get("weaponDefense") or 0)
         self.speed = float(stats.get("speed") or 0)
         self.drops = info.get("drops") or []
+
+        # 接触攻击附带的异常（毒/晕/减速）：skill 节点 + MobSkill.img 强度
+        self.status_attacks: List[dict] = self._load_status_attacks()
 
         # 动作缓存
         self.action = "stand"
@@ -198,6 +228,7 @@ class Monster:
                 "amount": roll_damage(self.attack_power),
                 "x": self.x, "y": self.cy - 30,
                 "id": self.mob_id,
+                "status_attacks": self.status_attacks,
             })
             self.attack_cooldown = 0.8
 
@@ -282,6 +313,47 @@ class Monster:
         if not self.drops:
             return None
         return random.choice(self.drops)
+
+    # ── 异常技能（毒/晕/减速）─────────────────────────────────────
+    def _load_status_attacks(self) -> List[dict]:
+        """把 mob 异常技能解析成可触发数据 [{kind, prob, duration, potency}]。"""
+        attacks: List[dict] = []
+        for sid, level, prob in parse_mob_status_skills(self._mob_skill_node()):
+            lv = self._mob_skill_level(sid, level)
+            try:
+                duration = float(int(lv.get("time") or 0))
+            except (TypeError, ValueError):
+                continue
+            if duration <= 0:
+                continue
+            try:
+                potency = float(int(lv.get("x") or 0))
+            except (TypeError, ValueError):
+                potency = 0.0
+            attacks.append({"kind": settings.MOB_STATUS_SKILLS[sid],
+                            "prob": prob, "duration": duration,
+                            "potency": potency})
+        return attacks
+
+    def _mob_skill_node(self):
+        """当前怪 img 的 skill 引用节点；缺素材/结构异常返回 None。"""
+        try:
+            image = self.assets.wz["Mob"].root.images.get(
+                f"{self.mob_id.zfill(7)}.img")
+            return image.parse().get("skill") if image is not None else None
+        except Exception:
+            return None
+
+    def _mob_skill_level(self, skill_id: str, level: int) -> dict:
+        """Skill.wz/MobSkill.img/<id>/level/<level> 的字段表（time/prop/x）。"""
+        try:
+            img = self.assets.wz["Skill"].root.images.get("MobSkill.img")
+            node = img.parse().get(f"{skill_id}/level/{level}")
+            if node is None:
+                return {}
+            return {c.name: getattr(c, "value", None) for c in node.children()}
+        except Exception:
+            return {}
 
     # ── 绘制 ───────────────────────────────────────────────────────
     def draw(self, surface: pygame.Surface, camera) -> None:

@@ -41,17 +41,19 @@ class DamageNumber:
     FADE = 0.6            # 上升淡出时长（秒）
     RISE_PX = 30.0        # 淡出期间上升距离
 
-    def __init__(self, x: float, y: float, amount: int, kind: str = "red"):
+    def __init__(self, x: float, y: float, amount: int, kind: str = "red",
+                 big: bool = False):
         self.x = x
         self.y = y
         self.amount = amount
         self.kind = kind
+        self.big = big          # 暴击：强制用大号数字集（NoViolet1）
         self.elapsed = 0.0
 
     @property
     def set_name(self) -> str:
         base = self.KIND_SETS.get(self.kind, "NoRed")
-        return base + ("1" if self.amount >= 1000 else "0")
+        return base + ("1" if (self.big or self.amount >= 1000) else "0")
 
     @property
     def digits(self) -> List[str]:
@@ -187,7 +189,7 @@ class Arrow:
     def __init__(self, x: float, y: float, vx: float, vy: float,
                  frames: list, hit_frames: list, dmg: int,
                  mob_count: int = 1, life: float = 0.6,
-                 kind: str = "red"):
+                 kind: str = "red", crit: bool = False):
         self.x = x
         self.y = y
         self.vx = vx
@@ -198,6 +200,7 @@ class Arrow:
         self.mob_count = max(1, mob_count)
         self.life = life
         self.kind = kind                # 伤害飘字配色（普攻红/技能紫）
+        self.crit = crit                # 命中时按暴击大号紫字结算
         self.age = 0.0
         self.hit_ids: set = set()
         self.dead = False
@@ -221,8 +224,9 @@ class Arrow:
             self.hit_ids.add(id(mob))
             luk = getattr(player, "luk", 0)
             dmg = max(1, self.dmg - int(getattr(mob, "pd", 0) * (1 - luk / 100.0)))
+            kind = "violet" if (self.crit or self.kind == "violet") else "red"
             combat.numbers.append(DamageNumber(
-                mob.x, mob.cy - mob.sprite_h, dmg, self.kind))
+                mob.x, mob.cy - mob.sprite_h, dmg, kind, big=self.crit))
             if self.hit_frames:
                 combat.effects.append(Effect(
                     self.hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45))
@@ -304,13 +308,14 @@ class Combat:
             mult = 1.0
         atk = player.attack_value()
         luk = getattr(player, "luk", 0)
+        crit_rate = getattr(player, "crit_rate", lambda: 0.0)()
 
         for mob in targets:
-            dmg = stats_mod.roll_damage(atk, mult, getattr(mob, "pd", 0),
-                                        luk, random)
+            dmg, crit = stats_mod.roll_damage(atk, mult, getattr(mob, "pd", 0),
+                                              luk, random, crit_rate)
             self.numbers.append(DamageNumber(
                 mob.x, mob.cy - mob.sprite_h, dmg,
-                "violet" if skill else "red"))
+                "violet" if (skill or crit) else "red", big=crit))
             if hit_frames:
                 self.effects.append(Effect(
                     hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45))
@@ -325,16 +330,19 @@ class Combat:
         skill_data=None 为普攻：单箭、攻击力 100%、红色飘字，
         弹道贴图用箭矢物品的 bullet 节点（原版同款）。
         """
+        crit_rate = getattr(player, "crit_rate", lambda: 0.0)()
         if skill_data is None:
-            dmg = stats_mod.roll_damage(player.attack_value(), 1.0, 0, 0, random)
+            dmg, crit = stats_mod.roll_damage(player.attack_value(), 1.0,
+                                              0, 0, random, crit_rate)
             n, mob_count = 1, 1
             kind = "red"
             frames = self.assets.normal_arrow_frames() if self.assets else []
             hit_frames: List = []
         else:
             sid = skill_data["id"]
-            dmg = stats_mod.roll_damage(player.attack_value(),
-                                        skill_data["damage"], 0, 0, random)
+            dmg, crit = stats_mod.roll_damage(player.attack_value(),
+                                              skill_data["damage"],
+                                              0, 0, random, crit_rate)
             n = max(1, int(skill_data.get("bullet_count", 1)))
             mob_count = max(1, skill_data["mob_count"])
             kind = "violet"
@@ -347,7 +355,7 @@ class Combat:
                 x=player.x + facing * 16.0, y=player.y - 8.0 + offset,
                 vx=facing * settings.ARROW_SPEED, vy=0.0,
                 frames=frames, hit_frames=hit_frames,
-                dmg=dmg, mob_count=mob_count, kind=kind,
+                dmg=dmg, mob_count=mob_count, kind=kind, crit=crit,
                 life=settings.ARROW_LIFETIME))
 
     def update_arrows(self, dt: float, monsters, player=None) -> None:
@@ -380,6 +388,7 @@ class Combat:
         """怪物接触伤害队列 → 玩家扣血（受击硬直 + 无敌内忽略）。
 
         防御减伤：伤害 × 100 / (100 + 防御力)，至少保留 1 点。
+        附带异常：命中后按各 status_attack 的概率触发毒/晕/减速。
         """
         for hit in hits:
             if not player.hurt(hit["x"]):
@@ -388,6 +397,10 @@ class Combat:
             player.damage(amount)
             self.numbers.append(DamageNumber(
                 player.x, player.y - 40, amount, "blue"))
+            for atk in hit.get("status_attacks", ()):
+                if random.random() * 100.0 < atk.get("prob", 0):
+                    player.statuses.apply(atk["kind"], atk["duration"],
+                                          atk["potency"])
 
     def _take(self, drop: "DropItem", player) -> bool:
         """把一件掉落物收进角色：金币入 Combat，物品入背包；放不下则失败。"""

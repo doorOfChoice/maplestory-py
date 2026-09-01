@@ -254,6 +254,9 @@ class UI:
             (90, 96, 110))
         surface.blit(info, (bx + bar.get_width() - 238 - info.get_width(), by + 4))
 
+        # 血条上方：生效中的 buff 技能图标 + 状态异常色块（带剩余秒数）
+        self._draw_effect_icons(surface, player, bx, by)
+
         # 地图名：由 game 层按小地图面板位置调用 draw_map_name（右上避让）
 
         # 操作提示（左上）
@@ -265,6 +268,37 @@ class UI:
                          border_radius=6)
         plate.blit(hint, (8, 3))
         surface.blit(plate, (8, 8))
+
+    # ── buff / 状态异常图标条（血条上方）──────────────────────────
+    def _draw_effect_icons(self, surface, player, bx: int, by: int) -> None:
+        """绘制生效中的 buff 技能图标与状态异常色块，右下角标剩余秒数。"""
+        buffs = getattr(player, "buffs", None)
+        statuses = getattr(player, "statuses", None)
+        rows: List[Tuple[object, Optional[pygame.Surface], Tuple[int, int, int]]] = []
+        if buffs is not None:
+            for b in buffs.active():
+                rows.append((b, self.assets.skill_icon(b.skill_id),
+                             (120, 200, 255)))
+        if statuses is not None:
+            colors = {"poison": (120, 230, 120), "stun": (255, 220, 90),
+                      "slow": (120, 180, 255)}
+            for s in statuses.active():
+                rows.append((s, None, colors.get(s.kind, (200, 200, 200))))
+        if not rows:
+            return
+        x = bx
+        y = by - 30
+        gap = 4
+        for obj, icon, color in rows:
+            if icon is None:
+                icon = pygame.Surface((28, 28), pygame.SRCALPHA)
+                pygame.draw.rect(icon, color, (2, 2, 24, 24), border_radius=4)
+            surface.blit(icon, (x, y))
+            secs = int(obj.remaining)
+            label = render_text(self.font_tiny, str(secs), (255, 255, 255))
+            surface.blit(label, (x + icon.get_width() - label.get_width(),
+                                 y + icon.get_height() - label.get_height()))
+            x += icon.get_width() + gap
 
     def draw_map_name(self, surface, name: str, y: int) -> None:
         """右上角地图名名牌。y 由调用方给出（小地图可见时下移避让）。"""
