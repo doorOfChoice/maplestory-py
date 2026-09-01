@@ -4,14 +4,14 @@
 
 ## 项目概览
 
-MapleStory v113 的 pygame 单机重制。游戏直接读取 `wz/` 下的官方 WZ 资产（只读），由自制的 `wzpy` 函数库解析、解密并渲染成 pygame 画面。
+MapleStory v113 的 pygame 单机重制。游戏直接读取 `resources/wz/` 下的官方 WZ 资产（只读），由自制的 `wzpy` 函数库解析、解密并渲染成 pygame 画面。
 
 - **Python ≥ 3.12**，包管理用 `uv`
 - **src 布局**：所有代码（`game`、`wzpy`、`tests`、`scripts`）都位于 `src/` 下，透过可编辑安装（editable）暴露为顶层包；`src/scripts/` 放独立脚本（如 `capture_screenshots.py`），按路径运行、不打包进发行版
 - **两层架构**：
   - `src/wzpy/` —— 函数库层：WZ 封存格式解析（解密、属性树、图片解码）、Map/Mob/Character 渲染器、JSON 导出。可独立重复使用。
   - `src/game/` —— 应用层：游戏循环、物理、实体（玩家/怪物/NPC）、战斗、技能、背包、任务、UI。
-- `wz/` 目录本身入库（仅 `.gitkeep` 占位），目录内的 WZ 文件已 gitignore，不提交。
+- `resources/` 目录本身入库（`resources/wz/` 仅 `.gitkeep` 占位），`resources/wz/` 内的 WZ 文件已 gitignore，不提交；`resources/content/` 放 NPC 对话/任务规则脚本（Lua），`resources/content/AGENTS.md` 是其编写规范。
 
 ## 常用命令
 
@@ -43,7 +43,7 @@ WZ (.wz) → wzpy: WzFile.open → 解密 → 目录树 → 惰性属性解析
 
 - **坐标系统**：沿用 WZ 世界坐标（y 向下为正），角色以 navel 为锚点，脚底 = navel + `FEET_OFFSET`（20px）
 - **物理**（src/game/core/physics.py）：自制的 MS 式 foothold 行走系统，非回合制碰撞 —— 落地只发生在「脚底本帧跨越 foothold 线」时；爬墙只沿当前 foothold 的 prev/next 链；含梯子/绳、蹬墙跳
-- **WZ 资产只读**：本项目只读 `wz/`，永不写入
+- **WZ 资产只读**：本项目只读 `resources/wz/`，永不写入
 - **惰性解析**：WZ 影像首次访问才解析，并积极缓存
 - **非模态对话**：NPC/任务对话不暂停世界
 - **常量集中**：所有物理/战斗/背包常量集中在 `src/game/settings.py`（含文件头说明）
@@ -71,6 +71,6 @@ WZ (.wz) → wzpy: WzFile.open → 解密 → 目录树 → 惰性属性解析
 - 惯例注释：测试 docstring 描述**被验证的行为**（与代码注释同样用简体中文）
 - 新功能或修 bug 时遵循 TDD：红灯先写、一次一片（vertical slice）、测公开 seam，先与使用者确认要测的 seam
 
-## 数据与资产 (wz/)
+## 数据与资产 (resources/)
 
-`wz/` 下为 MapleStory v113（台湾版）官方 WZ 封存（Map / Mob / Character / Npc / String / Sound ...），仅供本项目执行时读取，**WZ 文件不得提交 Git**（目录本身以 `.gitkeep` 入库）。资产获取方式见 README「获取 WZ 资产」。改动需新增 WZ 依赖的测试时，不可假设 CI 环境有 WZ 文件，请以合成资料取代。
+`resources/wz/` 下为 MapleStory v113（台湾版）官方 WZ 封存（Map / Mob / Character / Npc / String / Sound ...），仅供本项目执行时读取，**WZ 文件不得提交 Git**（目录本身以 `.gitkeep` 入库）。资产获取方式见 README「获取 WZ 资产」。改动需新增 WZ 依赖的测试时，不可假设 CI 环境有 WZ 文件，请以合成资料取代。

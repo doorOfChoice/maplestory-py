@@ -12,7 +12,7 @@
 · close_all()       切图 / 重生 / 进入任务前清空
 · portal_blocked()  是否有对话框屏蔽传送门
 
-逻辑全部建于已抽出的声明式层：转职走 scripts.DialogueSession 会话、任务列表走
+逻辑全部建于已抽出的声明式层：转职走 scripting.LuaSession 会话、任务列表走
 render.quest_alarm.QuestAlarmView、任务过滤走 quests.collect_npc_quests —— 本类
 只做编排与路由，不再硬编码任何对话文案。
 """
@@ -27,7 +27,7 @@ from game import settings
 from game.render.quest_alarm import QuestAlarm, QuestAlarmView, QuestEntry, PANEL_W
 from game.systems import dialogues
 from game.systems.quests import collect_npc_quests, render_markup
-from game.systems.scripts import build_advance_session
+from game.systems.scripting import build_lua_session
 from game.systems.shop import SHOP_NPCS, STORAGE_NPC
 from game.core.jobs import JOBS, job_for_trainer
 
@@ -232,11 +232,12 @@ class NpcDialogueController:
             self.ctx.shop_panel.close()
             self.ctx.storage_panel.open()
 
-    # ── 转职对话（数据驱动，文案在 scripts.build_advance_session）────
+    # ── 转职对话（内容脚本在 content/advance.lua）──────────────────────
     def _begin_advance_flow(self, npc, jobdef) -> bool:
-        """导师对话：由转职脚本解释器按玩家状态路由（可转职/已是该职/不足）。"""
-        sess, ctx = build_advance_session(self.ctx.world.player, jobdef,
-                                          npc.name, self.assets)
+        """导师对话：由 Lua 会话按玩家状态路由（可转职/已是该职/不足）。"""
+        sess, ctx = build_lua_session(
+            "advance", player=self.ctx.world.player, jobdef=jobdef,
+            npc_name=npc.name, assets=self.assets)
         self._advance_session = sess
         self._advance_ctx = ctx
         self._advance_npc = npc

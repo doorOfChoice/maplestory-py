@@ -9,7 +9,9 @@ from pathlib import Path
 # ── 路径 ─────────────────────────────────────────────────────────────
 # 代码位于 src/game，故向上三阶回到项目根（src/game → src → 项目根）。
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-WZ_DIR = PROJECT_ROOT / "wz"
+# 资源目录（与 src 同级）：wz 官方资产 + content 规则脚本，均为只读运行数据。
+RESOURCE_DIR = PROJECT_ROOT / "resources"
+WZ_DIR = RESOURCE_DIR / "wz"
 REGION = "EMS"
 
 SAVE_DIR = PROJECT_ROOT / "saves"

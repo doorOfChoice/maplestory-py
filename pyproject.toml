@@ -9,6 +9,7 @@ dependencies = [
     "pillow",
     "pycryptodome>=3.23.0",
     "pygame>=2.6.1",
+    "lupa>=2.8",
 ]
 
 [build-system]
@@ -17,6 +18,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/game", "src/wzpy"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"resources/content" = "content"
 
 [[tool.uv.index]]
 url = "https://mirrors.aliyun.com/pypi/simple"

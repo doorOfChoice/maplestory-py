@@ -103,7 +103,7 @@ def test_advancement_flow_uses_script(game):
     dlg = game._dialogue
     assert dlg._begin_advance_flow(npc, JOBS[3000]) is True
     assert dlg._advance_session is not None
-    assert dlg._advance_session.node_id == "confirm"
+    assert [o.label for o in dlg._advance_session.snapshot().options] == ["yes", "no"]
     dlg._advance_button("yes")
     assert game.ctx.world.player.job == 3000
     assert dlg._advance_session is not None      # 停在「恭喜转职」节点

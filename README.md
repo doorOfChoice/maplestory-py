@@ -2,7 +2,7 @@
 
 用 Python + Pygame 复刻 MapleStory v113（台服）：直接读取官方 WZ 资产，重现地图、怪物、NPC、任务、技能与背包。
 
-> 只`读取` `wz/` 下的官方资产，任何时候都`不写入`、不修改。
+> 只`读取` `resources/wz/` 下的官方资产，任何时候都`不写入`、不修改。
 
 ## 还原
 
@@ -30,7 +30,7 @@
 需要 Python ≥ 3.12、`uv`，以及 v113（台服）WZ 文件（仓库不提供）：
 
 1. 从 [MapleStoryUnity/wzData](https://github.com/MapleStoryUnity/wzData) 下载 TMS **113** 压缩包
-2. 把全部 `.wz` 文件放进项目根目录 `wz/`（`wz/` 目录入库、里头的 WZ 已 gitignore）
+2. 把全部 `.wz` 文件放进 `resources/wz/`（`resources/wz/` 目录入库、里头的 WZ 已 gitignore）
 
 ```bash
 uv sync                      # 安装依赖
