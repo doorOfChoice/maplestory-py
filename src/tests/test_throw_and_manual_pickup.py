@@ -57,4 +57,5 @@ def test_pickup_collects_drop_within_range():
     d._age = 99.0
     c.drops.append(d)
     assert c.pickup(p)
+    c.update(0.25, p)
     assert c.meso == 5

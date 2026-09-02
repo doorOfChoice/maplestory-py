@@ -44,5 +44,6 @@ def test_drop_then_pickup_keeps_full_count():
     d.x = p.x
     d.y = p.y
     assert c.pickup(p)
+    c.update(0.25, p)
     total = sum(i.count for i in p.inventory.consumes.values())
     assert total == 12

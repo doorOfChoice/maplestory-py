@@ -298,7 +298,7 @@ class World:
         for npc in self.npcs:
             npc.update(dt)
 
-        self.combat.update(dt)
+        self.combat.update(dt, self.player)
         self.camera.center_on(self.player.x, self.player.y)
         return None
 
@@ -314,6 +314,7 @@ class World:
             mob.draw(surface, self.camera)
         if player_visible:
             self.player.draw(surface, self.camera)
+        self.combat.draw_attracting(surface, self.camera)
         self.combat.draw_arrows(surface, self.camera)
         self.combat.draw_effects(surface, self.camera)
 

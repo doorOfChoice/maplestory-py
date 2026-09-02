@@ -141,9 +141,9 @@ class DropItem:
     """掉落物：金币（官方硬币旋转动画）或物品（官方 info/icon 图标）。"""
 
     def __init__(self, x: float, y: float, item: Optional[dict] = None,
-                 meso: int = 0, ground_y: Optional[float] = None,
-                 assets: Optional[Assets] = None,
-                 lifetime: Optional[float] = None, pickup_lock: float = 0.0):
+                  meso: int = 0, ground_y: Optional[float] = None,
+                  assets: Optional[Assets] = None,
+                  lifetime: Optional[float] = None, pickup_lock: float = 0.0):
         self.x = x
         self.y = y
         self.item = item
@@ -159,13 +159,32 @@ class DropItem:
         self.ground_y = (ground_y if ground_y is not None
                          else y) - 4.0
         self._age = 0.0
+        # 吸附动画状态（拾取后物品飞向角色）
+        self.attracting = False
+        self._attract_tx = 0.0
+        self._attract_ty = 0.0
+        self._attract_elapsed = 0.0
 
     @property
     def is_meso(self) -> bool:
         return self.item is None
 
-    def update(self, dt: float) -> bool:
+    def update(self, dt: float, px: float = 0.0, py: float = 0.0) -> bool:
         self._age += dt
+        if self.attracting:
+            self._attract_elapsed += dt
+            dx = self._attract_tx - self.x
+            dy = self._attract_ty - self.y
+            dist = (dx * dx + dy * dy) ** 0.5
+            t = min(self._attract_elapsed / settings.PICKUP_ATTRACT_TIME, 1.0)
+            ease = t * t * (3.0 - 2.0 * t)  # smoothstep
+            speed = 800.0 * ease
+            if dist > 2.0:
+                self.x += dx / dist * speed * dt
+                self.y += dy / dist * speed * dt
+            self.y -= 4.0 * dt  # 轻微上浮弧线
+            self.life -= dt
+            return self.life > 0 and dist > 2.0 and self._attract_elapsed < settings.PICKUP_ATTRACT_TIME * 1.5
         self.life -= dt
         self.vy += settings.GRAVITY * 0.35 * dt
         self.x += self.vx * dt
@@ -203,8 +222,15 @@ class DropItem:
         sx, sy = camera.to_screen(self.x, self.y)
         img = self._sprite()
         if img is not None:
-            surface.blit(img, (int(sx - img.get_width() / 2),
-                               int(sy - img.get_height() / 2)))
+            w, h = img.get_size()
+            if self.attracting:
+                t = min(self._attract_elapsed / settings.PICKUP_ATTRACT_TIME, 1.0)
+                scale = 1.0 + 0.25 * t
+                sw, sh = int(w * scale), int(h * scale)
+                scaled = pygame.transform.smoothscale(img, (sw, sh))
+                surface.blit(scaled, (int(sx - sw / 2), int(sy - sh / 2)))
+            else:
+                surface.blit(img, (int(sx - w / 2), int(sy - h / 2)))
             return
         # 图标缺失时的占位（如装备不在本 WZ 子集）
         pygame.draw.circle(surface, (255, 220, 80), (int(sx), int(sy)), 5)
@@ -461,13 +487,14 @@ class Combat:
     def pickup(self, player) -> bool:
         """按 Z 手动拾取：一次只收取离人物最近的一件掉落物（原版行为）。
 
+        拾取后物品会吸附到角色身上（短暂动画），再收入背包/金币。
         其余掉落物留在原地，再按再捡；背包装备栏满时装备留在地上。
         """
         feet = player.y + settings.FEET_OFFSET
         best = None
         best_dx = float("inf")
         for drop in self.drops:
-            if drop.taken or drop._age < drop.pickup_lock:
+            if drop.taken or drop._age < drop.pickup_lock or drop.attracting:
                 continue
             dx = abs(drop.x - player.x)
             if dx > settings.PICKUP_RANGE or dx >= best_dx:
@@ -476,9 +503,13 @@ class Combat:
             if abs(drop.ground_y - feet) > 50.0:
                 continue
             best, best_dx = drop, dx
-        if best is None or not self._take(best, player):
+        if best is None:
             return False
-        self.drops = [d for d in self.drops if not d.taken]
+        # 启动吸附动画，延迟实际拾取
+        best.attracting = True
+        best._attract_tx = player.x
+        best._attract_ty = player.y - settings.FEET_OFFSET
+        best._attract_elapsed = 0.0
         return True
 
     def drop_player_item(self, player, item) -> DropItem:
@@ -497,21 +528,39 @@ class Combat:
         self.drops.append(d)
         return d
 
-    def update(self, dt: float) -> None:
-        """推进战斗实体（伤害飘字 / 特效 / 掉落物物理）。"""
+    def update(self, dt: float, player=None) -> None:
+        """推进战斗实体（伤害飘字 / 特效 / 掉落物物理 / 吸附动画）。"""
         self.numbers = [n for n in self.numbers if n.update(dt)]
         for e in self.effects:
             e.update(dt)
         self.effects = [e for e in self.effects if not e.done]
+        px = player.x if player is not None else 0.0
+        py = player.y if player is not None else 0.0
         for d in self.drops:
-            d.update(dt)
+            d.update(dt, px, py)
+        # 吸附完成的掉落物：实际拾取
+        for d in self.drops:
+            if not d.attracting or d._attract_elapsed < settings.PICKUP_ATTRACT_TIME:
+                continue
+            if self._take(d, player):
+                d.taken = True
+                d.attracting = False
+            else:
+                d.attracting = False
         self.drops = [d for d in self.drops if d.life > 0 and not d.taken]
 
     def draw(self, surface: pygame.Surface, camera) -> None:
         for drop in self.drops:
-            drop.draw(surface, camera)
+            if not drop.attracting:
+                drop.draw(surface, camera)
         for num in self.numbers:
             num.draw(surface, camera, self.assets)
+
+    def draw_attracting(self, surface: pygame.Surface, camera) -> None:
+        """绘制正在吸附到角色身上的掉落物（叠在玩家上方）。"""
+        for drop in self.drops:
+            if drop.attracting:
+                drop.draw(surface, camera)
 
     def draw_arrows(self, surface: pygame.Surface, camera) -> None:
         """飞行中的箭矢（实体之上、特效之下）。"""
