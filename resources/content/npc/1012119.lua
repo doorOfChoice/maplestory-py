@@ -7,7 +7,7 @@ function M.shops()
       shop_id = "potions",
       items = {
         {item_id = "02000000", price = 50},
-        {item_id = "02000003", price = 100},
+        {item_id = "02000003", price = 1000},
         {item_id = "02000001", price = 30},
         {item_id = "02000002", price = 20},
       }
@@ -16,7 +16,7 @@ function M.shops()
       shop_id = "weapons",
       items = {
         {item_id = "01452000", price = 500},
-        {item_id = "01452002", price = 800},
+        {item_id = "01452002", price = 8000},
       }
     },
     {

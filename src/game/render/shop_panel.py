@@ -1,9 +1,14 @@
 """NPC 商店面板：左货架右背包，买/卖按钮 + 价格显示（官方素材风格）。
 
+优先使用 UIWindow.img/Shop 的原版奶油配色商店窗（两栏 + 底图烤死的分行），
+买/卖物品落在左右两栏格子上，选中行用原版 orange select 高亮，底部按钮用
+原版 BtBuy/BtSell/BtExit，顶部页签用原版 TabBuy。素材缺失时自动退回旧式
+深色面板（draw_menu_bg），保证测试（fake assets）不闪退。
+
 交互：点货架物品选中（高亮），点「购买」买入一件；点背包物品选中，点
 「出售」把整堆/整件卖出（消耗品/其他按 SELL_RATE×数量，装备按单件）。
-自制卷轴（234xxxxx 段）无 WZ 图标，用自绘卷轴贴图兜底。点右上角 × 或
-按 Esc 关闭；背包列表超长可用滚轮滚动。
+自制卷轴（234xxxxx 段）无 WZ 图标，用自绘卷轴贴图兜底。点右上角 ×、
+原版离开商店按钮或按 Esc 关闭；背包列表超长可用滚轮滚动。
 """
 
 from __future__ import annotations
@@ -17,6 +22,23 @@ from game.systems.inventory import item_kind, make_item
 from game.render.panels import _ellipsize, draw_menu_bg
 from game.systems.scrolls import SCROLLS, is_scroll_id
 
+# ── 原版 Shop/backgrnd 几何（由 UI.wz 底图逐像素实测）────────────────
+# 底图 463×339：上段为标题/预览头区，下段两栏各 5 行，行距 40。
+BG_PANEL_W, BG_PANEL_H = 463, 339
+BG_ROW_Y0 = 124          # 左/右栏第一行底图格子的内容上沿
+BG_ROW_H = 40            # 行距（分隔线位于 164/204/244/284）
+BG_NROWS = 5
+BG_LCOL_X, BG_LCOL_W = 32, 196      # 左栏（货架）
+BG_RCOL_X, BG_RCOL_W = 260, 198     # 右栏（背包）
+BG_LCOL_SLOT_CX = 24                # 左栏图标槽盒子中心 x（由底图实测）
+BG_LCOL_NAME_X = 45                 # 左栏名称起点 x（随图标槽盒子右沿）
+BG_LCOL_PRICE_GAP = 26              # 左栏价格距内容右沿的留白（越大越靠左）
+BG_RCOL_SLOT_CX = 253               # 右栏图标槽盒子中心 x（面板坐标，由底图实测）
+BG_RCOL_NAME_X = 273                # 右栏名称起点 x（面板坐标，随槽盒子右沿）
+BG_MESO_X, BG_MESO_Y = 365, 65      # 右栏顶部金币金额文字起点 x/y（随底图金币图标）
+BTN_W, BTN_H = 70, 19               # 原版 BtBuy/BtSell/BtExit 尺寸
+
+# ── 旧式深色回退面板几何（素材缺失时用）────────────────────────────
 PANEL_W, PANEL_H = 620, 340
 TITLE_H = 26
 TAB_H = 22
@@ -24,7 +46,7 @@ ROW_H = 30
 SHELF_W = 286
 COL_GAP = 14
 BOTTOM_H = 54
-BTN_W, BTN_H = 60, 26
+BTN_W_FB, BTN_H_FB = 60, 26
 
 
 class ShopPanel:
@@ -48,6 +70,18 @@ class ShopPanel:
         self._sell_rect = pygame.Rect(0, 0, 0, 0)
         self._scroll_icon: Optional[pygame.Surface] = None
         self._toast: Optional[Tuple[str, float]] = None
+        self._wz_cache: dict = {}        # Shop/<path> → Surface
+
+    # ── 素材取值 ───────────────────────────────────────────────────
+    def _wz(self, path: str) -> Optional[pygame.Surface]:
+        """Shop/<path> → Surface（缓存）；无素材返回 None。"""
+        hit = self._wz_cache.get(path)
+        if hit is not None:
+            return hit
+        hit = self.assets.ui_surface("UIWindow.img", "Shop/" + path)
+        hit = hit[0] if hit else None
+        self._wz_cache[path] = hit
+        return hit
 
     # ── 开关 ───────────────────────────────────────────────────────
     def open(self, npc_id: str) -> None:
@@ -189,10 +223,197 @@ class ShopPanel:
     def draw(self, surface, player, combat) -> None:
         if not self.visible:
             return
-        f, fs = self.ui.font, self.ui.font_small
         self._tab_rects.clear()
         self._shelf_rects.clear()
         self._bag_rects.clear()
+        vw, vh = surface.get_width(), surface.get_height()
+        bg = self._wz("backgrnd")
+        if bg is not None:
+            self._draw_official(surface, bg, player, combat)
+        else:
+            self._draw_fallback(surface, player, combat)
+        # 提示（两种布局共用）
+        if self._toast is not None:
+            text, remain = self._toast
+            remain -= 1 / 60
+            if remain <= 0:
+                self._toast = None
+            else:
+                self._toast = (text, remain)
+                self._draw_toast(surface, text)
+
+    def _official_rect(self, surface) -> Tuple[int, int]:
+        """官方底图居中定位。"""
+        vw, vh = surface.get_width(), surface.get_height()
+        return (vw - BG_PANEL_W) // 2, (vh - BG_PANEL_H) // 2 - 10
+
+    def _row_rect(self, col_x: int, col_w: int, y0: int, pitch: int,
+                  index: int) -> pygame.Rect:
+        """第 index 行格子的显示矩形（含 2px 内缩避让分隔线）。"""
+        return pygame.Rect(col_x, y0 + index * pitch, col_w, pitch - 6)
+
+    def _draw_official(self, surface, bg, player, combat) -> None:
+        """原版 Shop/backgrnd 独立两栏商店窗（素材齐全时调用）。"""
+        f, fs = self.ui.font, self.ui.font_small
+        x, y = self._official_rect(surface)
+        self.rect = pygame.Rect(x, y, BG_PANEL_W, BG_PANEL_H)
+        surface.blit(bg, (x, y))
+
+        # ── 头区左框：标题 + 商店页签 ─────────────────────────────
+        surface.blit(f.render("商店", True, (90, 84, 74)), (x + 18, y + 8))
+        tab_y = y + 28
+        tab_x = x + 18
+        for shop_id in self.shop_ids:
+            on = shop_id == self._shop_id()
+            label = shop_mod.SHOP_NAMES.get(shop_id, shop_id)
+            tr = pygame.Rect(tab_x, tab_y, max(48, fs.size(label)[0] + 12), 18)
+            pygame.draw.rect(surface, (252, 200, 60) if on else (222, 214, 196),
+                             tr, border_radius=3)
+            pygame.draw.rect(surface, (150, 120, 60) if on else (170, 160, 140),
+                             tr, 1, border_radius=3)
+            surface.blit(fs.render(label, True, (90, 60, 20) if on else (110, 100, 86)),
+                         (tr.x + 6, tr.y + 3))
+            self._tab_rects.append((tr, shop_id))
+            tab_x += tr.w + 5
+
+        surface.blit(fs.render("点击欲购买的道具", True, (130, 118, 100)),
+                     (x + 18, y + 54))
+
+        # ── 头区右框：离开商店按钮 + 关闭 ─────────────────────────
+        exit_img = self._wz("BtExit/normal/0")
+        if exit_img is not None:
+            ex = x + BG_PANEL_W - 20 - exit_img.get_width()
+            surface.blit(exit_img, (ex, y + 14))
+            self._close_rect = pygame.Rect(ex, y + 14, exit_img.get_width(),
+                                           exit_img.get_height())
+        else:
+            self._close_rect = pygame.Rect(x + BG_PANEL_W - 34, y + 10, 20, 18)
+            surface.blit(fs.render("×", True, (110, 100, 88)), self._close_rect.topleft)
+
+        # ── 头区右框顶部：金币金额（紧随底图金币图标）───────────────
+        meso_s = self.ui.font_tiny.render(f"{combat.meso:,}", True, (120, 96, 40))
+        surface.blit(meso_s, (x + BG_MESO_X, y + BG_MESO_Y))
+
+        # ── 左栏：货架物品（买）─────────────────────────────────────
+        items = self._shelf_items()
+        row_x = x + BG_LCOL_X
+        row_w = BG_LCOL_W
+        for i, item_id in enumerate(items):
+            if i >= BG_NROWS:
+                break
+            rect = self._row_rect(row_x, row_w, y + BG_ROW_Y0, BG_ROW_H, i)
+            self._draw_buy_row(surface, rect, item_id, fs,
+                               i == self.sel_shelf)
+            self._shelf_rects.append((rect, i))
+
+        # ── 右栏：背包物品（卖，可滚动）────────────────────────────
+        entries = self._bag_entries(player)
+        bag_x = x + BG_RCOL_X
+        bag_w = BG_RCOL_W
+        for j in range(BG_NROWS):
+            i = self._scroll + j
+            if i >= len(entries):
+                break
+            rect = self._row_rect(bag_x, bag_w, y + BG_ROW_Y0, BG_ROW_H, j)
+            self._draw_sell_row(surface, rect, entries[i], fs,
+                                i == self.sel_bag)
+            self._bag_rects.append((rect, i))
+
+        # ── 底部：买/卖按钮 + 金币 ─────────────────────────────────
+        by = y + BG_PANEL_H - 34
+        buy_img = self._wz("BtBuy/normal/0")
+        sell_img = self._wz("BtSell/normal/0")
+        bx = x + BG_PANEL_W - 18 - (BTN_W * 2 + 8)
+        if buy_img is not None and sell_img is not None:
+            surface.blit(sell_img, (bx, by))
+            surface.blit(buy_img, (bx + BTN_W + 8, by))
+            self._buy_rect = pygame.Rect(bx + BTN_W + 8, by, BTN_W, BTN_H)
+            self._sell_rect = pygame.Rect(bx, by, BTN_W, BTN_H)
+        else:
+            self._buy_rect = pygame.Rect(bx + BTN_W + 8, by, BTN_W, BTN_H)
+            self._sell_rect = pygame.Rect(bx, by, BTN_W, BTN_H)
+            for rect, label, color in ((self._buy_rect, "购买", (52, 110, 78)),
+                                       (self._sell_rect, "出售", (110, 84, 52))):
+                pygame.draw.rect(surface, color, rect, border_radius=4)
+                surface.blit(fs.render(label, True, (240, 240, 245)),
+                             (rect.x + (rect.w - fs.size(label)[0]) // 2, rect.y + 4))
+
+    def _blit_row_content(self, surface, rect: pygame.Rect, icon, fs,
+                          name_txt: str, name_c, price_txt, price_c,
+                          price_max_w: int) -> None:
+        """把图标 + 名称 + 价格垂直居中绘制到 rect：名称紧随图标实际宽度。"""
+        if icon is not None:
+            surface.blit(icon, (rect.x + 6,
+                                rect.centery - icon.get_height() // 2))
+        name_s = fs.render(name_txt, True, name_c)
+        name_x = rect.x + 6 + (icon.get_width() + 7 if icon is not None else 0)
+        surface.blit(name_s, (name_x, rect.centery - name_s.get_height() // 2))
+        if price_txt is not None:
+            p_s = fs.render(price_txt, True, price_c)
+            surface.blit(p_s, (rect.right - 6 - p_s.get_width(),
+                               rect.centery - p_s.get_height() // 2))
+
+    @staticmethod
+    def _sel_rect(rect: pygame.Rect) -> pygame.Rect:
+        return pygame.Rect(rect.x, rect.y - 3, rect.w, rect.h + 4)
+
+    def _draw_buy_row(self, surface, rect: pygame.Rect, item_id: str, fs,
+                      selected: bool) -> None:
+        """左栏单行：图标 + 名称 + 买价；选中叠原版 orange select。"""
+        if selected:
+            sel = self._wz("select")
+            if sel is not None:
+                fit = pygame.transform.smoothscale(
+                    sel, (rect.w, rect.h + 4))
+                surface.blit(fit, (rect.x, rect.y - 3))
+        # 图标水平居中于槽盒子（BG_LCOL_SLOT_CX），名称紧随盒子右沿
+        icon = self._icon(item_id)
+        name_c = (60, 52, 44) if selected else (80, 72, 62)
+        icon_x = rect.x - BG_LCOL_X + BG_LCOL_SLOT_CX
+        name_x = rect.x - BG_LCOL_X + BG_LCOL_NAME_X
+        price_w = 58
+        max_w = (rect.right - 6 - price_w) - name_x
+        name_txt = _ellipsize(self._item_name(item_id), fs, max_w)
+        name_s = fs.render(name_txt, True, name_c)
+        if icon is not None:
+            surface.blit(icon, (icon_x - icon.get_width() // 2,
+                                rect.centery - icon.get_height() // 2))
+        surface.blit(name_s, (name_x, rect.centery - name_s.get_height()))
+        price = shop_mod.item_price(item_id, self.assets) or 0
+        price_s = fs.render(f"{price:,}", True, (170, 60, 30))
+        surface.blit(price_s, (name_x, rect.centery + 8))
+
+    def _draw_sell_row(self, surface, rect: pygame.Rect, entry, fs,
+                       selected: bool) -> None:
+        """右栏单行：图标 + 名称×数量 + 卖价；选中叠原版 orange select。"""
+        if selected:
+            sel = self._wz("select")
+            if sel is not None:
+                fit = pygame.transform.smoothscale(
+                    sel, (rect.w, rect.h + 4))
+                surface.blit(fit, (rect.x, rect.y - 3))
+        _src, item = entry
+        icon = self._icon(item.id)
+        count = f" ×{item.count}" if item.count > 1 else ""
+        name_c = (60, 52, 44) if selected else (80, 72, 62)
+        icon_x = rect.x - BG_RCOL_X + BG_RCOL_SLOT_CX
+        name_x = rect.x - BG_RCOL_X + BG_RCOL_NAME_X
+        price_w = 50
+        max_w = (rect.right - 6 - price_w) - name_x
+        name_txt = _ellipsize(item.name + count, fs, max_w)
+        name_s = fs.render(name_txt, True, name_c)
+        if icon is not None:
+            surface.blit(icon, (icon_x - icon.get_width() // 2,
+                                rect.centery - icon.get_height() // 2))
+        surface.blit(name_s, (name_x, rect.centery - name_s.get_height()))
+        price = shop_mod.item_price(item.id, self.assets) or 0
+        gain = shop_mod.sell_price(price) * max(1, item.count)
+        gain_s = fs.render(str(gain), True, (30, 110, 60))
+        surface.blit(gain_s, (name_x, rect.centery + 8))
+
+    def _draw_fallback(self, surface, player, combat) -> None:
+        """旧式深色面板：素材缺失（测试 fake assets）时兜底。"""
+        f, fs = self.ui.font, self.ui.font_small
         vw, vh = surface.get_width(), surface.get_height()
         x = (vw - PANEL_W) // 2
         y = (vh - PANEL_H) // 2 - 10
@@ -282,9 +503,9 @@ class ShopPanel:
             surface.blit(fs.render(_ellipsize(sel_desc, fs, 260), True, (210, 215, 225)),
                          (x + 160, by + 14))
 
-        self._buy_rect = pygame.Rect(x + PANEL_W - 14 - BTN_W, by + 14, BTN_W, BTN_H)
-        self._sell_rect = pygame.Rect(self._buy_rect.x - BTN_W - 8, by + 14, BTN_W, BTN_H)
-        close_btn = pygame.Rect(self._sell_rect.x - 50, by + 14, 42, BTN_H)
+        self._buy_rect = pygame.Rect(x + PANEL_W - 14 - BTN_W_FB, by + 14, BTN_W_FB, BTN_H_FB)
+        self._sell_rect = pygame.Rect(self._buy_rect.x - BTN_W_FB - 8, by + 14, BTN_W_FB, BTN_H_FB)
+        close_btn = pygame.Rect(self._sell_rect.x - 50, by + 14, 42, BTN_H_FB)
         for rect, label, color in ((self._buy_rect, "购买", (52, 110, 78)),
                                    (self._sell_rect, "出售", (110, 84, 52)),
                                    (close_btn, "关闭", (74, 78, 92))):

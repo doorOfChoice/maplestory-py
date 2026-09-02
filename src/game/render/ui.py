@@ -78,10 +78,10 @@ DIALOG_BUTTON_LABELS = {"shop": "购买", "storage": "存取"}
 class UI:
     def __init__(self, assets):
         self.assets = assets
-        self.font = _load_font(13)
-        self.font_big = _load_font(16)
-        self.font_small = _load_font(12)
-        self.font_tiny = _load_font(10)
+        self.font = _load_font(11)
+        self.font_big = _load_font(14)
+        self.font_small = _load_font(10)
+        self.font_tiny = _load_font(8)
         self.dialog_lines: List[str] = []
         self.dialog_visible = False
         self.dialog_anchor = None
