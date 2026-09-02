@@ -392,6 +392,11 @@ class Physics:
         return True
 
     # ── 梯子 / 绳索 ───────────────────────────────────────────────
+    @staticmethod
+    def rope_center_x(r: Dict[str, Any]) -> float:
+        """绳/梯的攀爬中心线 x（细绳的线略偏图像左缘右侧）。"""
+        return float(r["x"]) + (0.0 if r.get("ladder") else 6.0)
+
     def rope_at(self, x: float, y: float) -> Optional[Dict[str, Any]]:
         """靠近任意绳/梯（含细绳 l=0）时返回其数据，可按 ↑/↓ 攀爬。
 
@@ -403,9 +408,7 @@ class Physics:
         best_dx: float = 20.0
         reach = settings.FEET_OFFSET + settings.CLIMB_TOP_OVERSHOOT
         for r in self.ropes:
-            rx = float(r["x"])
-            # 细绳的攀爬线略偏图像左缘右侧
-            cx = rx + (6.0 if not r.get("ladder") else 0.0)
+            cx = self.rope_center_x(r)
             dx = abs(cx - x)
             if (dx < best_dx
                     and float(r["y1"]) - reach <= y <= float(r["y2"]) + reach):

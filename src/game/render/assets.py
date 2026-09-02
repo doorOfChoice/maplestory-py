@@ -73,6 +73,7 @@ class Assets:
         self._mob_cache: Dict[Tuple, Any] = {}
         self._npc_cache: Dict[Tuple, Any] = {}
         self._sound_cache: Dict[str, bytes] = {}
+        self._weapon_sfx_cache: Dict[str, str] = {}
         self._ui_cache: Dict[Tuple, Any] = {}
         self._effect_cache: Dict[Tuple, Any] = {}
         self._icon_cache: Dict[str, Any] = {}
@@ -523,6 +524,29 @@ class Assets:
         return frames
 
     # ── 音效 / BGM ──────────────────────────────────────────────────
+    def weapon_sfx(self, equips: List[str]) -> str:
+        """当前武器的音效组名（Sound/Weapon.img 下的子节点，如 bow / swordS）。
+
+        取自 Character/Weapon/{id}.img/info/sfx；未装备武器或资产缺失回退 barehands。
+        """
+        weapon = next((e for e in equips if _is_weapon(e)), None)
+        if weapon is None:
+            return "barehands"
+        hit = self._weapon_sfx_cache.get(weapon)
+        if hit is not None:
+            return hit
+        sfx = "barehands"
+        try:
+            img = self.wz["Character"].root.get(f"Weapon/{int(weapon):08d}.img")
+            node = img.parse().get("info/sfx") if img is not None else None
+            value = str(getattr(node, "value", "") or "") if node is not None else ""
+            if value:
+                sfx = value
+        except Exception:
+            pass
+        self._weapon_sfx_cache[weapon] = sfx
+        return sfx
+
     def sound_bytes(self, path: str) -> Optional[bytes]:
         """按 'Bgm03/Elfwood' 风格路径读取 Sound.wz 内嵌音频字节。"""
         if path in self._sound_cache:

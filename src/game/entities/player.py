@@ -488,6 +488,9 @@ class Player:
             if ladder is None:
                 self.climbing = False
             else:
+                # 钉在绳/梯中心线上：挂绳瞬间吸附，攀爬中不被水平输入带偏
+                self.x = physics.rope_center_x(ladder)
+                self.vx = 0.0
                 landed = False
                 if up:
                     self.y -= settings.LADDER_SPEED * dt

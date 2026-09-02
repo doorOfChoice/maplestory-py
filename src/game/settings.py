@@ -101,9 +101,7 @@ DROP_LIFETIME = 20.0             # 掉落物存活秒数
 DROP_PLAYER_LIFETIME = 120.0     # 玩家扔出物品的存活秒数（防误扔瞬间消失）
 DROP_THROW_SPEED = -340.0        # 玩家扔出物品的上抛初速度（竖直向上）
 DROP_ITEM_CHANCE = 0.45          # 击杀掉落物品概率（金币必掉）
-PICKUP_RANGE = 18.0              # Z 键拾取的水平半径（紧贴脚边）
-PICKUP_ATTRACT_SPEED = 300.0     # 吸附中掉落物水平速度 px/s
-PICKUP_ATTRACT_HOP = -260.0      # 吸附中掉落物每次蹦跳初速度
+PICKUP_RANGE = 30.0             # Z 键拾取水平半径（一次只捡其中最近的一件）
 FALL_OUT_DAMAGE = 30             # 掉出地图底部回出生点时的扣血
 
 # ── 背包 / 装备 ──────────────────────────────────────────────────────

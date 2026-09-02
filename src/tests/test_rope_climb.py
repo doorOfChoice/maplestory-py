@@ -109,6 +109,21 @@ def test_climb_up_then_stay_on_top_platform(monkeypatch):
     assert p.y <= 176.0           # 落在顶平台（196 - FEET_OFFSET）附近
 
 
+def test_climb_snaps_player_to_rope_center(monkeypatch):
+    """挂绳瞬间角色应吸附到绳/梯中心线，攀爬过程中保持居中。"""
+    ph = make()
+    p = make_player(monkeypatch, ph, ROPE["x"] + 15, 434)
+    k = Keys()
+    k.up = True
+    p.update(0.016, k, ph)
+    assert p.climbing is True
+    assert p.x == pytest.approx(ROPE["x"])
+    for _ in range(30):
+        p.update(0.016, k, ph)
+    assert p.climbing is True
+    assert p.x == pytest.approx(ROPE["x"])
+
+
 def test_climb_down_from_top_platform(monkeypatch):
     """站在梯顶平台按↓直接下滑；再按↓到梯底落地。"""
     ph = make()

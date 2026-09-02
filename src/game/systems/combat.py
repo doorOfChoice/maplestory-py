@@ -158,7 +158,6 @@ class DropItem:
         # 落地基准：脚下 foothold 的表面（略微抬高让图形贴地），缺省用生成点
         self.ground_y = (ground_y if ground_y is not None
                          else y) - 4.0
-        self.attracted = False   # 被拾取吸引：自动跳向玩家
         self._age = 0.0
 
     @property
@@ -178,7 +177,7 @@ class DropItem:
             if abs(self.vy) < 12:
                 self.vy = 0.0
         # 在地面上时水平摩擦减速
-        if self.vy == 0.0 and not self.attracted:
+        if self.vy == 0.0:
             self.vx *= max(0.0, 1 - 6.0 * dt)
         return self.life > 0
 
@@ -460,44 +459,27 @@ class Combat:
         return False
 
     def pickup(self, player) -> bool:
-        """按 Z 手动拾取：收取人物周边已解锁的掉落物。
+        """按 Z 手动拾取：一次只收取离人物最近的一件掉落物（原版行为）。
 
-        拾起一件后，同层附近的金币/掉落物自动蹦向玩家（原版行为）。
-        背包装备栏满时装备留在地上。
+        其余掉落物留在原地，再按再捡；背包装备栏满时装备留在地上。
         """
-        got = False
+        feet = player.y + settings.FEET_OFFSET
+        best = None
+        best_dx = float("inf")
         for drop in self.drops:
             if drop.taken or drop._age < drop.pickup_lock:
                 continue
-            if abs(drop.x - player.x) > settings.PICKUP_RANGE:
+            dx = abs(drop.x - player.x)
+            if dx > settings.PICKUP_RANGE or dx >= best_dx:
                 continue
-            if abs(drop.y - player.y) > 30.0:
+            # 同层即可拾取（按落地基准判定，弹跳中/落差略大也不挡）
+            if abs(drop.ground_y - feet) > 50.0:
                 continue
-            if self._take(drop, player):
-                got = True
-        if got:
-            # 原版行为：拾起一件后，同层附近的金币/掉落物自动蹦向玩家
-            feet = player.y + settings.FEET_OFFSET
-            for d in self.drops:
-                if d.taken or d.attracted:
-                    continue
-                if abs(d.ground_y - feet) < 50.0 and abs(d.x - player.x) < 300.0:
-                    d.attracted = True
+            best, best_dx = drop, dx
+        if best is None or not self._take(best, player):
+            return False
         self.drops = [d for d in self.drops if not d.taken]
-        return got
-
-    def collect_attracted(self, player) -> bool:
-        """吸附中的掉落物飞到身上即自动收取（无需再按 Z）。"""
-        pr = pygame.Rect(int(player.x - 16), int(player.y - 30), 32, 60)
-        got = False
-        for d in self.drops:
-            if d.taken or not d.attracted:
-                continue
-            if pr.colliderect(d.rect()):
-                if self._take(d, player):
-                    got = True
-        self.drops = [d for d in self.drops if not d.taken]
-        return got
+        return True
 
     def drop_player_item(self, player, item) -> DropItem:
         """玩家从背包扔出：从人物中心竖直上抛、自由落体回脚下平台（原版轨迹）。
@@ -515,23 +497,15 @@ class Combat:
         self.drops.append(d)
         return d
 
-    def update(self, dt: float, player=None) -> bool:
-        """推进战斗实体；吸附中的掉落物飞到身上即自动收取，返回是否有收取。"""
+    def update(self, dt: float) -> None:
+        """推进战斗实体（伤害飘字 / 特效 / 掉落物物理）。"""
         self.numbers = [n for n in self.numbers if n.update(dt)]
         for e in self.effects:
             e.update(dt)
         self.effects = [e for e in self.effects if not e.done]
         for d in self.drops:
-            if d.attracted and player is not None:
-                dx = player.x - d.x
-                d.vx = (settings.PICKUP_ATTRACT_SPEED if dx >= 0
-                        else -settings.PICKUP_ATTRACT_SPEED)
-                # 落地则再起跳，形成连续蹦跳效果
-                if d.vy == 0.0 and d.y >= d.ground_y - 0.5:
-                    d.vy = settings.PICKUP_ATTRACT_HOP
             d.update(dt)
         self.drops = [d for d in self.drops if d.life > 0 and not d.taken]
-        return self.collect_attracted(player) if player is not None else False
 
     def draw(self, surface: pygame.Surface, camera) -> None:
         for drop in self.drops:

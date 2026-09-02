@@ -79,5 +79,52 @@ class Audio:
         except Exception:
             pass
 
+    def _sfx(self, key: str, path: str) -> Optional[pygame.mixer.Sound]:
+        """按键取音效，未预载则从 Sound.wz 惰性解码并缓存。"""
+        snd = self._sounds.get(key)
+        if snd is None:
+            try:
+                data = self.assets.sound_bytes(path)
+                if data:
+                    snd = pygame.mixer.Sound(file=io.BytesIO(data))
+                    self._sounds[key] = snd
+            except Exception:
+                return None
+        return snd
+
+    def play_attack(self, equips, volume: float = 0.8) -> None:
+        """武器攻击音效：按装备武器的 sfx 组名取 Sound/Weapon.img/{sfx}/Attack。"""
+        if not self._enabled:
+            return
+        try:
+            sfx = self.assets.weapon_sfx(list(equips))
+        except Exception:
+            sfx = "barehands"
+        snd = self._sfx(f"Weapon/{sfx}/Attack", f"Weapon/{sfx}/Attack")
+        if snd is None:
+            return
+        try:
+            snd.set_volume(volume)
+            snd.play()
+        except Exception:
+            pass
+
+    def play_skill_cast(self, skill_id, equips, volume: float = 0.8) -> None:
+        """技能施放音效：Sound/Skill.img/{skillId}/Use，缺失回退武器攻击音。"""
+        if not self._enabled:
+            return
+        snd = None
+        if skill_id is not None:
+            key = f"Skill/{skill_id}/Use"
+            snd = self._sfx(key, key)
+        if snd is None:
+            self.play_attack(equips, volume)
+            return
+        try:
+            snd.set_volume(volume)
+            snd.play()
+        except Exception:
+            pass
+
     def close(self) -> None:
         self.stop_bgm()

@@ -298,8 +298,7 @@ class World:
         for npc in self.npcs:
             npc.update(dt)
 
-        if self.combat.update(dt, self.player):
-            audio and audio.play("PickUpItem", 0.5)
+        self.combat.update(dt)
         self.camera.center_on(self.player.x, self.player.y)
         return None
 

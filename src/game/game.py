@@ -245,7 +245,8 @@ class Game:
                 elif event.key == pygame.K_z:
                     self._try_pickup()
                 elif event.key == pygame.K_a:
-                    self.ctx.world.player.start_attack()
+                    if self.ctx.world.player.start_attack():
+                        self.ctx.audio.play_attack(self.ctx.world.player.equips)
                 elif event.key == pygame.K_DOWN and self.keys.jump:
                     self.ctx.world.player.drop_through(self.ctx.world.physics)
                 elif event.key == pygame.K_b:
@@ -269,7 +270,8 @@ class Game:
         # 用持续按键状态补触发攻击（按下即生效，无需等松开重按）
         if (self.keys.attack and not self.ctx.ui.dialog_visible
                 and not self.dead and not self.ctx.world.player.attacking):
-            self.ctx.world.player.start_attack()
+            if self.ctx.world.player.start_attack():
+                self.ctx.audio.play_attack(self.ctx.world.player.equips)
 
     def _try_pickup(self) -> bool:
         """Z 键手动拾取人物周边掉落物；有收获则播放音效。"""
@@ -287,6 +289,7 @@ class Game:
         if data is None:
             return
         if self.ctx.world.player.start_attack(data):
+            self.ctx.audio.play_skill_cast(sid, self.ctx.world.player.equips)
             eff = self.assets.skill_effect_frames(sid)
             if eff:
                 self.ctx.world.combat.effects.append(Effect(
