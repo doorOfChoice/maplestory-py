@@ -2,6 +2,10 @@
 
 扫描脚本目录，加载每个 Lua 脚本，调用 quests(ctx) 拿到任务数组，
 逐条翻译成 QuestDef 后合并到 quest_defs 字典，供游戏流程使用。
+
+同时支持 shops() 和 dialogues()：
+- shops() 返回 [{shop_id, items: [{item_id, price}, ...]}, ...]
+- dialogues() 返回 [[line1, line2], [line3, line4], ...]
 """
 
 from __future__ import annotations
@@ -16,6 +20,8 @@ from lupa import LuaRuntime
 from game import settings
 from game.core.jobs import JOBS
 from game.systems.quests import QuestDef
+from game.systems.shop import register_lua_shop
+from game.systems.dialogues import register_lua_dialogue
 
 # 内容脚本目录：resources/content/npc/<npc_id>.lua
 _SCRIPT_DIR = settings.RESOURCE_DIR / "content" / "npc"
@@ -124,11 +130,68 @@ def _sandbox() -> LuaRuntime:
     return lua
 
 
+def _load_lua_shops(npc_id: str, lua: LuaRuntime, mod) -> None:
+    """从 Lua 脚本注册商店定义。"""
+    shops_fn = mod["shops"]
+    if shops_fn is None:
+        return
+    shops_tbl = shops_fn()
+    if shops_tbl is None:
+        return
+    shop_ids: List[str] = []
+    for i in range(1, len(shops_tbl) + 1):
+        shop = shops_tbl[i]
+        if shop is None:
+            continue
+        shop_id = str(shop["shop_id"] or f"{npc_id}_shop_{i}")
+        items_tbl = shop["items"]
+        if items_tbl is not None:
+            item_list: List[Tuple[str, int]] = []
+            for j in range(1, len(items_tbl) + 1):
+                item = items_tbl[j]
+                if item is None:
+                    continue
+                item_id = str(item["item_id"] or "")
+                price = _num(item["price"])
+                if item_id:
+                    item_list.append((item_id, price))
+            # 将 Lua 定义的物品写入 SHOPS（如果该 shop_id 尚不存在）
+            from game.systems.shop import SHOPS
+            if shop_id not in SHOPS:
+                SHOPS[shop_id] = [it[0] for it in item_list]
+        shop_ids.append(shop_id)
+    if shop_ids:
+        register_lua_shop(npc_id, shop_ids)
+
+
+def _load_lua_dialogues(npc_id: str, lua: LuaRuntime, mod) -> None:
+    """从 Lua 脚本注册对话台词池。"""
+    dialogues_fn = mod["dialogues"]
+    if dialogues_fn is None:
+        return
+    dialogues_tbl = dialogues_fn()
+    if dialogues_tbl is None:
+        return
+    lines_pool: List[List[str]] = []
+    for i in range(1, len(dialogues_tbl) + 1):
+        group = dialogues_tbl[i]
+        if group is None:
+            continue
+        lines = _lines(group)
+        if lines:
+            lines_pool.append(lines)
+    if lines_pool:
+        register_lua_dialogue(npc_id, lines_pool)
+
+
 def load_lua_quest_defs(
     script_dir: Optional[Path] = None,
     ctx: Any = None,
 ) -> Dict[str, QuestDef]:
-    """扫描 script_dir 下 *.lua，加载 quests() 翻译成 {qid: QuestDef}。"""
+    """扫描 script_dir 下 *.lua，加载 quests() 翻译成 {qid: QuestDef}。
+
+    同时加载 shops() 和 dialogues()（如果脚本导出的话）。
+    """
     script_dir = script_dir or _SCRIPT_DIR
     defs: Dict[str, QuestDef] = {}
     if not script_dir.is_dir():
@@ -139,19 +202,22 @@ def load_lua_quest_defs(
             lua = _sandbox()
             src = path.read_text(encoding="utf-8")
             mod = lua.execute(src, str(path))
+            # 加载任务定义
             quests_fn = mod["quests"]
-            if quests_fn is None:
-                continue
-            quests_tbl = quests_fn(ctx)
-            if quests_tbl is None:
-                continue
-            for i in range(1, len(quests_tbl) + 1):
-                item = quests_tbl[i]
-                if item is None:
-                    continue
-                d = _quest_to_def(npc_id, i, item)
-                if d is not None:
-                    defs[d.qid] = d
+            if quests_fn is not None:
+                quests_tbl = quests_fn(ctx)
+                if quests_tbl is not None:
+                    for i in range(1, len(quests_tbl) + 1):
+                        item = quests_tbl[i]
+                        if item is None:
+                            continue
+                        d = _quest_to_def(npc_id, i, item)
+                        if d is not None:
+                            defs[d.qid] = d
+            # 加载商店定义
+            _load_lua_shops(npc_id, lua, mod)
+            # 加载对话定义
+            _load_lua_dialogues(npc_id, lua, mod)
         except Exception:
             logging.warning("Lua script %s load failed", path, exc_info=True)
     return defs

@@ -3,6 +3,8 @@
 · SHOPS：商店 id → 货架物品 id 列表（8 位补零）；SHOP_NPCS：NPC → 可开的商店。
 · 价格：优先 WZ info.price（assets.item_price），缺省回退 settings.FALLBACK_PRICES。
 · buy/sell 为纯函数：buy 扣钱入包（钱不够 / 包满失败），sell 按 SELL_RATE 出售。
+· Lua 脚本可在 content/npc/<npc_id>.lua 中导出 shops() 注册商店，
+  运行时通过 register_lua_shop() 合并进 SHOPS / SHOP_NPCS。
 """
 
 from __future__ import annotations
@@ -25,9 +27,19 @@ SHOP_NPCS: dict = {"1012119": ["potions", "weapons", "scrolls"]}
 # 仓库 NPC（小安：帮你看着行李）
 STORAGE_NPC = "1012110"
 
+# Lua 脚本动态注册的商店数据（npc_id → 货架物品 id 列表）
+_LUA_SHOPS: dict = {}
+
+
+def register_lua_shop(npc_id: str, shop_ids: List[str]) -> None:
+    """注册 Lua 脚本为 NPC 定义的商店列表。"""
+    _LUA_SHOPS[str(npc_id)] = list(shop_ids)
+
 
 def shops_of(npc_id: str) -> List[str]:
-    """该 NPC 可开的商店列表。"""
+    """该 NPC 可开的商店列表。Lua 注册优先于硬编码配置。"""
+    if str(npc_id) in _LUA_SHOPS:
+        return list(_LUA_SHOPS[str(npc_id)])
     return list(SHOP_NPCS.get(npc_id) or [])
 
 

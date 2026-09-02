@@ -148,41 +148,50 @@ end
 `lua_quests.load_lua_quest_defs()` 扫描 `resources/content/npc/` 加载并翻译成
 `QuestDef` 合并进 `quest_defs` —— 与官方任务（Quest.wz）走同一套状态机/存档/头顶灯泡/多任务列表。
 
-### quests(ctx) 函数契约
+### 导出函数契约
 
-脚本导出 `M.quests(ctx)`，返回**任务数组**（每个元素是任务定义表）：
+脚本可导出以下函数（均可选）：
+
+| 函数 | 返回 | 说明 |
+|---|---|---|
+| `quests(ctx)` | 数组[QuestDef] | 自定义任务定义 |
+| `shops()` | 数组[ShopDef] | NPC 的商店定义 |
+| `dialogues()` | 数组[数组[string]] | NPC 的寒暄台词池 |
+
+### 商店定义（`shops()`）
+
+返回商店定义数组，每个元素是一个表：
 
 ```lua
-local M = {}
-
-function M.quests(ctx)
-  return {
-    {
-      name = "收集红药水",
-      lvmin = 1,
-      end_items = {{2000000, 10}},  -- 收集 10 个红药水
-      reward_exp = 200,
-      reward_money = 1000,
-      accept_lines = {"你要帮我收集 #t2000000# 吗？"},
-      accept_yes = {"太好了！收集 10 个红药水就来找我吧。"},
-      accept_no = {"好吧，改变主意了再来。"},
-      complete_lines = {"你收集够了！要领取奖励吗？"},
-      complete_yes = {"这是你的奖励！"},
-      complete_stop = {"还差一些，继续加油！"},
-    },
-    -- 可再写第二个任务...
+{
+  items = {
+    {item_id = "02000000", price = 50},
+    {item_id = "02000003", price = 100},
   }
-end
-
-return M
+}
 ```
 
 要点：
-- **`start_npc` / `end_npc` 由文件名决定**（`npc/1012119.lua` → NPC 1012119），脚本内不必写；
-  需要「接 A 交给 B」时可在任务表里显式写 `start_npc = ...` / `end_npc = ...` 覆盖。
-- **任务 id 自动加 `c_` 前缀**：`c_<npc_id>_<序号>`（序号从 1 起），无需也不应在脚本里指定 qid。
-- 与官方任务**共存**：同一 NPC 既有官方任务又有自定义任务时，`collect_npc_quests` 会把两者
-  都收进接取列表（可交付的排前面）。
+- `shop_id` 由系统自动生成（`<npc_id>_shop_<序号>`），无需在脚本中指定
+- `items` 中的 `price` 为买价；卖价按 `SELL_RATE` 自动计算
+- Lua 定义的商店会合并进 `SHOPS` 和 `SHOP_NPCS`，与硬编码配置共存
+- 脚本内不需要写 `shop_id`，系统自动分配
+
+### 对话定义（`dialogues()`）
+
+返回台词池数组，每个元素是一套台词（若干行）：
+
+```lua
+{
+  {"欢迎光临！", "有什么需要帮忙的吗？"},
+  {"我的药水品质有保障，", "冒险者尽管放心。"},
+}
+```
+
+要点：
+- 每次对话随机取一套
+- Lua 定义的台词优先于硬编码配置
+- 与 `quests()` 同文件，同一 NPC 的任务和对话分开写
 
 ### 任务定义字段
 

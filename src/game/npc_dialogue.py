@@ -25,7 +25,7 @@ import pygame
 from game.systems import dialogues
 from game.systems.quests import collect_npc_quests, render_markup
 from game.systems.scripting import build_lua_session
-from game.systems.shop import SHOP_NPCS, STORAGE_NPC
+from game.systems.shop import STORAGE_NPC, shops_of
 from game.core.jobs import JOBS, job_for_trainer
 
 # 对话层「消费」某次点击后，game.py 不再把该事件交给商店/面板
@@ -70,7 +70,7 @@ class NpcDialogueController:
                 if self._begin_quest_flow(npc):   # 仅剩「进行中未满足」的状态提示
                     return
                 buttons: List[str] = []
-                if npc.npc_id in SHOP_NPCS:
+                if shops_of(npc.npc_id):
                     buttons.append("shop")
                 if npc.npc_id == STORAGE_NPC:
                     buttons.append("storage")

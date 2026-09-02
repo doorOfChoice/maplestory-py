@@ -8,6 +8,8 @@
   items 为 [[item_id, count], ...]，负数=收回
 - 任务（当 ctx 携带 world/quest_defs 时注册）：quest_available / quest_completable /
   quest_state / accept_quest / complete_quest / quest_info（薄封装，复用 quests.py 逻辑）
+- 商店（当 ctx 携带 world 时注册）：get_shop_items(shop_id) / shop_buy(item_id, count) /
+  shop_sell(item_id, count)
 
 安全：宿主运行时禁用 os/io/package/dofile/loadfile，脚本为仓库内可信文本。
 """
@@ -107,5 +109,57 @@ def make_globals(ctx: Any) -> Dict[str, Callable]:
         globals_["accept_quest"] = accept_quest
         globals_["complete_quest"] = complete_quest
         globals_["quest_info"] = quest_info
+
+    # 商店相关：仅当 ctx 携带 world 时注册（与任务函数相同条件）
+    if world is not None:
+        from game.systems import shop as shop_mod
+
+        def get_shop_items(shop_id: str) -> List[dict]:
+            """获取指定商店的货架物品列表。"""
+            items = shop_mod.SHOPS.get(shop_id, [])
+            return [{"item_id": iid, "price": shop_mod.item_price(iid, world.assets) or 0}
+                    for iid in items]
+
+        def shop_buy(item_id: str, count: int = 1) -> bool:
+            """购买物品。需先通过 open_shop 打开商店。"""
+            shop_id = getattr(ctx, "_current_shop", None)
+            if shop_id is None:
+                return False
+            price = shop_mod.item_price(item_id, world.assets) or 0
+            ok, _meso = shop_mod.buy(shop_id, item_id, world.combat.meso,
+                                     world.player.inventory, price=price, count=count)
+            if ok:
+                world.combat.meso = _meso
+            return ok
+
+        def shop_sell(item_id: str, count: int = 1) -> bool:
+            """出售物品。需先通过 open_shop 打开商店。"""
+            shop_id = getattr(ctx, "_current_shop", None)
+            if shop_id is None:
+                return False
+            inv = world.player.inventory
+            for bucket in (inv.consumes, inv.etcs):
+                for key, item in list(bucket.items()):
+                    if item.id == item_id:
+                        sell_count = min(count, item.count)
+                        price = shop_mod.item_price(item_id, world.assets) or 0
+                        gain = shop_mod.sell_price(price) * sell_count
+                        world.combat.meso += gain
+                        item.count -= sell_count
+                        if item.count <= 0:
+                            del bucket[key]
+                        return True
+            for i, item in enumerate(inv.equips):
+                if item.id == item_id:
+                    price = shop_mod.item_price(item_id, world.assets) or 0
+                    gain = shop_mod.sell_price(price)
+                    world.combat.meso += gain
+                    inv.equips.pop(i)
+                    return True
+            return False
+
+        globals_["get_shop_items"] = get_shop_items
+        globals_["shop_buy"] = shop_buy
+        globals_["shop_sell"] = shop_sell
 
     return globals_

@@ -1,9 +1,14 @@
-"""NPC 商店：买卖结算（钱不够 / 包满 / 卖价取整）。"""
+"""NPC 商店：买卖结算（钱不够 / 包满 / 卖价取整）+ Lua 动态注册商店。"""
 from __future__ import annotations
 
 from game import settings
 from game.systems.inventory import Inventory, Item
-from game.systems.shop import buy, sell, sell_price, shops_of, item_price
+from game.systems.shop import (
+    SHOPS, SHOP_NPCS, STORAGE_NPC,
+    buy, sell, sell_price, shops_of, item_price,
+    register_lua_shop,
+)
+from game.systems import dialogues
 
 
 def test_buy_deducts_meso_and_adds_item():
@@ -67,3 +72,33 @@ def test_shops_of_merchant_npc():
 def test_item_price_fallback_for_scrolls():
     """自制卷轴无 WZ price → 回退兜底表。"""
     assert item_price("02340000", assets=None) == settings.FALLBACK_PRICES["02340000"]
+
+
+def test_register_lua_shop_overrides_hardcoded():
+    """register_lua_shop 注册的商店优先于硬编码 SHOP_NPCS。"""
+    register_lua_shop("9999999", ["potions"])
+    assert shops_of("9999999") == ["potions"]
+    # 清理
+    from game.systems.shop import _LUA_SHOPS
+    _LUA_SHOPS.pop("9999999", None)
+
+
+def test_register_lua_shop_for_unknown_npc():
+    """未注册的 NPC 返回空列表。"""
+    assert shops_of("9999998") == []
+
+
+def test_register_lua_dialogue():
+    """dialogues.register_lua_dialogue 注册的台词优先于硬编码 DIALOGUES。"""
+    dialogues.register_lua_dialogue("9999999", [["Lua 台词 1", "Lua 台词 2"]])
+    got = dialogues.get_dialog("9999999")
+    assert got == ["Lua 台词 1", "Lua 台词 2"]
+    # 清理
+    dialogues.DIALOGUES.pop("9999999", None)
+
+
+def test_get_dialogue_fallback_to_generic():
+    """未收录 NPC 回退通用池。"""
+    got = dialogues.get_dialog("9999998", "路人")
+    assert got is not None
+    assert len(got) > 0
