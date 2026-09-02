@@ -26,6 +26,18 @@ def is_ranged_weapon(item_id: str) -> bool:
         return False
 
 
+# 双手武器类别：双手剑/双手斧/双手锤/长枪/铁戟（长杖 138 原版用单手姿态）
+TWO_HANDED_CATEGORIES = (140, 141, 142, 143, 144)
+
+
+def is_two_handed_weapon(item_id: str) -> bool:
+    """双手武器判定：攻击动画使用 swingT*/stabT* 姿态的类别。"""
+    try:
+        return int(item_id) // 10000 % 1000 in TWO_HANDED_CATEGORIES
+    except (TypeError, ValueError):
+        return False
+
+
 # ── 职业注册表 ───────────────────────────────────────────────────────
 @dataclass
 class JobDef:

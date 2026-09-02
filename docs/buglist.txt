@@ -1,17 +1,2 @@
-1. [已解决] 拣取物品一次z只能拣取一个物品
-   期望即原版行为：一次 Z 只捡起最近的一件，再按再捡。
-   修复：拾取改为在半径内（同层、已过拾取锁）只收取最近的一件；
-   移除整套吸附/自动收取机制（其余掉落物留在原地）。
-   回归：src/tests/test_pickup_single_press.py
-
-2. [已解决] 攻击怪物没有音效
-   修复：读取武器 Character/Weapon/{id}.img/info/sfx 组名，播
-   Sound/Weapon.img/{sfx}/Attack（未装备武器回退 barehands）；
-   技能施放优先 Sound/Skill.img/{skillId}/Use，缺失时回退武器音。
-   音效首次使用才解码并缓存，混音不可用时静默降级。
-
-3. [已解决] 上绳子的时候，经常不居中，看着怪怪的
-   修复：攀爬中心线抽成 Physics.rope_center_x（细绳沿用 +6 偏移），
-   挂绳与攀爬期间把角色 x 钉在该中心线上并清零水平速度，
-   不再被攻击惯性/按键残留带偏。
-   回归：src/tests/test_rope_climb.py::test_climb_snaps_player_to_rope_center
+1. 双手武器攻击没有动画，预期：应该有动画
+2. 地图上的背景怪怪的，感觉贴图贴的乱七八糟的

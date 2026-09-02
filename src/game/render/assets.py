@@ -31,11 +31,35 @@ from wzpy.character import CharacterRenderer, DEFAULT_EAR_TYPE
 from wzpy.properties import WzCanvasProperty, WzUolProperty
 
 from game import settings
-from game.core.jobs import is_ranged_weapon, resolve_skill_img
+from game.core.jobs import (is_ranged_weapon, is_two_handed_weapon,
+                            resolve_skill_img)
 from game.core.localize import to_simplified
 
-# 攻击姿态回退顺序（玩家攻击用）
-ATTACK_POSES = ("swingO1", "swingO2", "swingO3", "stabO1", "stabO2")
+# 攻击姿态候选表（玩家攻击用）：双手武器优先 swingT*/stabT*，其余 swingO*/stabO*
+ONE_HANDED_ATTACK_POSES = ("swingO1", "swingO2", "swingO3", "stabO1", "stabO2")
+TWO_HANDED_ATTACK_POSES = ("swingT1", "stabT1", "swingT2", "stabT2", "swingT3")
+
+
+def select_attack_pose(weapon: Optional[str], poses: List[str]) -> str:
+    """按武器类别从可用姿态里选攻击姿态。
+
+    远程优先拉弓/举弩（shoot1/shoot2）；双手武器优先 T 姿态；
+    其余优先 O 姿态。全部缺失时回退 swingO1（身体仍有动画）。
+    """
+    if weapon is None:
+        return ONE_HANDED_ATTACK_POSES[0]
+    if is_ranged_weapon(weapon):
+        pref = "shoot1" if int(weapon) // 10000 == 145 else "shoot2"
+        if pref in poses:
+            return pref
+    groups = ((TWO_HANDED_ATTACK_POSES, ONE_HANDED_ATTACK_POSES)
+              if is_two_handed_weapon(weapon)
+              else (ONE_HANDED_ATTACK_POSES, TWO_HANDED_ATTACK_POSES))
+    for group in groups:
+        for pref in group:
+            if pref in poses:
+                return pref
+    return ONE_HANDED_ATTACK_POSES[0]
 
 
 class Assets:
@@ -396,15 +420,7 @@ class Assets:
             (e for e in equips if self.char_renderer and _is_weapon(e)), None
         )
         poses = self.char_renderer.get_weapon_poses(weapon) if weapon else []
-        if weapon is not None and is_ranged_weapon(weapon):
-            # 弓用 shoot1、弩用 shoot2（原版拉弓动作），武器无该动作时回退近战表
-            pref = "shoot1" if int(weapon) // 10000 == 145 else "shoot2"
-            if pref in poses:
-                return pref
-        for pref in ATTACK_POSES:
-            if pref in poses:
-                return pref
-        return ATTACK_POSES[0]
+        return select_attack_pose(weapon, poses)
 
     # ── 怪物 ────────────────────────────────────────────────────────
     def mob_frames(
