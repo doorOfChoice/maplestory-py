@@ -14,7 +14,7 @@ def fh(fid, layer, x1, y1, x2, y2, prev=-1, next=-1, platform=0):
 
 def make(segs):
     return Physics(segs, [], bounds={"left": -1000, "right": 2000,
-                                     "top": 0, "width": 3000, "height": 500})
+                                         "top": 0, "width": 3000, "height": 500})
 
 
 class FakeAssets:
@@ -33,6 +33,19 @@ class FakeAssets:
 
     def mob_origin(self, mob_id, action):
         return (0, 0)
+
+
+class _FakeAudio:
+    """间谍对象：记录 play() 被调用时的音效名和音量。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def play(self, name, volume=0.7):
+        self.calls.append((name, volume))
+
+    def play_mob_death(self, mob_id, volume=0.5):
+        self.calls.append((f"MobDeath/{mob_id}", volume))
 
 
 # 一条 5 段连续平台（每段 90px）在同一 layer，prev/next 相连
@@ -78,10 +91,35 @@ def test_does_not_fall_off_ledge_turns_back():
     """怪物走上高台边缘（断口）时应折返，而不是掉到低台或悬空。"""
     ph = make(CLIFF)
     mob = Monster(FakeAssets(), {"id": "0100101", "x": 50, "y": 100, "cy": 100,
-                                 "rx0": 0, "rx1": 300}, 0, ph)
+                                     "rx0": 0, "rx1": 300}, 0, ph)
     hi_x = mob.x
     for _ in range(400):
         mob.update(0.05, player_x=100000, player_y=0, mobs=[])
         hi_x = max(hi_x, mob.x)
         assert mob.cy == 100  # 始终站在高台高度，不下落
     assert hi_x <= 100  # 巡逻在高台右缘折返，不越过断口
+
+
+def test_death_sound_played_once_on_mob_die():
+    """怪物死亡时应在首次 update 播放一次 MobDeath 音效，之后不再重复。"""
+    ph = make(CHAIN)
+    mob = Monster(FakeAssets(), {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                                     "rx0": 0, "rx1": 450}, 0, ph)
+    audio = _FakeAudio()
+    mob.take_hit(999, from_x=210)  # HP 归零，触发 die()
+    assert mob.dead
+    # 首次 update：应播放死亡音效
+    mob.update(0.05, player_x=100000, player_y=0, mobs=[], audio=audio)
+    assert audio.calls == [("MobDeath/100101", 0.5)]
+    # 后续 update：不应再播放
+    mob.update(0.05, player_x=100000, player_y=0, mobs=[], audio=audio)
+    assert audio.calls == [("MobDeath/100101", 0.5)]
+
+
+def test_death_sound_not_played_without_audio():
+    """怪物死亡时若未传入 audio，不应报错。"""
+    ph = make(CHAIN)
+    mob = Monster(FakeAssets(), {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                                     "rx0": 0, "rx1": 450}, 0, ph)
+    mob.take_hit(999, from_x=210)
+    mob.update(0.05, player_x=100000, player_y=0, mobs=[])  # 无 audio

@@ -592,6 +592,39 @@ class Assets:
         self._sound_cache[path] = data
         return data
 
+    def mob_death_sound_bytes(self, mob_id: str) -> Optional[bytes]:
+        """按 Mob.img/{id}/Die 路径读取怪物死亡音效字节，支持 UOL 引用。
+
+        :param mob_id: 怪物 ID（十进制字符串，不足 7 位自动补零）。
+        """
+        padded = mob_id.zfill(7)
+        path = f"Mob.img/{padded}/Die"
+        if path in self._sound_cache:
+            return self._sound_cache[path]
+        image = self.wz["Sound"].root.get("Mob.img")
+        if image is None:
+            return None
+        node = image.parse()
+        for seg in padded.split("/") + ["Die"]:
+            nxt = node.get(seg) if hasattr(node, "get") else None
+            if nxt is None:
+                return None
+            node = nxt
+        # 解析 UOL 引用
+        if isinstance(node, WzUolProperty):
+            node = node.parent.get(node.value) if node.parent else None
+        if node is None or not hasattr(node, "_data_offset") or node._data_offset is None:
+            return None
+        sound_file = self.wz["Sound"]
+        with sound_file.reader_lock:
+            reader = sound_file.reader
+            keep = reader.position
+            reader.seek(node._data_offset)
+            data = reader.read(node._data_length)
+            reader.seek(keep)
+        self._sound_cache[path] = data
+        return data
+
     def map_bgm_path(self) -> str:
         try:
             root, _src = self.map_renderer._map_root(self.map_id)

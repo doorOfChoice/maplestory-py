@@ -102,6 +102,7 @@ class Monster:
         self.attack_cooldown = 0.0
         self.dead = False
         self.remove_after = 0.0
+        self._death_sound_played = False
 
         self._load_action("move" if self._has("move") else "stand")
 
@@ -157,6 +158,9 @@ class Monster:
         if self.dead:
             self.remove_after -= dt
             self.anim.advance(dt)
+            if not self._death_sound_played and audio:
+                audio.play_mob_death(self.mob_id, 0.5)
+                self._death_sound_played = True
             return
 
         if self.hit_flash > 0:

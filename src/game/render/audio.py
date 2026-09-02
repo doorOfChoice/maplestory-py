@@ -59,7 +59,7 @@ class Audio:
     # ── SFX ────────────────────────────────────────────────────────
     def _preload_sfx(self) -> None:
         for name in ("Jump", "LevelUp", "PickUpItem", "DropItem", "IncEXP",
-                     "QuestClear", "GameIn", "Portal"):
+                       "QuestClear", "GameIn", "Portal"):
             try:
                 data = self.assets.sound_bytes(f"Game.img/{name}")
                 if data:
@@ -71,6 +71,28 @@ class Audio:
         if not self._enabled:
             return
         snd = self._sounds.get(name)
+        if snd is None:
+            return
+        try:
+            snd.set_volume(volume)
+            snd.play()
+        except Exception:
+            pass
+
+    def play_mob_death(self, mob_id: str, volume: float = 0.5) -> None:
+        """播放指定怪物的死亡音效（从 Mob.img/{id}/Die 惰性加载）。"""
+        if not self._enabled:
+            return
+        key = f"MobDeath/{mob_id}"
+        snd = self._sounds.get(key)
+        if snd is None:
+            try:
+                data = self.assets.mob_death_sound_bytes(mob_id)
+                if data:
+                    snd = pygame.mixer.Sound(file=io.BytesIO(data))
+                    self._sounds[key] = snd
+            except Exception:
+                return
         if snd is None:
             return
         try:
