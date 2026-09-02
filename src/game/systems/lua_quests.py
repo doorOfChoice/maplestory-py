@@ -20,7 +20,7 @@ from lupa import LuaRuntime
 from game import settings
 from game.core.jobs import JOBS
 from game.systems.quests import QuestDef
-from game.systems.shop import register_lua_shop
+from game.systems.shop import register_lua_shop, register_shop_profile
 from game.systems.dialogues import register_lua_dialogue
 
 # 内容脚本目录：resources/content/npc/<npc_id>.lua
@@ -131,7 +131,7 @@ def _sandbox() -> LuaRuntime:
 
 
 def _load_lua_shops(npc_id: str, lua: LuaRuntime, mod) -> None:
-    """从 Lua 脚本注册商店定义。"""
+    """从 Lua 脚本注册商店定义（货架明细 + 买价 + 显示名）。"""
     shops_fn = mod["shops"]
     if shops_fn is None:
         return
@@ -144,9 +144,10 @@ def _load_lua_shops(npc_id: str, lua: LuaRuntime, mod) -> None:
         if shop is None:
             continue
         shop_id = str(shop["shop_id"] or f"{npc_id}_shop_{i}")
+        name = str(shop["name"]) if shop["name"] else None
         items_tbl = shop["items"]
+        item_list: List[Tuple[str, int]] = []
         if items_tbl is not None:
-            item_list: List[Tuple[str, int]] = []
             for j in range(1, len(items_tbl) + 1):
                 item = items_tbl[j]
                 if item is None:
@@ -155,10 +156,7 @@ def _load_lua_shops(npc_id: str, lua: LuaRuntime, mod) -> None:
                 price = _num(item["price"])
                 if item_id:
                     item_list.append((item_id, price))
-            # 将 Lua 定义的物品写入 SHOPS（如果该 shop_id 尚不存在）
-            from game.systems.shop import SHOPS
-            if shop_id not in SHOPS:
-                SHOPS[shop_id] = [it[0] for it in item_list]
+        register_shop_profile(shop_id, name, item_list)
         shop_ids.append(shop_id)
     if shop_ids:
         register_lua_shop(npc_id, shop_ids)

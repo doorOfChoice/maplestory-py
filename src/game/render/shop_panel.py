@@ -107,6 +107,10 @@ class ShopPanel:
     def _shelf_items(self) -> List[str]:
         return list(shop_mod.SHOPS.get(self._shop_id(), []))
 
+    def _shop_price(self, item_id: str) -> int:
+        """该店该物品买价（脚本价 > WZ 价 > 兜底表）。"""
+        return shop_mod.buy_price(self._shop_id(), item_id, self.assets) or 0
+
     def _bag_entries(self, player) -> List[Tuple[Tuple, Item]]:
         inv = player.inventory
         entries = [(("stack", it.id), it) for it in inv.consumes.values()]
@@ -184,7 +188,7 @@ class ShopPanel:
         if self.sel_shelf >= len(items):
             return
         item_id = items[self.sel_shelf]
-        price = shop_mod.item_price(item_id, self.assets) or 0
+        price = self._shop_price(item_id)
 
         def make_fn(iid: str, count: int) -> Item:
             name = SCROLLS.get(iid, {}).get("name") if is_scroll_id(iid) else None
@@ -213,7 +217,7 @@ class ShopPanel:
             got = inv.take_stack(src[1])
         if got is None:
             return
-        price = shop_mod.item_price(got.id, self.assets) or 0
+        price = shop_mod.buy_price(self._shop_id(), got.id, self.assets) or 0
         gain = shop_mod.sell_price(price) * max(1, got.count)
         combat.meso = shop_mod.sell(got, combat.meso, price)
         self.sel_bag = None
@@ -265,7 +269,7 @@ class ShopPanel:
         tab_x = x + 18
         for shop_id in self.shop_ids:
             on = shop_id == self._shop_id()
-            label = shop_mod.SHOP_NAMES.get(shop_id, shop_id)
+            label = shop_mod.shop_name(shop_id)
             tr = pygame.Rect(tab_x, tab_y, max(48, fs.size(label)[0] + 12), 18)
             pygame.draw.rect(surface, (252, 200, 60) if on else (222, 214, 196),
                              tr, border_radius=3)
@@ -379,7 +383,7 @@ class ShopPanel:
             surface.blit(icon, (icon_x - icon.get_width() // 2,
                                 rect.centery - icon.get_height() // 2))
         surface.blit(name_s, (name_x, rect.centery - name_s.get_height()))
-        price = shop_mod.item_price(item_id, self.assets) or 0
+        price = self._shop_price(item_id)
         price_s = fs.render(f"{price:,}", True, (170, 60, 30))
         surface.blit(price_s, (name_x, rect.centery + 8))
 
@@ -406,7 +410,7 @@ class ShopPanel:
             surface.blit(icon, (icon_x - icon.get_width() // 2,
                                 rect.centery - icon.get_height() // 2))
         surface.blit(name_s, (name_x, rect.centery - name_s.get_height()))
-        price = shop_mod.item_price(item.id, self.assets) or 0
+        price = shop_mod.buy_price(self._shop_id(), item.id, self.assets) or 0
         gain = shop_mod.sell_price(price) * max(1, item.count)
         gain_s = fs.render(str(gain), True, (30, 110, 60))
         surface.blit(gain_s, (name_x, rect.centery + 8))
@@ -430,7 +434,7 @@ class ShopPanel:
         # 页签
         tx = x + 14
         for shop_id in self.shop_ids:
-            label = shop_mod.SHOP_NAMES.get(shop_id, shop_id)
+            label = shop_mod.shop_name(shop_id)
             tr = pygame.Rect(tx, y + TITLE_H + 2, max(46, fs.size(label)[0] + 14), 18)
             on = shop_id == self._shop_id()
             pygame.draw.rect(surface, (60, 70, 88) if on else (34, 40, 52), tr,
@@ -453,7 +457,7 @@ class ShopPanel:
                 surface.blit(icon, (rect.x + 3, rect.y + 2))
             surface.blit(fs.render(_ellipsize(self._item_name(item_id), fs, rect.w - 108),
                                    True, (230, 230, 235)), (rect.x + 32, rect.y + 5))
-            price = shop_mod.item_price(item_id, self.assets) or 0
+            price = shop_mod.buy_price(self._shop_id(), item_id, self.assets) or 0
             surface.blit(fs.render(f"{price:,}", True, (255, 216, 96)),
                          (rect.right - 46, rect.y + 5))
             surface.blit(fs.render("金币", True, (210, 210, 215)),
@@ -481,7 +485,7 @@ class ShopPanel:
             count = f" ×{item.count}" if item.count > 1 else ""
             surface.blit(fs.render(_ellipsize(item.name + count, fs, rect.w - 96),
                                    True, (230, 230, 235)), (rect.x + 32, rect.y + 5))
-            price = shop_mod.item_price(item.id, self.assets) or 0
+            price = shop_mod.buy_price(self._shop_id(), item.id, self.assets) or 0
             gain = shop_mod.sell_price(price) * max(1, item.count)
             surface.blit(fs.render(str(gain), True, (140, 200, 160)),
                          (rect.right - 40, rect.y + 5))
@@ -494,11 +498,13 @@ class ShopPanel:
                      (x + 14, by + 14))
         sel_desc = ""
         if self.sel_shelf is not None and self.sel_shelf < len(items):
-            price = shop_mod.item_price(items[self.sel_shelf], self.assets) or 0
+            price = shop_mod.buy_price(self._shop_id(), items[self.sel_shelf],
+                                       self.assets) or 0
             sel_desc = f"选中 {self._item_name(items[self.sel_shelf])} · 买价 {price}"
         elif self.sel_bag is not None and self.sel_bag < len(entries):
             _src, item = entries[self.sel_bag]
-            sel_desc = f"选中 {item.name} · 单件卖价 {shop_mod.sell_price(shop_mod.item_price(item.id, self.assets) or 0)}"
+            base = shop_mod.buy_price(self._shop_id(), item.id, self.assets) or 0
+            sel_desc = f"选中 {item.name} · 单件卖价 {shop_mod.sell_price(base)}"
         if sel_desc:
             surface.blit(fs.render(_ellipsize(sel_desc, fs, 260), True, (210, 215, 225)),
                          (x + 160, by + 14))

@@ -164,6 +164,8 @@ end
 
 ```lua
 {
+  shop_id = "potions",
+  name = "药水",
   items = {
     {item_id = "02000000", price = 50},
     {item_id = "02000003", price = 100},
@@ -172,10 +174,11 @@ end
 ```
 
 要点：
-- `shop_id` 由系统自动生成（`<npc_id>_shop_<序号>`），无需在脚本中指定
-- `items` 中的 `price` 为买价；卖价按 `SELL_RATE` 自动计算
-- Lua 定义的商店会合并进 `SHOPS` 和 `SHOP_NPCS`，与硬编码配置共存
-- 脚本内不需要写 `shop_id`，系统自动分配
+- Lua 是商店的**唯一事实来源**：货架、买价、名称全部由 `shops()` 定义，
+  Python 不再有硬编码商店；未定义 `shops()` 的 NPC 无商店
+- `shop_id` 由系统自动生成（`<npc_id>_shop_<序号>`），也可在脚本中显式指定
+- `name` 为页签显示名，缺省回退 `shop_id`
+- `items` 中的 `price` 为买价（脚本价优先于 WZ `info.price` 与兜底表）；卖价按 `SELL_RATE` 自动计算
 
 ### 对话定义（`dialogues()`）
 

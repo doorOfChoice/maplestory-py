@@ -1,10 +1,14 @@
 """NPC 商店：货架配置与买卖结算（纯函数，可单测）。
 
-· SHOPS：商店 id → 货架物品 id 列表（8 位补零）；SHOP_NPCS：NPC → 可开的商店。
-· 价格：优先 WZ info.price（assets.item_price），缺省回退 settings.FALLBACK_PRICES。
+商店数据完全来自脚本：content/npc/<npc_id>.lua 导出 shops()，经
+register_lua_shop() 把每个商店的货架明细（物品 id + 买价）与显示名注册进来。
+这里不再硬编码任何货架/价格/名称；无脚本注册的 NPC 没有商店。
+
+· SHOPS       商店 id → 货架物品 id 列表（8 位补零）
+· SHOP_NAMES  商店 id → 显示名（脚本缺省时回退 shop_id）
+· SHOP_PRICING 商店 id → 物品 id → 脚本买价（缺省即走 WZ / 兜底表）
+· 买价优先级：脚本价 > WZ info.price（assets.item_price）> settings.FALLBACK_PRICES
 · buy/sell 为纯函数：buy 扣钱入包（钱不够 / 包满失败），sell 按 SELL_RATE 出售。
-· Lua 脚本可在 content/npc/<npc_id>.lua 中导出 shops() 注册商店，
-  运行时通过 register_lua_shop() 合并进 SHOPS / SHOP_NPCS。
 """
 
 from __future__ import annotations
@@ -14,42 +18,67 @@ from typing import Callable, List, Optional, Tuple
 from game import settings
 from game.systems.inventory import Inventory, Item, item_kind
 
-# ── 货架配置（商店 id → 物品 id 列表，id 为补零 8 位）────────────────
-SHOPS: dict = {
-    "potions": ["02000000", "02000003", "02000001", "02000002"],  # 红/蓝/橘/白药水
-    "weapons": ["01452000", "01452002", "01302000"],              # 战斗弓/长弓/剑
-    "scrolls": ["02340000", "02340002", "02340001"],              # 自制强化卷轴
-}
-SHOP_NAMES: dict = {"potions": "药水", "weapons": "武器", "scrolls": "卷轴"}
+# 商店 id → 货架物品 id 列表（全部由 Lua 脚本注册，无硬编码）
+SHOPS: dict = {}
+# 商店 id → 显示名（脚本缺省时回退 shop_id）
+SHOP_NAMES: dict = {}
+# 商店 id → 物品 id → 脚本买价（缺省即走 WZ / 兜底表）
+SHOP_PRICING: dict = {}
 
-# NPC → 可开的商店列表（弓箭手村行商 王年海）
-SHOP_NPCS: dict = {"1012119": ["potions", "weapons", "scrolls"]}
+# NPC → 可开的商店 id 列表（Lua 脚本注册）
+_LUA_SHOPS: dict = {}
+
 # 仓库 NPC（小安：帮你看着行李）
 STORAGE_NPC = "1012110"
 
-# Lua 脚本动态注册的商店数据（npc_id → 货架物品 id 列表）
-_LUA_SHOPS: dict = {}
-
 
 def register_lua_shop(npc_id: str, shop_ids: List[str]) -> None:
-    """注册 Lua 脚本为 NPC 定义的商店列表。"""
+    """记录 NPC 可开的商店列表（顺序即页签顺序）。"""
     _LUA_SHOPS[str(npc_id)] = list(shop_ids)
 
 
+def register_shop_profile(shop_id: str, name: Optional[str],
+                          items: List[Tuple[str, int]]) -> None:
+    """注册单个商店的货架明细与买价。
+
+    items 为 [(item_id, price), ...]，price 可能为 0（表示改用 WZ/兜底价）；
+    缺省名回退 shop_id。
+    """
+    SHOPS[shop_id] = [iid for iid, _ in items]
+    SHOP_NAMES[shop_id] = (name or shop_id)
+    SHOP_PRICING[shop_id] = dict(items)
+
+
 def shops_of(npc_id: str) -> List[str]:
-    """该 NPC 可开的商店列表。Lua 注册优先于硬编码配置。"""
-    if str(npc_id) in _LUA_SHOPS:
-        return list(_LUA_SHOPS[str(npc_id)])
-    return list(SHOP_NPCS.get(npc_id) or [])
+    """该 NPC 可开的商店列表。"""
+    return list(_LUA_SHOPS.get(str(npc_id)) or [])
+
+
+def shop_name(shop_id: str) -> str:
+    """商店显示名，缺省回退 shop_id。"""
+    return SHOP_NAMES.get(shop_id, shop_id)
+
+
+def shop_price(shop_id: str, item_id: str) -> Optional[int]:
+    """脚本为该店该物品定的买价；无脚本价返回 None。"""
+    return SHOP_PRICING.get(shop_id, {}).get(item_id)
 
 
 def item_price(item_id: str, assets=None) -> Optional[int]:
-    """物品买价：优先 WZ price 字段；缺省回退兜底表（卷轴等自制物品）。"""
+    """物品基础买价：优先 WZ price 字段；缺省回退兜底表（卷轴等自制物品）。"""
     if assets is not None:
         p = assets.item_price(item_id)
         if p is not None:
             return p
     return settings.FALLBACK_PRICES.get(item_id)
+
+
+def buy_price(shop_id: str, item_id: str, assets=None) -> Optional[int]:
+    """该店该物品的最终买价：脚本价 > WZ 价 > 兜底表。"""
+    p = shop_price(shop_id, item_id)
+    if p is not None:
+        return p
+    return item_price(item_id, assets)
 
 
 def buy(shop_id: str, item_id: str, meso: int, inventory: Inventory,
@@ -63,7 +92,7 @@ def buy(shop_id: str, item_id: str, meso: int, inventory: Inventory,
     if shop_id in SHOPS and item_id not in SHOPS[shop_id]:
         return False, meso
     if price is None:
-        price = item_price(item_id) or 0
+        price = buy_price(shop_id, item_id) or 0
     cost = price * count
     if meso < cost:
         return False, meso

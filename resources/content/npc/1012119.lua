@@ -5,15 +5,21 @@ function M.shops()
   return {
     {
       shop_id = "potions",
+      name = "药水",
       items = {
         {item_id = "02000000", price = 50},
-        {item_id = "02000003", price = 1000},
+        {item_id = "02000003", price = 300},
         {item_id = "02000001", price = 30},
+        {item_id = "02000002", price = 20},
+        {item_id = "02000002", price = 20},
+        {item_id = "02000002", price = 20},
+        {item_id = "02000002", price = 20},
         {item_id = "02000002", price = 20},
       }
     },
     {
       shop_id = "weapons",
+      name = "武器",
       items = {
         {item_id = "01452000", price = 500},
         {item_id = "01452002", price = 8000},
@@ -21,6 +27,7 @@ function M.shops()
     },
     {
       shop_id = "scrolls",
+      name = "卷轴",
       items = {
         {item_id = "02340000", price = 150},
         {item_id = "02340002", price = 200},

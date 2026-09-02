@@ -69,9 +69,12 @@ class NpcDialogueController:
                     return
                 if self._begin_quest_flow(npc):   # 仅剩「进行中未满足」的状态提示
                     return
-                buttons: List[str] = []
                 if shops_of(npc.npc_id):
-                    buttons.append("shop")
+                    # 有商店且无任务 → 直接开店，不再经气泡按钮
+                    self.ctx.storage_panel.close()
+                    self.ctx.shop_panel.open(npc.npc_id)
+                    return
+                buttons: List[str] = []
                 if npc.npc_id == STORAGE_NPC:
                     buttons.append("storage")
                 self.ctx.ui.show_dialog(npc.name,
@@ -211,16 +214,13 @@ class NpcDialogueController:
         self._quest_menu_npc = None
 
     def _dialog_button(self, key: str) -> None:
-        """NPC 对话按钮回调：打开商店 / 仓库面板。"""
+        """NPC 对话按钮回调：打开仓库面板。"""
         npc = self._talk_npc
         self.ctx.ui.hide_dialog()
         self._talk_npc = None
         if npc is None:
             return
-        if key == "shop":
-            self.ctx.storage_panel.close()
-            self.ctx.shop_panel.open(npc.npc_id)
-        elif key == "storage":
+        if key == "storage":
             self.ctx.shop_panel.close()
             self.ctx.storage_panel.open()
 
