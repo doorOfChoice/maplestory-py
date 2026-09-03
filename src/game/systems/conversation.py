@@ -79,7 +79,7 @@ class Conversation:
         lua = _sandbox()
         g = lua.globals()
         for name, fn in env.items():
-            g[name] = fn
+            g[name] = _bind_host_fn(lua, fn)
         ctx_tbl = lua.table_from(ctx_view)
         mod = lua.execute(lua_src, "conversation")
         talk = mod["talk"]
@@ -179,6 +179,27 @@ def _sandbox() -> LuaRuntime:
     for name in _FORBIDDEN:
         g[name] = None
     return lua
+
+
+def _bind_host_fn(lua: LuaRuntime, fn: Callable) -> Callable:
+    """包一层宿主函数：list/dict 返回值折成 Lua 原生表再交给脚本。
+
+    lupa 默认把返回的 Python 序列包成 POBJECT，Lua 侧 `#t` 直接报错、
+    越界索引抛 IndexError；折表后 quest_available/quest_completable 等
+    列表函数才真正可用。标量原样透传。
+    """
+    def wrapped(*args):
+        return _to_lua_value(lua, fn(*args))
+    return wrapped
+
+
+def _to_lua_value(lua: LuaRuntime, value: Any) -> Any:
+    if isinstance(value, dict):
+        return lua.table_from({str(k): _to_lua_value(lua, v)
+                               for k, v in value.items()})
+    if isinstance(value, (list, tuple)):
+        return lua.table_from([_to_lua_value(lua, v) for v in value])
+    return value
 
 
 def make_ctx_view(player, npc_id, npc_name: str, map_id,

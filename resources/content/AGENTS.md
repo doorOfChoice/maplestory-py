@@ -1,212 +1,217 @@
 # AGENTS.md — NPC 对话/任务规则脚本（content/）
 
-本目录是「规则引擎文本」的家：每个 NPC 的对话/任务流程用 **Lua** 写成一份脚本。
+本目录是「规则引擎文本」的家：NPC 的对话流程与任务数值用 **Lua** 写成脚本。
 **改台词、改分支、给不同 NPC 定义不同任务，只改本目录的 `.lua`；不碰 Python。**
-Python 层（`src/game/systems/scripting.py` + `src/game/systems/script_api.py` + `src/game/systems/lua_quests.py`）负责把上下文
-灌进来、执行 Lua、并把 `snapshot()` 回报的内容渲染到原版 UI。
+Python 层负责装载与执行：`src/game/systems/conversation.py`（步骤图解释器，编译
+`talk()`）、`src/game/systems/script_api.py`（注册宿主全局函数）、
+`src/game/systems/lua_quests.py`（启动期扫描 `entries()`/`shops()` 翻译成任务与商店）、
+`src/game/npc_dialogue.py`（路由：talk() 脚本 > 默认会话 > 直开商店 > 寒暄）。
 
 ## 文件与命名
 
-- 一个场景/一份脚本 = 一个 `.lua` 文件，按用途命名：`advance.lua`（转职）、
-  `npc/<npc_id>.lua`（每个 NPC 一份自定义任务，如 `npc/1012119.lua`）。
-- 脚本是 Lua **模块**：最后必须 `return M`（一个导出工厂的表）。
-- 沙箱运行时通过 `scripting.build_lua_session("advance", ...)` 加载
-  `resources/content/advance.lua`；文件名即脚本名，不含 `.lua` 后缀。
+- 一个场景/一份脚本 = 一个 `.lua` 文件，按用途命名：`advance.lua`（转职会话）、
+  `npc/<npc_id>.lua`（每个 NPC 一份：任务/传送条目、商店定义、可选 `talk()`）。
+- 脚本是 Lua **模块**：最后必须 `return M`（一张导出表）。
+- 「脚本名」即相对 `content/` 的路径（不含 `.lua`）：`advance`、`npc/1012119`。
+  转职任务（`adv_*`）以 `QuestDef.script = "advance"` 指到 `content/advance.lua`。
 - **不要**在 `.lua` 里 `import` / `require` 任何游戏模块；沙箱已禁用 `package`。
 
 ## 沙箱环境
 
-- 脚本只能看到 Lua 标准库里的**纯计算**库：`string`、`table`、`math`，
+- 脚本只能看到 Lua 标准库里的**纯计算**部分：`string`、`table`、`math`，
   `setmetatable`、`pairs`、`ipairs`、`tonumber`、`tostring` 等。
-- **禁用**：`os`、`io`、`package`、`debug`、`dofile`、`loadfile`、`eval` —
-  因此不能读文件、不能执行系统命令、不能动态加载代码。
+- **禁用**：`os`、`io`、`package`、`debug`、`dofile`、`loadfile` —
+  不能读文件、不能执行系统命令、不能动态加载代码。
 - 内容为仓库内可信文本，故沙箱无需额外防护；但仍请遵守上面的限制。
 
-## 每份脚本必须导出的契约
+## talk(ctx) 契约（对话步骤图）
 
-宿主把模块加载后调用 `mod.new(ctx)` 得到一台会话，之后反复调用：
+NPC 对话 = 一张**步骤图**。`npc/<npc_id>.lua`（或转职脚本）可选导出 `talk(ctx)`：
+每次与玩家开对话时**实时调用一次**，返回会话定义表：
 
+```lua
+function M.talk(ctx)
+  local QID = "c_1012119_1"
+  return {
+    title = "托德",                      -- 面板标题；缺省用 NPC 名
+    start = "greet",                     -- 起始步名；缺省用 steps 的第一项
+    steps = {
+      greet = {
+        text = { "哟，冒险者。要点什么？" },
+        links = {
+          { label = "接任务：收集红药水",
+            show  = function(c) return quest_state(QID) == "available" end,
+            click = function(c) if accept_quest(QID) then return "accepted" end
+                                 return "busy" end },
+          { label = "交付：收集红药水",
+            show  = function(c) return quest_state(QID) == "accepted"
+                                      and #quest_completable(c.npc.id) > 0 end,
+            click = function(c) if complete_quest(QID) then return "rewarded" end
+                                 return "not_yet" end },
+          { label = "随便聊聊", click = function(c) return "chat" end },
+        },
+      },
+      accepted = { text = { "太好了！收集 10 个红药水就来找我吧。",
+                           "按 Q 查看任务日志。" } },   -- 无 links/buttons = 终态
+      rewarded = { text = { "这是你的奖励！" } },
+      not_yet  = { text = { "还差一些，继续加油！" } },
+      busy     = { text = { "现在好像接不了，回头再看看你的等级吧。" } },
+      chat     = { text = { "呵呵，看你装备渐佳，是个人物。" } },
+    },
+  }
+end
 ```
-new(ctx)                       → 会话表（记录状态，返回 self）
-session:snapshot()             → 当前该显示什么（纯数据表）
-session:choose(label)          → 一次按钮/按键选择，推进状态
-session.done                   → bool，会话是否结束（终态置 true）
-```
 
-要点：
-- 用 **冒号方法** 定义 `snapshot` / `choose`（`function M:snapshot()`），因为它们
-  需要读 `self`。宿主以 `session["snapshot"](self.session)` 方式调用。
-- `new` 用**点方法**（`function M.new(ctx)`），宿主以 `mod["new"](ctx)` 调用。
-- `choose(label)` 里，但凡对话**已经结束**，就必须 `self.done = true`；否则
-  游戏会把当前画面一直渲染下去。
+参考实现：`npc/1012119.lua`（任务链接显隐）与 `advance.lua`（buttons 确认流）。
 
-## snapshot() 返回表字段
+### 会话定义字段
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `npc` | string | 说话人名字（一般取 `self.ctx.npc_name`） |
-| `lines` | 数组[string] | 本次要显示的文本行，按顺序渲染 |
-| `mode` | string | UI 组件：`"quest"`（任务/确认框）、`"dialog"`（寒暄气泡）、`"menu"`（多任务列表）。当前转职路径始终以 `"quest"` 渲染 |
-| `options` | 数组[string] | 可选按钮标签。为空 = 终态陈述（按「确定」结束） |
+| 字段 | 类型 | 缺省 | 说明 |
+|---|---|---|---|
+| `title` | string | NPC 名 | 面板标题 |
+| `start` | string | `steps` 首项 | 起始步名 |
+| `steps` | 表/string→step | **必填** | 步骤集合；缺 `steps` 视为脚本错误 |
 
-> 数组自动从 Lua 的 1 起始索引折成 Python 数组；数组里是字符串标签。
+### 步骤（step）字段
 
-## 可读变量 ctx（只读视图，Lua 读到标量/嵌套表，不持有真实对象）
+| 字段 | 类型 | 缺省 | 说明 |
+|---|---|---|---|
+| `text` | 数组[string] 或 function(ctx)→数组 | 空 | 黑文本行，按序渲染。函数式文本**惰性求值**：每次刷新面板（含点击之后）重新调用，可读到最新副作用结果 |
+| `links` | 数组[link] | 空 | 蓝字交互行，按序渲染 |
+| `buttons` | 表 `{yes=目标, no=目标}` | 无 | 渲染 BtYes/BtNo；目标为**步名字符串**或 **function(ctx)**（先执行副作用，返回步名或 `nil`=结束） |
+| `next` | string | 无 | 终态按「确定」后的跳转步名；缺省 = 结束对话 |
 
-宿主把真实上下文转成只读表 `ctx`，当前暴露：
+### 链接（link）字段
+
+| 字段 | 类型 | 缺省 | 说明 |
+|---|---|---|---|
+| `label` | string 或 function(ctx)→string | 必填 | 蓝字文本。函数式 label 在**开会话时求值一次**（不随后续刷新重算） |
+| `note` | number | 0 | 行右侧 `Lv n` 灰标注；0 不画 |
+| `show` | function(ctx)→boolean | 恒显示 | 渲染前调用；false 整行隐藏、**不占点击序号** |
+| `click` | function(ctx)→string/nil | 结束 | 先执行副作用（宿主函数），返回步名跳转；返回 `nil` = 结束对话 |
+
+### 结束标记（隐式）
+
+- **无 `links` 且无 `buttons` 的步骤 = 终态**：画 BtOK，按确定/回车走 `next`（缺省结束）。
+- 任何 `click` / 按钮函数返回 `nil` → 立即结束。不设显式 `end` 字段。
+
+### 按键与鼠标路由
+
+- 回车/空格 = `confirm`：有 `buttons.yes` 触发 yes；终态则等同按 BtOK。
+- Esc = `close`：有 `buttons.no` 走 no 分支，否则直接结束。
+- 点面板外 → 收起会话；走远（>140px）、切图、重生 → 会话销毁。
+
+### 运行时语义
+
+- 解释器**不持久化**：每次开对话重新调 `talk(ctx)` 建模，所有 `show` 条件天然是
+  「此刻」的；点击链接前也会重新求值一遍可见性。
+- `text`/`label` 目前是**原样渲染**（不跑 `render_markup`，`\n` 也不会自动分行）：
+  请写成多个数组元素、直接给白话文本；需要物品/怪物名就自己拼字。
+  （`entries()` Say 槽位的默认对话文本才会被宿主做官方标记替换，见下文。）
+
+### 错误处理
+
+| 位置 | 行为 |
+|---|---|
+| `talk()` 加载/调用抛错、缺 `talk`/`steps`、返回 `nil` | 整个会话弃用，回落下一优先级（默认会话或寒暄），记 warning |
+| 单个 `show` 抛错 | 仅该链接隐藏，其余正常，记 warning |
+| `click` / 按钮函数抛错 | 结束会话，记 warning（已发生的宿主副作用保留） |
+| click 返回不存在的步名 | 结束会话，记 warning |
+
+单脚本失败隔离：一个 NPC 的脚本坏了不影响其它 NPC。
+
+## 可读变量 ctx（只读视图，纯数据）
+
+宿主每次开会话重建只读表，Lua 读到标量/嵌套表，不持有真实对象：
 
 | 路径 | 类型 | 含义 / 值域 |
 |---|---|---|
 | `ctx.player.level` | number | 玩家等级 |
-| `ctx.player.job` | number | 职业代码（`0`=新手、`3000`=弓箭手...） |
-| `ctx.jobdef.code` | number | 目标职业代码 |
-| `ctx.jobdef.name` | string | 目标职业名（如 `弓箭手`） |
-| `ctx.jobdef.advance_lv` | number | 转职所需等级 |
-| `ctx.npc_name` | string | 当前 NPC 名字 |
+| `ctx.player.job` | number | 职业代码（`0`=新手、`3000`=弓箭手…） |
+| `ctx.player.map` | number | 当前地图 id（出租车按图过滤用） |
+| `ctx.npc.id` | string | 当前 NPC 的 id |
+| `ctx.npc.name` | string | 当前 NPC 名字 |
+| `ctx.jobdef.code/.name/.advance_lv` | number/string | 目标职业信息；**仅转职会话携带** |
 
-## 可调用的全局函数（副作用在宿主侧执行）
+## 可调用的宿主全局函数（副作用在宿主侧执行）
 
-函数由宿主注册到运行时，Lua 直接按名调用。**参数传基本类型（string/number/boolean），
-不要传 ctx 表进宿主函数**。
+函数由宿主（`script_api.make_globals`）注册到沙箱，Lua 直接按名调用。
+**参数传基本类型（string/number/boolean）**；返回的列表/表（如
+`quest_completable`）会被折成 Lua 原生表，`#t`、`t[1].field`、`ipairs` 均可用。
+注册按宿主上下文分级：**没注册的函数在脚本里不存在**，调用即报错（触发上表兜底）。
 
-### 转职（所有内容脚本都有）
+### 转职（仅转职会话注册：宿主 ctx 携带 `jobdef`）
 | 函数 | 返回 | 副作用 |
 |---|---|---|
-| `can_advance()` | boolean | 无。判定当前玩家能否转职为 `ctx.jobdef` |
-| `advance_job()` | nil | 改真身职业（附技能/武器），并置宿主 `ctx.advanced = true` |
+| `can_advance()` | boolean | 无。判定玩家能否转职为 `ctx.jobdef` |
+| `advance_job()` | nil | 改真身职业（附技能/武器），置宿主 `advanced` 标记；会话结束时宿主播升级音效并把对应 `adv_*` 任务置完成 |
 
-### 发奖（仅当宿主 ctx 携带 `world` 时才注册）
-> 转职脚本的宿主上下文没有 `world`，故 `give_reward` 在转职脚本里**不存在**；
-> 给 NPC 写任务/自定义脚本时宿主会传 `world`，届时可用。
-
+### 发奖与切图（NPC 会话注册：宿主携带 `world`）
 | 函数 | 参数 | 返回 | 说明 |
 |---|---|---|---|
-| `give_reward(exp, meso, items)` | number/table | boolean | 直接给玩家发奖励：经验、金币、物品；三参数均可省略（传 0 / nil / 空表跳过） |
+| `give_reward(exp, meso, items)` | number/table | boolean | 直接发奖：经验、金币、物品；参数可省略。`items` 为 `[[item_id, count], ...]`，`count` 负数 = 收回 |
+| `teleport(map_id)` | string/number | boolean | 登记切图请求；本次交互后会话关闭并由宿主执行切图 |
 
-- `exp` / `meso`：number，大于 0 才发放。
-- `items`：嵌套数组 `[[item_id, count], ...]`，如 `{{2000000, 3}}` = 物品 2000000 给 3 个；
-  `count` 为负表示**收回**该物品。
-- 成功返回 `true`。自定义脚本可在发奖后依返回值切换对话分支。
-
-### 任务（仅当宿主 ctx 携带 `world` / `quest_defs` 时才注册）
-> 目前 `advance.lua` 的宿主上下文**没有**这两者，故下述任务函数在转职脚本里**不存在**；
-> 给 NPC 写任务脚本时，宿主会传相关上下文，届时可用。
-
+### 任务（NPC 会话注册：宿主携带 `world` + `quest_defs`）
 | 函数 | 参数 | 返回 | 说明 |
 |---|---|---|---|
-| `quest_available(npc_id)` | number/string | 数组[{qid,title,level,state}] | 该 NPC 可接取 + 可交付的任务 |
-| `quest_completable(npc_id)` | number/string | 数组[{qid,title,level,state}] | 仅可交付的任务（state=`complete`） |
+| `quest_available(npc_id)` | number/string | 数组[{qid,title,level,state}] | 该 NPC 可接取 + 可交付的任务（state=`offer`/`complete`） |
+| `quest_completable(npc_id)` | number/string | 数组[{qid,title,level,state}] | 仅可交付的（state=`complete`） |
 | `quest_state(qid)` | number/string | string | `"available"/"accepted"/"completed"` |
-| `accept_quest(qid)` | number/string | boolean | 接取任务（成功 true；条件不足 false） |
-| `complete_quest(qid)` | number/string | boolean | 完成任务并**发奖励**（exp/金币/物品）；失败 false |
-| `quest_info(qid)` | number/string | 表{name,reward_exp,reward_money} | 任务奖励/名称信息，可拼进发奖文案 |
+| `accept_quest(qid)` | number/string | boolean | 接取任务（条件不足 false） |
+| `complete_quest(qid)` | number/string | boolean | 完成任务并**按 QuestDef 发奖**（exp/金币/物品、扣 end_items）；条件不足 false |
+| `quest_info(qid)` | number/string | 表{name,reward_exp,reward_money} | 任务信息，未知 qid 返回空表 |
 
-返回的 task 数组元素是表：`{ qid=string, title=string, level=number, state=string }`。
+### 商店数据（NPC 会话注册：宿主携带 `world`）
+| 函数 | 参数 | 返回 | 说明 |
+|---|---|---|---|
+| `get_shop_items(shop_id)` | string | 数组[{item_id,price}] | 货架与买价（可用于 `talk()` 里报价文案） |
+| `shop_buy(item_id, count)` / `shop_sell(item_id, count)` | string/int | boolean | 已注册但**暂不可用**，见「未提供」 |
 
-## 选项标签约定（重要）
+### 未提供 / 后续扩展
 
-宿主按钮路由把「回车/空格」映射为 `yes`、把「Esc」映射为 `no`，其余按标签直传；
-当没有更匹配项时统一回落到 `ok`。因此：
+- `open_shop()`：**不存在**。`talk()` 完全接管对话后，原先默认菜单里的「商店」链接
+  入口也随之消失（如 `npc/1012119.lua` 演示）。商店入口留待后续以宿主函数形式提供。
+- `shop_buy`/`shop_sell` 依赖宿主 `_current_shop` 定位货架，当前宿主从不置位，
+  故在 `talk()` 里调用恒返回 `false`；对话内交易与 `open_shop` 一并留待后续。
+- 句内蓝字标记（`#L…#l` 内嵌渲染）、`talk()` 文本的官方标记替换：本轮不做。
 
-- **选择型状态**：`options = { "yes", "no" }`。
-- **陈述/终态**：`options = {}`（空）或 `{ "ok" }`。
-- 终态时：`choose("yes"|"no"|"ok"|...)` 只要代表「确定/结束」就应 `self.done = true`。
+## 对话路由：talk() 与默认会话的关系
 
-转职流程示范（confirm「yes」→ advanced「恭喜」，advanced「ok」才结束）：
-```lua
-function M:choose(label)
-  if self.state == "confirm" and label == "yes" then
-    advance_job()              -- 改真身；不要在此时置 done
-    self.state = "advanced"
-    return
-  elseif self.state == "confirm" and label == "no" then
-    self.state = "declined"
-    return
-  end
-  self.done = true             -- 其余（含 advanced 的 ok）一律结束
-end
-```
+`npc_dialogue.try_talk` 按优先级：
 
-## 编写规范
+1. NPC 有 `content/npc/<id>.lua` 且导出 `talk()` → **完全接管对话**（默认菜单不出现）。
+2. 否则该 NPC 有任务/进行中/传送条目 → 宿主**自动合成默认会话**（一张蓝字列表）：
+   可交付在前、可接任务、进行中、传送目的地（剔除玩家当前图）、有商店则末尾加
+   「商店」链接。点任务进入由 `entries()` Say 槽文本组成的子会话。
+3. 有商店且以上皆空 → 直接开商店面板。
+4. 其余 → 寒暄气泡（仓库 NPC 带 storage 按钮）。
 
-- 语言：文件内注释用简体中文；每个状态对应 `snapshot()` 的一个分支。
-- 用 `setmetatable({}, { __index = M })` 建会话表，把 `self.ctx`、`self.state`、
-  `self.done` 存在 `self` 上。
-- 需要插值/格式化用 Lua 字符串拼接 `..` 或 `string.format("（当前 Lv%d...）", ...)`。
-- 一个状态一个 `lines` 数组；语义要拆分就多写几行。
-- 官方任务的奖励/文案数值**不要写死在 Lua**——任务数值在任务数据表，脚本只通过
-  `quest_info`/`ctx` 取；**自定义发奖**则相反，直接调 `give_reward(exp, meso, items)`
-  把数值写在脚本里（这是自定义内容与官方任务的最大区别）。
-- 改完可用 `uv run python -m game.main` 进游戏试；或跑单测
-  `uv run pytest src/tests/test_lua_advance.py`（转职脚本路径）。
-- 新增 `.lua` 后，宿主调用侧需传对应的 `build_lua_session("<脚本名>", ...)`；
-  脚本名要一致。
+因此：写 `talk()` 就要自己负责全部入口（任务、聊天等）；只想改数值/文案、
+不加新流程时，可以不写 `talk()`，让宿主合成默认会话。
 
 ## 自定义 NPC 条目脚本（npc/<npc_id>.lua）
 
-每个 NPC 可在 `npc/<npc_id>.lua` 里定义**多条带类型条目**（任务、传送……），启动时由
-`lua_quests.load_lua_quest_defs()` 扫描 `resources/content/npc/` 加载并分流：
-quest 条目翻译成 `QuestDef` 合并进 `quest_defs`（与官方任务走同一套状态机/存档/头顶灯泡），
-teleport 条目注册为该 NPC 的传送目的地（出租车）。玩家与 NPC 对话时，任务与
-传送条目合成**同一个选择菜单**（UtilDlgEx 蓝字列表），点选按类型路由。
-
-### 导出函数契约
-
-脚本可导出以下函数（均可选）：
+每个 NPC 可在 `npc/<npc_id>.lua` 里导出以下内容，启动期由
+`lua_quests.load_lua_quest_defs()` 扫描 `resources/content/npc/` 加载：
 
 | 函数 | 返回 | 说明 |
 |---|---|---|
-| `entries(ctx)` | 数组[条目] | NPC 对话条目；每条带 `type` 字段：`"quest"`（缺省）或 `"teleport"` |
+| `entries(ctx)` | 数组[条目] | 任务/传送条目；`type` 字段：`"quest"`（缺省）或 `"teleport"` |
 | `shops()` | 数组[ShopDef] | NPC 的商店定义 |
+| `talk(ctx)` | 会话定义 | 可选；见上文契约，接管该 NPC 的对话 |
 
-### 商店定义（`shops()`）
-
-返回商店定义数组，每个元素是一个表：
-
-```lua
-{
-  shop_id = "potions",
-  name = "药水",
-  items = {
-    {item_id = "02000000", price = 50},
-    {item_id = "02000003", price = 100},
-  }
-}
-```
-
-要点：
-- Lua 是商店的**唯一事实来源**：货架、买价、名称全部由 `shops()` 定义，
-  Python 不再有硬编码商店；未定义 `shops()` 的 NPC 无商店
-- `shop_id` 由系统自动生成（`<npc_id>_shop_<序号>`），也可在脚本中显式指定
-- `name` 为页签显示名，缺省回退 `shop_id`
-- `items` 中的 `price` 为买价（脚本价优先于 WZ `info.price` 与兜底表）；卖价按 `SELL_RATE` 自动计算
-
-### 传送条目（`type = "teleport"`）
-
-`entries()` 里的传送条目每个元素是一个表（出租车等 NPC 用）：
-
-```lua
-function M.entries(ctx)
-  return {
-    { type = "teleport", label = "射手村",   map = "100000000" },
-    { type = "teleport", label = "魔法密林", map = "101000000" },
-  }
-end
-```
-
-要点：
-- Lua 是传送目的地的**唯一事实来源**：Python 不再持有出租车名单或目的地表
-- `label` 为菜单显示名，`map` 为目标地图 id（字符串）
-- 目的地可包含本镇：运行时按玩家当前地图自动剔除
-- 玩家点选后经 `Game._enter_map` 切图，落在目标图的 `sp` 出生门
-- 未知 `type` 的条目会被跳过并记录 warning
+`entries(ctx)` 的 `ctx` 恒为 `nil`（加载发生在启动期，玩家尚未构建）：任务条件
+一律写在定义字段（`lvmin`/`kills`/`end_items` 等）由 `QuestLog` 判定，运行时
+条件请写在 `talk()` 的 `show` 里。quest 条目按文件名+序号生成 qid
+`c_<npc_id>_<序号>`（如 `c_1012119_1`），`talk()` 里的 `accept_quest` 等就引用它。
 
 ### 任务条目（`type = "quest"`，缺省）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `type` | string | `"quest"` 或省略（缺省即 quest） |
-| `name` | string | 任务名（必填，缺失则该条任务跳过） |
+| `name` | string | 任务名（必填，缺失则该条跳过） |
 | `lvmin` / `lvmax` | number | 接取等级下限 / 上限（0 = 不限） |
 | `jobs` | 数组[number] | 职业限制，空 = 不限 |
 | `start_items` | 数组[[id,count]] | 接取时需持有该物品 |
@@ -224,24 +229,64 @@ end
 | `complete_stop` | 数组[string] | 条件未满足时的提示 |
 | `desc0` / `desc1` / `desc2` | string | 任务日志描述（可选） |
 
-对话文本支持官方标记（`render_markup`）：`#t<id>#` 物品名、`#o<id>#` 怪物名、`#m<id>#` 地图名、`#p<id>#` NPC 名、`#b/#r/#k` 颜色、`\n` 换行。
+> `accept_lines` 等六个 Say 槽位是「NPC **未写 `talk()`** 时默认子会话」的对话文本；
+> 写了 `talk()` 则完全不用它们（但任务数值字段仍然生效：接取/交付判定、奖励发放、
+> 头顶灯泡、存档）。缺省槽位有宿主兜底文案。
 
-### ctx 参数
+任务对话文本槽位支持官方标记（宿主 `render_markup`）：`#t<id>#` 物品名、
+`#o<id>#` 怪物名、`#m<id>#` 地图名、`#p<id>#` NPC 名、`#b/#r/#k` 颜色、`\n` 换行。
 
-当前加载发生在启动期（玩家尚未构建），`ctx` 恒为 `nil`。任务条件一律写在定义字段里
-（`lvmin` / `kills` / `end_items` 等），由 `QuestLog` 判定，脚本内**不要**依赖 `ctx`。
+### 传送条目（`type = "teleport"`）
+
+```lua
+function M.entries(ctx)
+  return {
+    { type = "teleport", label = "射手村",   map = "100000000" },
+    { type = "teleport", label = "魔法密林", map = "101000000" },
+  }
+end
+```
+
+- Lua 是传送目的地的**唯一事实来源**：Python 不再持有出租车名单或目的地表。
+- `label` 为菜单显示名，`map` 为目标地图 id（字符串）。
+- 不写 `talk()` 时目的地进默认会话蓝字列表（自动剔除玩家当前图）；
+  写了 `talk()` 则在链接里自己调 `teleport(map)`。
+- 玩家点选后经 `Game._enter_map` 切图，落在目标图的 `sp` 出生门。
+- 未知 `type` 的条目会被跳过并记录 warning。
+
+### 商店定义（`shops()`）
+
+```lua
+{
+  shop_id = "potions",          -- 可省略，自动生成 <npc_id>_shop_<序号>
+  name = "药水",                 -- 页签显示名，缺省回退 shop_id
+  items = {
+    {item_id = "02000000", price = 50},
+    {item_id = "02000003", price = 100},
+  }
+}
+```
+
+- Lua 是商店的**唯一事实来源**：货架、买价、名称全部由 `shops()` 定义，
+  Python 不再有硬编码商店；未定义 `shops()` 的 NPC 无商店。
+- `items` 中的 `price` 为买价（脚本价优先于 WZ `info.price` 与兜底表）；
+  卖价按 `SELL_RATE` 自动计算。
 
 ### 沙箱与失败隔离
 
-- 与转职脚本同一沙箱：禁用 `os`/`io`/`package`/`debug`/`dofile`/`loadfile`。
-- 单个脚本加载失败或单条任务翻译失败，只跳过该条并记录 warning，不影响其它 NPC/任务。
+- 与 `talk()` 同一套沙箱：禁用 `os`/`io`/`package`/`debug`/`dofile`/`loadfile`。
+- 单个脚本加载失败或单条任务翻译失败，只跳过该条并记录 warning，
+  不影响其它 NPC/任务。
 
-## 参照实现
+## 编写规范
 
-本目录 `advance.lua` 是一份可运行的完整示例（转职会话）：
-
-- `new`：按 `ctx.player.job` / `can_advance()` 决定入口状态。
-- `snapshot`：按 `self.state` 返回 `{npc,lines,mode,options}`。
-- `choose`：`confirm` 时 yes/no 分别转 `advanced`/`declined`；其余置 `done = true`。
-
-新增 NPC 脚本或自定义任务时，照此结构复制一份，改状态机与文案即可。
+- 语言：文件内注释用简体中文；一个步骤一个 `text` 数组；语义要拆分就多写几行。
+- 插值/格式化用 Lua 拼接 `..` 或 `string.format("（当前 Lv%d…）", ctx.player.level)`。
+- 官方/自定义**任务数值**写在 `entries()` 定义字段里，由 `QuestLog` 判定与发奖；
+  **自定义发奖**（不属于任何任务的赠与）则相反——直接 `give_reward` 把数值写在
+  `talk()` 里。
+- `show` 条件只读 `ctx` 与宿主查询函数；副作用（accept/complete/发奖/切图）只在
+  `click`/按钮函数里做。
+- 改完可用 `uv run python -m game.main` 进游戏试；或跑单测：
+  `uv run pytest src/tests/test_lua_talk_demo.py src/tests/test_lua_advance.py`
+  （1012119 演示与转职脚本路径）。

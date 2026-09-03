@@ -1,4 +1,4 @@
--- 1012119（商店 NPC 托德）自定义任务与商店示例
+-- 1012119（商店 NPC 托德）自定义任务、商店与 talk() 对话演示
 local M = {}
 
 function M.shops()
@@ -33,6 +33,40 @@ function M.shops()
         {item_id = "02340002", price = 200},
         {item_id = "02340001", price = 100},
       }
+    },
+  }
+end
+
+-- talk() 完全接管对话（默认的任务/商店菜单不再出现）。
+-- 当前宿主未提供 open_shop，故本演示暂无商店入口（见 content/AGENTS.md「未提供」）。
+function M.talk(ctx)
+  local QID = "c_1012119_1"
+  return {
+    title = "托德",
+    start = "greet",
+    steps = {
+      greet = {
+        text = { "哟，冒险者。要点什么？" },
+        links = {
+          { label = "接任务：收集红药水",
+            show  = function(c) return quest_state(QID) == "available" end,
+            click = function(c) if accept_quest(QID) then return "accepted" end
+                                 return "busy" end },
+          { label = "交付：收集红药水",
+            show  = function(c) return quest_state(QID) == "accepted"
+                                      and #quest_completable(c.npc.id) > 0 end,
+            click = function(c) if complete_quest(QID) then return "rewarded" end
+                                 return "not_yet" end },
+          { label = "随便聊聊",
+            click = function(c) return "chat" end },
+        },
+      },
+      accepted = { text = { "太好了！收集 10 个红药水就来找我吧。",
+                           "按 Q 查看任务日志。" } },
+      rewarded = { text = { "这是你的奖励！" } },
+      not_yet  = { text = { "还差一些，继续加油！" } },
+      busy     = { text = { "现在好像接不了，回头再看看你的等级吧。" } },
+      chat     = { text = { "呵呵，看你装备渐佳，是个人物。" } },
     },
   }
 end

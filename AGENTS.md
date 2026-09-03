@@ -48,6 +48,7 @@ WZ (.wz) → wzpy: WzFile.open → 解密 → 目录树 → 惰性属性解析
 - **非模态对话**：NPC/任务对话不暂停世界
 - **常量集中**：所有物理/战斗/背包常量集中在 `src/game/settings.py`（含文件头说明）
 - **分层子包**：`src/game/` 内按职责分四层 —— `core/`（纯逻辑/工具：physics/stats/jobs/animation/…）、`entities/`（player/monster/npc）、`systems/`（combat/skills/quests/inventory/…）、`render/`（assets/ui/panels/minimap/…）；顶层留编排（`game.py`/`context.py`/`world.py`/`settings.py`/…）。依赖方向 `entities→core/render`、`systems→core/entities/render`、`render→core`，保持无环。
+- **统一对话解释器**：对话统一走 `systems/conversation.py` 步骤图解释器（Lua `talk()` 契约 + `quest_flow.py` Say 槽适配器），`npc_dialogue.py` 只做路由（talk() > 默认会话 > 直开商店 > 寒暄）；契约见 `resources/content/AGENTS.md`。
 
 ## 样式约定
 

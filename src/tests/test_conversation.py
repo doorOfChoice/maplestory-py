@@ -232,3 +232,21 @@ def test_missing_talk_raises():
     """脚本没有 talk() → LookupError，供调用方回落。"""
     with pytest.raises(LookupError):
         Conversation.from_source("return {}", {}, {})
+
+
+def test_host_list_return_folded_to_lua_table():
+    """宿主函数返回 list[dict] → Lua 侧 # 与字段访问可用（折成原生表）。"""
+    src = """
+    local M = {}
+    function M.talk(ctx)
+      return { start = "s", steps = { s = { text = function(c)
+        local t = items()
+        return { tostring(#t), tostring(t[1].n), tostring(#empty()) }
+      end } } }
+    end
+    return M
+    """
+    env = {"items": lambda: [{"n": 5}, {"n": 6}], "empty": lambda: []}
+    ctx = make_ctx_view(SimpleNamespace(level=1, job=0), "1", "n", 0)
+    conv = Conversation.from_source(src, env, ctx)
+    assert conv.current().lines == ["2", "5", "0"]
