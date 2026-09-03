@@ -1,6 +1,6 @@
 """背景逐帧绘制：视差公式 / 平铺铺满视口 / 自动滚动 / 选帧 / front 分层。
 
-复刻原版客户端背景语义：屏幕锚点 = (x, y) - 相机 × (100 + r) / 100；
+复刻原版客户端背景语义：屏幕锚点 = (x, y) + 相机 × (rx / 100)；
 type 1/3/4/6/7 横向平铺、2/3/5/6/7 纵向平铺（步长 cx/cy，0 取图宽/高），
 平铺范围铺满视口；type 4-7 另加 rx/ry 随时间自动滚动。
 """
@@ -40,17 +40,35 @@ def test_type0_drawn_once_at_anchor_minus_origin():
 
 
 def test_parallax_moves_background_slower_than_camera():
-    """视差：rx=-5 时背景只随相机移动 95%（原版 (100+rx)/100 公式）。"""
+    """视差：rx=-5 时背景只随相机移动 5%（原版 (rx/100) 公式，rx=0 固定屏幕）。"""
     layer = make_layer(w=100, h=80, x=500, y=0, rx=-5)
     blits = layer_blits(layer, 1000.0, 0.0, VIEW_W, VIEW_H, 0.0)
-    assert blits[0][1] == 500 - 950
+    assert blits[0][1] == 500 - 50
 
 
 def test_parallax_vertical_with_ry():
     """ry 同理作用于纵向。"""
     layer = make_layer(w=100, h=80, x=0, y=400, ry=-10)
     blits = layer_blits(layer, 0.0, 500.0, VIEW_W, VIEW_H, 0.0)
-    assert blits[0][2] == 400 - 450
+    assert blits[0][2] == 400 - 50
+
+
+def test_rx_neg100_is_world_anchored():
+    """rx=-100 时与相机 1:1 平移（世界锚定），绝不能被锁定在屏幕（会「跟着玩家跑」）。"""
+    layer = make_layer(w=100, h=80, x=500, y=300, rx=-100, ry=-100)
+    a0 = layer_blits(layer, 0.0, 0.0, VIEW_W, VIEW_H, 0.0)[0]
+    a300 = layer_blits(layer, 300.0, 200.0, VIEW_W, VIEW_H, 0.0)[0]
+    assert a0[1:] == (500, 300)
+    assert a300[1:] == (200, 100)
+
+
+def test_rx_zero_is_screen_fixed():
+    """rx=0 时背景固定屏幕（如天空），不随相机移动。"""
+    layer = make_layer(w=100, h=80, x=500, y=300, rx=0, ry=0)
+    a0 = layer_blits(layer, 0.0, 0.0, VIEW_W, VIEW_H, 0.0)[0]
+    a300 = layer_blits(layer, 300.0, 200.0, VIEW_W, VIEW_H, 0.0)[0]
+    assert a0[1:] == (500, 300)
+    assert a300[1:] == (500, 300)
 
 
 def test_type3_tiles_cover_whole_view_without_gaps():

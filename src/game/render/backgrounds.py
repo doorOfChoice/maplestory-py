@@ -1,7 +1,7 @@
 """背景逐帧渲染：相机视差 + 平铺铺满视口（复刻原版客户端 CMapleMap 背景绘制）。
 
 原版客户端每帧相对相机绘制 back 层，而非把背景烤进整图：
-  · 屏幕锚点 = (x, y) - 相机左上角 × (100 + r) / 100（r = rx/ry，视差系数）
+  · 屏幕锚点 = (x, y) + 相机左上角 × (rx / 100)（视差系数，rx=0 固定屏幕、rx=-100 世界锚定）
   · type 4-7 另加随时间自动滚动（rx/ry 作速度，rx * t / 200）
   · type 1/3/4/6/7 横向平铺、2/3/5/6/7 纵向平铺，步长 cx/cy（0 取图宽/高）
   · 平铺范围铺满整个视口 —— 宽视口下也不会出现烤图的硬边 / 空缺
@@ -74,8 +74,11 @@ def layer_blits(layer: BackLayer, cam_x: float, cam_y: float,
     surface, (ox, oy), _delay = layer.frames[Animation.frame_at(layer.frames, t_ms)]
     w, h = surface.get_size()
 
-    ax = layer.x - cam_x * (100 + layer.rx) / 100.0
-    ay = layer.y - cam_y * (100 + layer.ry) / 100.0
+    # 屏幕锚点 = 图层锚点 + 相机左上角 × (rx / 100)。视差系数直接取 rx/100：
+    # rx=0 固定屏幕（天空），rx<0 随相机方向滚动（小于 |rx|% 越拖慢），rx=-100 恰好地效等比（随地图平移）。
+    # 注意与「未缩放的地图整图」保持一致：rx=-100 时屏幕位移 = 相机位移，即世界锚定。
+    ax = layer.x + cam_x * layer.rx / 100.0
+    ay = layer.y + cam_y * layer.ry / 100.0
     if layer.bg_type in _H_SCROLL:
         ax += layer.rx * t_ms / 200.0
     if layer.bg_type in _V_SCROLL:
