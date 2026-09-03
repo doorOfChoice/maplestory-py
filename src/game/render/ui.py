@@ -61,10 +61,11 @@ DLG_TEXT_X = 16        # 白纸左缘内缩
 DLG_TEXT_W = 348       # 白纸内文字换行宽度
 DLG_LINE_H = 20
 
-# 多任务选择列表：沿用 UtilDlgEx 白纸面板，条目为可点击蓝字行
+# 会话面板：黑正文行与蓝字链接行共存于同一 UtilDlgEx 白纸面板
 LIST_ROW_H = 26
 LIST_PAD_TOP = 12
 LIST_PAD_BOTTOM = 10
+CONV_TEXT_LINK_GAP = 6     # 黑文本与蓝字同时存在时的节间空隙
 QUEST_LIST_BLUE = (51, 102, 204)
 QUEST_LIST_BLUE_HOVER = (120, 175, 250)
 
@@ -91,15 +92,15 @@ class UI:
         # ── 对话框按钮（商店/仓库入口）────────────────────────────
         self._dialog_button_keys: List[str] = []
         self.dialog_buttons: List[Tuple[pygame.Rect, str]] = []
-        # ── 任务对话框（模块化，带选项按钮）────────────────────
+        # ── 会话面板（黑正文行 + 蓝字链接行 + 按钮，同一 UtilDlgEx）──
         self.quest_visible = False
         self.quest_title = ""
-        self.quest_lines: List[str] = []            # 已渲染文本行
+        self.quest_lines: List[str] = []                        # 黑正文行（原文）
+        self.quest_links: List[Tuple[str, int]] = []            # 蓝字 (标注, Lv)
+        self.quest_button_keys: List[str] = []                  # yes/no 子集
+        self.quest_terminal = False                             # 终态画 BtOK
         self.quest_rect: Optional[pygame.Rect] = None
-        self.quest_buttons: List[Tuple[pygame.Rect, str]] = []   # (rect, key)
-        self._quest_buttons_keys: List[str] = ["ok"]
-        # 多任务选择列表：非空时 draw_quest 渲染可点击蓝字条目（替代正文+按钮）
-        self.quest_entries: List[Tuple[str, int]] = []           # (标题, 等级)
+        self.quest_buttons: List[Tuple[pygame.Rect, str]] = []  # (rect, key)
         self.quest_entry_rects: List[Tuple[pygame.Rect, int]] = []
         self._plate_cache: dict = {}
         self._balloon_cache: dict = {}
@@ -144,41 +145,62 @@ class UI:
         return None
 
     # ── 任务对话框 ─────────────────────────────────────────────────
-    def show_quest(self, title: str, lines: List[str],
-                   buttons: Optional[List[str]] = None) -> None:
-        """显示任务对话框。buttons: ['yes','no'] / ['ok'] 等按钮键。"""
-        self.quest_visible = True
-        self.quest_title = title
-        self.quest_lines = list(lines)
-        self.quest_buttons = []
-        self._quest_buttons_keys = list(buttons or ["ok"])
-        self.quest_entries = []
-        self.quest_entry_rects = []
+    @property
+    def quest_entries(self) -> List[Tuple[str, int]]:
+        """旧接口兼容别名：蓝字链接行（迁移完成后可删）。"""
+        return self.quest_links
 
-    def show_quest_list(self, title: str, entries: List[Tuple[str, int]]) -> None:
-        """显示多任务选择列表：同一 UtilDlgEx 白纸面板，条目为可点击蓝字行。
+    def show_conv(self, title: str, lines: List[str],
+                  links: List[Tuple[str, int]], buttons: List[str],
+                  terminal: bool) -> None:
+        """统一会话面板：黑正文行 + 蓝字链接行（(label, Lv 标注)）+ 按钮。
 
-        ``entries`` 为 (任务标题, 等级) 列表；等级为 0 时不显示右侧 Lv 标注。
+        buttons 为 ["yes","no"] 子集；terminal 时画 BtOK。
         """
         self.quest_visible = True
         self.quest_title = title
-        self.quest_lines = []
+        self.quest_lines = list(lines)
+        self.quest_links = list(links)
+        self.quest_button_keys = [b for b in buttons if b in ("yes", "no")]
+        self.quest_terminal = terminal
         self.quest_buttons = []
-        self._quest_buttons_keys = []
-        self.quest_entries = list(entries)
         self.quest_entry_rects = []
+
+    def show_quest(self, title: str, lines: List[str],
+                   buttons: Optional[List[str]] = None) -> None:
+        """显示任务对话框（show_conv 薄壳）。buttons: ['yes','no'] / ['ok'] 等。"""
+        bs = list(buttons or ["ok"])
+        self.show_conv(title, lines, [], [b for b in bs if b != "ok"], "ok" in bs)
+
+    def show_quest_list(self, title: str, entries: List[Tuple[str, int]]) -> None:
+        """显示多任务选择列表（show_conv 薄壳）：条目为可点击蓝字行。
+
+        ``entries`` 为 (任务标题, 等级) 列表；等级为 0 时不显示右侧 Lv 标注。
+        """
+        self.show_conv(title, [], entries, [], False)
 
     def hide_quest(self) -> None:
         self.quest_visible = False
         self.quest_title = ""
         self.quest_lines = []
+        self.quest_links = []
+        self.quest_button_keys = []
+        self.quest_terminal = False
         self.quest_rect = None
         self.quest_buttons = []
-        self.quest_entries = []
         self.quest_entry_rects = []
 
-    def quest_hit(self, pos) -> Optional[str]:
-        """命中任务对话框按钮 → 返回按钮键（yes/no/ok），否则 None。"""
+    def conv_link_hit(self, pos) -> Optional[int]:
+        """命中某条蓝字链接行 → 返回其序号；否则 None。"""
+        if not self.quest_visible:
+            return None
+        for rect, idx in self.quest_entry_rects:
+            if rect.collidepoint(pos):
+                return idx
+        return None
+
+    def conv_button_hit(self, pos) -> Optional[str]:
+        """命中按钮 → 返回按钮键（yes/no/ok），否则 None。"""
         if not self.quest_visible:
             return None
         for rect, key in self.quest_buttons:
@@ -190,14 +212,9 @@ class UI:
         return (self.quest_visible and self.quest_rect is not None
                 and self.quest_rect.collidepoint(pos))
 
-    def quest_list_hit(self, pos) -> Optional[int]:
-        """命中多任务列表某条目 → 返回其序号；否则 None。"""
-        if not self.quest_visible or not self.quest_entries:
-            return None
-        for rect, idx in self.quest_entry_rects:
-            if rect.collidepoint(pos):
-                return idx
-        return None
+    # 兼容别名（迁移完成后可删）
+    quest_hit = conv_button_hit
+    quest_list_hit = conv_link_hit
 
     def show_death(self) -> None:
         self.death_visible = True
@@ -525,19 +542,24 @@ class UI:
             pygame.draw.polygon(surface, (255, 233, 107),
                                 [(bx0, by0), (bx0 + 10, by0), (bx0 + 5, by0 + 6)])
 
-    # ── 任务对话框（UtilDlgEx + BtYes/BtNo/BtOK，非模态）─────────
+    # ── 会话面板（UtilDlgEx + 蓝字行 + BtYes/BtNo/BtOK，非模态）───
     def draw_quest(self, surface) -> None:
         if not self.quest_visible:
             return
-        if self.quest_entries:
-            self._draw_quest_list(surface)
-            return
+        self._draw_conv(surface)
+
+    def _draw_conv(self, surface) -> None:
+        """单一渲染路径：标题 + 黑正文行 + 蓝字链接行 + 底部按钮行。"""
         vw, vh = surface.get_width(), surface.get_height()
         wrapped: List[str] = []
         for ln in self.quest_lines:
             wrapped.extend(self._wrap(ln, DLG_TEXT_W, self.font))
-        n = len(wrapped)
-        body_h = max(70, 26 + n * DLG_LINE_H)
+        has_links = bool(self.quest_links)
+        text_h = len(wrapped) * DLG_LINE_H
+        link_block = len(self.quest_links) * LIST_ROW_H
+        if wrapped and has_links:
+            link_block += CONV_TEXT_LINK_GAP
+        body_h = max(70, LIST_PAD_TOP + text_h + link_block + LIST_PAD_BOTTOM)
         h = DLG_TOP_H + body_h + DLG_BOTTOM_H
         w = DLG_W
         x = (vw - w) // 2
@@ -545,70 +567,58 @@ class UI:
         self.quest_rect = pygame.Rect(x, y, w, h)
         self._dlg_frame(surface, x, y, w, body_h)
 
-        # 标题（任务名）
+        # 标题（任务名/会话名，金色）
         surface.blit(self.font_big.render(self.quest_title, True, (255, 216, 96)),
                      (x + DLG_TEXT_X, y + 7))
-        # 正文
-        ty = y + DLG_TOP_H + 8
+        # 黑正文行
+        ty = y + DLG_TOP_H + LIST_PAD_TOP
         for ln in wrapped:
             surface.blit(self.font.render(ln, True, (60, 52, 44)), (x + DLG_TEXT_X, ty))
             ty += DLG_LINE_H
 
-        # 按钮：BtYes / BtNo / BtOK
-        keys = getattr(self, "_quest_buttons_keys", ["ok"])
-        btns = []
+        # 蓝字链接行：起点在标题+黑文本之后，悬停高亮与 Lv 灰标注沿用列表画法
+        self.quest_entry_rects = []
+        if has_links:
+            gap = CONV_TEXT_LINK_GAP if wrapped else 0
+            mx, my = pygame.mouse.get_pos()
+            hx = mx * settings.VIEW_W // settings.WINDOW_W
+            hy = my * settings.VIEW_H // settings.WINDOW_H
+            rows = self.quest_list_row_rects(x, y + text_h + gap,
+                                              DLG_TEXT_W + 2 * DLG_TEXT_X,
+                                              len(self.quest_links))
+            for i, ((rx, ry, rw, rh), (label, note)) in enumerate(zip(rows, self.quest_links)):
+                rect = pygame.Rect(rx, ry, rw, rh)
+                self.quest_entry_rects.append((rect, i))
+                hovered = rect.collidepoint(hx, hy)
+                if hovered:
+                    hl = pygame.Surface((rw, rh), pygame.SRCALPHA)
+                    pygame.draw.rect(hl, (150, 190, 250, 70), (0, 0, rw, rh),
+                                     border_radius=6)
+                    surface.blit(hl, (rx, ry))
+                color = QUEST_LIST_BLUE_HOVER if hovered else QUEST_LIST_BLUE
+                t = self.font.render(label, True, color)
+                surface.blit(t, (rx + 6, ry + (rh - t.get_height()) // 2))
+                if note:
+                    lv = self.font_small.render(f"Lv {note}", True, (150, 140, 128))
+                    surface.blit(lv, (rx + rw - lv.get_width() - 6,
+                                      ry + (rh - lv.get_height()) // 2))
+
+        # 按钮行：先画的在最右（右起叠放），ok 由终态追加
+        keys = list(self.quest_button_keys) + (["ok"] if self.quest_terminal else [])
+        btns: List[Tuple[pygame.Rect, str]] = []
+        right = x + w - 14
         for key in reversed(keys):
             img_name = {"yes": "BtYes", "no": "BtNo", "ok": "BtOK"}.get(key)
             img = self._img("UIWindow.img", f"UtilDlgEx/{img_name}/normal/0")
             if img is None:
                 continue
-            bw_ = img.get_width()
-            bx = x + w - bw_ - 14
-            by = y + h - img.get_height() - 14
+            bw_, bh_ = img.get_width(), img.get_height()
+            bx = right - bw_
+            by = y + h - bh_ - 14
             surface.blit(img, (bx, by))
-            btns.append((pygame.Rect(bx, by, bw_, img.get_height()), key))
-            w -= bw_ + 10
-        # 恢复 w 供后续帧使用（本帧已计算完，无需恢复）
+            btns.append((pygame.Rect(bx, by, bw_, bh_), key))
+            right -= bw_ + 10
         self.quest_buttons = btns
-
-    def _draw_quest_list(self, surface) -> None:
-        """多任务选择列表：UtilDlgEx 白纸面板 + 可点击蓝字条目（与单任务对话框同款）。"""
-        vw, vh = surface.get_width(), surface.get_height()
-        n = len(self.quest_entries)
-        body_h = self.quest_list_body_height(n)
-        h = DLG_TOP_H + body_h + DLG_BOTTOM_H
-        w = DLG_W
-        x = (vw - w) // 2
-        y = vh - self._status_bar_h() - 8 - h
-        self.quest_rect = pygame.Rect(x, y, w, h)
-        self._dlg_frame(surface, x, y, w, body_h)
-
-        surface.blit(self.font_big.render(self.quest_title, True, (255, 216, 96)),
-                     (x + DLG_TEXT_X, y + 7))
-
-        # 悬停高亮：窗口坐标按视口比例换算成 canvas 坐标
-        mx, my = pygame.mouse.get_pos()
-        hx = mx * settings.VIEW_W // settings.WINDOW_W
-        hy = my * settings.VIEW_H // settings.WINDOW_H
-        self.quest_entry_rects = []
-        for i, ((rx, ry, rw, rh), (title, level)) in enumerate(
-                zip(self.quest_list_row_rects(x, y, DLG_TEXT_W + 2 * DLG_TEXT_X, n),
-                    self.quest_entries)):
-            rect = pygame.Rect(rx, ry, rw, rh)
-            self.quest_entry_rects.append((rect, i))
-            hovered = rect.collidepoint(hx, hy)
-            if hovered:
-                hl = pygame.Surface((rw, rh), pygame.SRCALPHA)
-                pygame.draw.rect(hl, (150, 190, 250, 70), (0, 0, rw, rh),
-                                 border_radius=6)
-                surface.blit(hl, (rx, ry))
-            color = QUEST_LIST_BLUE_HOVER if hovered else QUEST_LIST_BLUE
-            t = self.font.render(title, True, color)
-            surface.blit(t, (rx + 6, ry + (rh - t.get_height()) // 2))
-            if level:
-                lv = self.font_small.render(f"Lv {level}", True, (150, 140, 128))
-                surface.blit(lv, (rx + rw - lv.get_width() - 6,
-                                  ry + (rh - lv.get_height()) // 2))
 
     def _draw_dialog_fallback(self, surface, title, wrapped) -> None:
         h, content_h = self._dlg_layout(len(wrapped))
