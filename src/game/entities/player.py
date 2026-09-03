@@ -145,11 +145,14 @@ class Player:
 
     # ── 装备 / 属性 ────────────────────────────────────────────────
     def advance_to(self, code: int, assets: Assets) -> None:
-        """转职：改 job → 重建职业技能树 + 附赠被动/快捷键 → 补发初始武器。"""
+        """转职：改 job → 累积重建技能树并保留旧转等级/SP → 附赠被动/快捷键 → 补发初始武器。"""
         jobdef = JOBS[code]
+        old = self.skills
         self.job = code
-        self.skills = SkillBook(assets, code)
-        self.skills.on_advance(jobdef)
+        book = SkillBook(assets, code)
+        book.inherit(old)                              # 累积：旧转技能与各转 SP 照带
+        book.on_advance(jobdef)
+        self.skills = book
         if jobdef.starter_weapon is not None:
             item = make_item(jobdef.starter_weapon, assets)
             if item.slot is not None and self.inventory.equipped.get("weapon") is None:
@@ -196,8 +199,12 @@ class Player:
         return settings.CRIT_MULT
 
     def _apply_buff_skill(self, skill_data: dict) -> bool:
-        """buff 技能接线：WZ level 表含 time 字段时上 buff 并返回 True。
+        """纯 buff 技能接线：有 time 字段且不含任何攻击属性时上 buff 返回 True。
 
+        关键区分：原版多个弓系攻击技能（烈火箭/炸弹箭）的 level 表也带 time
+        （燃烧 DoT / 引信计时），若仅凭 time 判定会被误当 buff 吞掉、不触发攻击。
+        故再看 damage/mobCount/range/bulletCount 任一 > 0 即视为攻击技能，返回
+        False 让 start_attack 继续走攻击流程（其 DoT/引信暂不建模）。
         mods 从 level 表映射：attack→atk、dex→dex、criticalrate→crit、hp→hp。
         """
         d = skill_data.get("def")
@@ -206,6 +213,9 @@ class Player:
             return False
         seconds = d.stat(lv, "time", 0)
         if seconds <= 0:
+            return False
+        if any(d.stat(lv, atk_key, 0) > 0
+               for atk_key in ("damage", "mobCount", "range", "bulletCount")):
             return False
         mods = {key: d.stat(lv, src, 0)
                 for src, key in BUFF_MOD_MAP.items()}
@@ -373,7 +383,7 @@ class Player:
             self.recalc_vitals()
             self.hp = self.max_hp
             self.mp = self.max_mp
-            self.skills.gain_sp(settings.SP_PER_LEVEL)
+            self.skills.gain_sp_for_level(self.level, settings.SP_PER_LEVEL)
             leveled = True
         return leveled
 

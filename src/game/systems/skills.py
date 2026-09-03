@@ -2,10 +2,11 @@
 
 · SkillDef：一个技能的静态数据（名称、各等级 mpCon/damage/bulletCount/mobCount、
   前置 req、学习所需人物等级 CharLevel、invisible 标记）。
-· SkillBook：玩家运行时状态 —— 只加载当前职业树（新手 → 零技能）。
-  学习受四重门控：SP > 0、前置 req 满足、CharLevel 满足、未满级。
-  转职时 on_advance 把职业附赠被动直接满级，并为主动技能排布快捷键。
-  技能数据全部来自官方 Skill.wz，伤害倍率 = level.damage / 100。
+· SkillBook：玩家运行时状态 —— 累积加载「当前职业 + 各前置职业」的技能树
+  （原版行为：转职后保留旧职业技能）。学习受四重门控：该转 SP > 0、前置 req
+  满足、CharLevel 满足、未满级。SP 按职业组分池独立结算（一转/二转/三转各自结余）。
+  转职时 on_advance 把该转附赠被动直接满级（被动跨转累加进 passive_mods），
+  并为已学主动技能重排快捷键。技能数据全部来自官方 Skill.wz，伤害倍率 = level.damage / 100。
 """
 
 from __future__ import annotations
@@ -13,7 +14,8 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from game import settings
-from game.core.jobs import resolve_skill_img, skill_ids_for_job
+from game.core.jobs import (job_chain, job_sp_group, resolve_skill_img,
+                            skill_ids_for_chain, sp_group_of_skill)
 from game.core.localize import to_simplified
 
 
@@ -120,34 +122,74 @@ def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
 
 
 class SkillBook:
-    """玩家技能状态：等级 / SP / 冷却 / 快捷键。只含当前职业技能树。"""
+    """玩家技能状态：累积各转技能树 / 逐转独立 SP 池 / 冷却 / 快捷键。"""
 
     def __init__(self, assets, job: int,
                  defs: Optional[Dict[str, SkillDef]] = None):
         if defs is None:
-            defs = load_skill_defs(assets, skill_ids_for_job(assets, job)) \
+            defs = load_skill_defs(assets, skill_ids_for_chain(assets, job)) \
                 if assets is not None else {}
         self.defs = defs
         self.job = job
         self.levels: Dict[str, int] = {}
-        self.sp = 0
+        self.sp_by_job: Dict[int, int] = {}       # SP 职业组（300/310/311）→ 结余
         self.cooldowns: Dict[str, float] = {}
-        self.hotkeys: Dict[int, str] = {}       # 数字键 → 技能 id
+        self.hotkeys: Dict[int, str] = {}          # 数字键 → 技能 id
         self._passive_ids: set = set()
 
     # ── 查询 ───────────────────────────────────────────────────────
+    @property
+    def total_sp(self) -> int:
+        """跨转 SP 结余合计（状态面板展示用）。"""
+        return sum(self.sp_by_job.values())
+
+    def sp_for_group(self, group: int) -> int:
+        return self.sp_by_job.get(group, 0)
+
     def known(self) -> List[str]:
         """已学技能 id（按 id 排序）。"""
         return sorted(self.levels)
 
-    def learnable(self) -> List[str]:
-        """本职业可手动学习的技能（排除 invisible 附赠被动）。"""
-        return sorted(sid for sid, d in self.defs.items() if not d.invisible)
+    def learnable(self, owner_group: Optional[int] = None) -> List[str]:
+        """可手动学习的技能（排除附赠被动与 invisible）；给定组则只回该转。"""
+        return sorted(
+            sid for sid, d in self.defs.items()
+            if not d.invisible and sid not in self._passive_ids
+            and (owner_group is None or sp_group_of_skill(sid) == owner_group))
+
+    def skills_for_group(self, group: int) -> List[str]:
+        """技能窗某转页签要展示的全部技能（含自动满级被动，按 id 排序）。"""
+        return sorted(sid for sid in self.defs if sp_group_of_skill(sid) == group)
+
+    # ── SP 结算 ────────────────────────────────────────────────────
+    def add_sp(self, group: int, amount: int) -> None:
+        """直接向某转 SP 池加值（内部/测试用）。"""
+        if amount:
+            self.sp_by_job[group] = self.sp_by_job.get(group, 0) + amount
+
+    def gain_sp_for_level(self, level: int, amount: int) -> None:
+        """升级加 SP：归入职业链中「解锁等级 ≤ 本等级」的最高一阶（原版逐转分池）。"""
+        group = self._group_for_level(level)
+        if group is not None:
+            self.add_sp(group, amount)
+
+    def _group_for_level(self, level: int) -> Optional[int]:
+        chain = job_chain(self.job)
+        best = None
+        for jd in chain:
+            if jd.advance_lv <= level and (best is None or jd.advance_lv >= best.advance_lv):
+                best = jd
+        if best is None and chain:
+            best = chain[0]
+        return job_sp_group(best.code) if best is not None else None
 
     # ── 学习 / 升级 ────────────────────────────────────────────────
     def learn(self, skill_id: str, player_level: int) -> bool:
-        """消耗 1 SP 学习或升级。四重门控：SP / 前置 req / CharLevel / 未满级。"""
-        if self.sp <= 0:
+        """消耗该转 1 SP 学习或升级。四重门控：SP / 前置 req / CharLevel / 未满级。"""
+        if skill_id in self._passive_ids:
+            return False
+        group = sp_group_of_skill(skill_id)
+        if self.sp_by_job.get(group, 0) <= 0:
             return False
         d = self.defs.get(skill_id)
         if d is None or d.invisible:
@@ -160,7 +202,7 @@ class SkillBook:
         for rid, rlv in d.req.items():
             if self.levels.get(rid, 0) < rlv:
                 return False
-        self.sp -= 1
+        self.sp_by_job[group] -= 1
         self.levels[skill_id] = cur + 1
         self._assign_hotkey(skill_id)
         return True
@@ -176,14 +218,11 @@ class SkillBook:
         if key is not None:
             self.hotkeys[key] = skill_id
 
-    def gain_sp(self, amount: int) -> None:
-        self.sp += amount
-
     def passive_mods(self) -> Dict[str, int]:
-        """已学被动技能的聚合属性修正。
+        """已学被动技能的聚合属性修正（跨转累加）。
 
         键：str/dex/int/luk/atk/def/crit/crit_mult/acc/range/hp/mp。
-        被动技能在转职 on_advance 时已满级（invisible 附赠），这里读取
+        被动技能在转职 on_advance 时已满级（附赠），这里读取
         Skill.wz level 表的真实字段映射：
             prop   → crit（暴击率 %，如霸王箭 12→40）
             damage → crit_mult（暴击伤害 %，如霸王箭 105→200）
@@ -218,16 +257,31 @@ class SkillBook:
         return mods
 
     def on_advance(self, jobdef) -> None:
-        """转职：职业附赠被动直接满级（免费），主动技能重排快捷键。"""
-        self._passive_ids = {str(p) for p in jobdef.passive_ids}
-        for pid in self._passive_ids:
+        """转职：本职业附赠被动满级（累加进 passive），重排全部主动快捷键。"""
+        for p in jobdef.passive_ids:
+            pid = str(p)
+            self._passive_ids.add(pid)
             d = self.defs.get(pid)
             if d is not None:
                 self.levels[pid] = d.max_level
+        self.rebuild_hotkeys()
+
+    def inherit(self, old: "SkillBook") -> None:
+        """转职累积：把旧技能书的已学等级、各转 SP 结余、被动集合搬进本书。"""
+        if old is None:
+            return
+        self.levels = dict(old.levels)
+        self.sp_by_job = dict(old.sp_by_job)
+        self._passive_ids = set(old._passive_ids)
+
+    def rebuild_hotkeys(self) -> None:
+        """为全部可学主动技能（含旧转已学）重排最小空闲数字键。"""
         self.hotkeys = {}
         for sid in sorted(self.defs):
-            if sid not in self._passive_ids and not self.defs[sid].invisible:
-                self._assign_hotkey(sid)
+            d = self.defs[sid]
+            if sid in self._passive_ids or d.invisible:
+                continue
+            self._assign_hotkey(sid)
 
     # ── 施放 ───────────────────────────────────────────────────────
     def cast(self, skill_id: str, player_level: int) -> Optional[dict]:
@@ -261,12 +315,25 @@ class SkillBook:
 
     # ── 序列化 ───────────────────────────────────────────────────
     def to_dict(self) -> dict:
-        return {"sp": self.sp, "levels": dict(self.levels),
+        return {"sp_by_job": {str(k): v for k, v in self.sp_by_job.items()},
+                "levels": dict(self.levels), "passives": sorted(self._passive_ids),
                 "hotkeys": {str(k): v for k, v in self.hotkeys.items()}}
 
     def from_dict(self, data: dict) -> None:
-        self.sp = data.get("sp", 0)
         self.levels = dict(data.get("levels", {}))
+        passives = data.get("passives")
+        if passives is not None:
+            self._passive_ids = {str(p) for p in passives}
+        else:                                   # 旧档未存被动集：按职业链反推
+            self._passive_ids = {str(pid) for jd in job_chain(self.job)
+                                 for pid in jd.passive_ids
+                                 if str(pid) in self.levels}
+        raw_sp = data.get("sp_by_job")
+        if raw_sp is not None:
+            self.sp_by_job = {int(k): int(v) for k, v in raw_sp.items()}
+        else:                                   # 旧档单一 sp → 归入当前职业组
+            legacy = int(data.get("sp", 0) or 0)
+            self.sp_by_job = {job_sp_group(self.job): legacy} if legacy else {}
         self.hotkeys = {int(k): str(v)
                         for k, v in data.get("hotkeys", {}).items()}
         self.cooldowns.clear()

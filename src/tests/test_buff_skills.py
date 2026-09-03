@@ -97,3 +97,26 @@ def test_cast_buff_skill_zero_time_is_normal_attack(monkeypatch):
     assert player.start_attack(data) is True
     assert player.buffs.active() == []
     assert player.attacking
+
+
+def test_attack_skill_with_time_field_still_attacks(monkeypatch):
+    """带持续计时但含攻击属性的技能（烈火箭 damage+time）必须进攻击流程。"""
+    player = make_player(monkeypatch)
+    d = SkillDef("3111003", "烈火箭", "", [{"damage": 127, "time": 10}], 1)
+    data = {"id": "3111003", "def": d, "level": 1, "mp_con": 25, "hp_con": 0,
+            "damage": 1.27, "range": 0, "mob_count": 5, "bullet_count": 1}
+    assert player.start_attack(data) is True
+    assert player.attacking
+    assert player.pending_skill is data
+    assert player.buffs.active() == []
+
+
+def test_multi_target_skill_with_time_field_still_attacks(monkeypatch):
+    """无 damage 字段但有 mobCount 的多体技能（炸弹箭）同样不得被 buff 吞掉。"""
+    player = make_player(monkeypatch)
+    d = SkillDef("3101005", "炸弹箭", "", [{"mobCount": 5, "time": 4}], 1)
+    data = {"id": "3101005", "def": d, "level": 1, "mp_con": 28, "hp_con": 0,
+            "damage": 1.0, "range": 0, "mob_count": 5, "bullet_count": 1}
+    assert player.start_attack(data) is True
+    assert player.attacking
+    assert player.buffs.active() == []

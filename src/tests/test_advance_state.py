@@ -15,7 +15,7 @@ def fake_player(job: int = 3000) -> SimpleNamespace:
     book = SkillBook(None, job, defs={
         "3001004": SkillDef("3001004", "断魂箭", "", [{"mpCon": 7}] * 20, 20),
     })
-    book.sp = 2
+    book.add_sp(300, 2)
     book.levels["3001004"] = 3
     book.hotkeys[1] = "3001004"
     return SimpleNamespace(

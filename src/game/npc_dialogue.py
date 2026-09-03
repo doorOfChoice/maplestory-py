@@ -227,7 +227,7 @@ class NpcDialogueController:
     # ── Lua 驱动的任务对话（如转职：内容脚本在 content/advance.lua）─────────
     def _begin_lua_quest(self, npc, qid: str, script: str) -> None:
         """由 Lua 会话驱动的任务对话：按玩家状态路由，并记住所属任务 qid。"""
-        jobdef = job_for_trainer(npc.npc_id)
+        jobdef = job_for_trainer(npc.npc_id, self.ctx.world.player.job)
         sess, ctx = build_lua_session(
             script, player=self.ctx.world.player, jobdef=jobdef,
             npc_name=npc.name, assets=self.assets)

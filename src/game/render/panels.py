@@ -7,6 +7,7 @@
 · 状态窗（B 键）：UIWindow/Stat/backgrnd，四维行右端嵌 BtApUp「+」按钮，
   底部 BtAuto 一键分配；穿戴需求（reqLevel/四维）在点击装备时门控。
 · 技能窗口：UIWindow/Skill/backgrnd，升级按钮用 Skill/BtSpUp。
+· 按键设置窗（O）：动作列表 + 单击录入改绑（冲突互换）、右键恢复默认。
 · 快捷栏：UIWindow/ShortCut/backgrnd 竖条，技能图标嵌在格内。
 · Tooltip：UIWindow/ContextMenu 三段（t/c/s）官方深色底。
 
@@ -24,7 +25,8 @@ import pygame
 
 from game import settings
 from game.systems.inventory import SLOT_ORDER, Item, islot_to_slot
-from game.core.jobs import JOBS
+from game.core.jobs import JOBS, job_chain, job_sp_group
+from game.core.keybindings import ACTION_BY_ID, ACTIONS, display_key
 from game.systems.quests import render_markup
 from game.systems.scrolls import SCROLLS, apply_scroll, is_scroll_id
 from game.core.stats import STAT_LABELS, wear_block
@@ -70,6 +72,9 @@ SKL_BG = "Skill/backgrnd"
 SKL_W, SKL_H = 175, 289
 SKL_ROW_H = 40           # 技能列表每行高度
 SKL_ROWS = 6             # 技能窗一屏可见行数（(SKL_H-49)//SKL_ROW_H）
+SKL_ROWS_TAB = 5         # 带转数页签条时的一屏可见行数（页签占 header 下方一条）
+SKL_TAB_H = 22           # 转数页签条高度
+_SKL_ORD = ("一", "二", "三", "四", "五", "六")   # 转数中文序数
 SHT_BG = "ShortCut/backgrnd"
 SHT_W, SHT_H = 93, 244
 SHT_CELL_X = [4, 48]
@@ -100,6 +105,11 @@ TAB_LABEL = {"consume": "消耗", "equip": "装备", "etc": "其他"}
 
 BAR_RESERVE = 58     # 底部状态栏预留高度（无 StatusBar 素材时同值）
 
+# 按键设置窗（无专属原版素材，自绘风格与其它 fallback 一致）
+KC_W = 240           # 窗宽
+KC_ROW_H = 18        # 行高
+KC_ROWS = 15         # 一屏可见条目数（含分组标题行）
+
 
 def _panel(surface: pygame.Surface, rect: pygame.Rect,
            border=(90, 96, 110)) -> None:
@@ -123,6 +133,9 @@ class Panels:
         self.skill_visible = False
         self.questlog_visible = False
         self.stat_visible = False
+        self.keyconfig_visible = False
+        self.bindings = None              # Game 注入：KeyBindings
+        self._capture: Optional[str] = None   # 正在录入绑定的动作 id
         self.inv_tab = "consume"          # consume | equip | etc
         self._tooltip: Optional[str] = None
         self._toast: Optional[Tuple[str, float]] = None   # (文本, 剩余秒)
@@ -131,6 +144,9 @@ class Panels:
         self._skill_rect = pygame.Rect(0, 0, 0, 0)
         self._questlog_rect = pygame.Rect(0, 0, 0, 0)
         self._stat_rect = pygame.Rect(0, 0, 0, 0)
+        self._kc_rect = pygame.Rect(0, 0, 0, 0)
+        self._kc_rows: List[tuple] = []   # (Rect, action_id) 按键设置行热区
+        self._kc_scroll = 0               # 按键设置首条目偏移
         self._ap_rects: List[tuple] = []     # (Rect, stat)
         self._auto_rect: Optional[pygame.Rect] = None
         self._num_cache: dict = {}           # (ch, color) → 染色后的像素数字
@@ -142,6 +158,9 @@ class Panels:
         self._tab_rects: List[tuple] = []    # (Rect, tab)
         self._inv_scroll: dict = {}          # tab → 背包当前页首格索引（滚轮滚动）
         self._skill_scroll = 0               # 技能窗当前首行索引（滚轮滚动）
+        self._skill_tab: Optional[int] = None  # 技能窗当前 SP 职业组（None=最新一转）
+        self._skill_tab_rects: List[tuple] = []  # (Rect, group) 技能窗转数页签
+        self._skill_visible_rows = SKL_ROWS    # 技能窗当前一屏可见行数（绘制时定）
         # ── 拖拽 / 关闭 ─────────────────────────────────────────────
         self._win_pos: dict = {}             # key → (x, y) 用户拖动后的绝对位置
         self._win_size: dict = {}            # key → (w, h) 当前帧窗口尺寸
@@ -180,6 +199,32 @@ class Panels:
         if not self.stat_visible and self._drag and self._drag[0] == "stat":
             self._drag = None
 
+    def attach_bindings(self, bindings) -> None:
+        """Game 注入全局按键绑定表（改动经其实例路径即时写回文件）。"""
+        self.bindings = bindings
+
+    def toggle_keyconfig(self) -> None:
+        self.keyconfig_visible = not self.keyconfig_visible
+        self._capture = None
+        self._kc_scroll = 0
+        if not self.keyconfig_visible and self._drag and self._drag[0] == "keyconfig":
+            self._drag = None
+
+    @property
+    def capturing_action(self) -> Optional[str]:
+        """当前正在录入改绑的动作 id（None = 未录入）。"""
+        return self._capture
+
+    def consume_binding_key(self, key: int) -> bool:
+        """录入态吞掉按键完成改绑（冲突自动互换）；Esc 取消。返回是否消费。"""
+        if not self.keyconfig_visible or self._capture is None or self.bindings is None:
+            return False
+        if key != pygame.K_ESCAPE:
+            self.bindings.set(self._capture, key)
+            self.bindings.save()
+        self._capture = None
+        return True
+
     def _close_window(self, key: str) -> None:
         """关闭按钮：只关对应窗口（背包/装备栏互不牵连）。"""
         if key == "inv":
@@ -192,6 +237,9 @@ class Panels:
             self.questlog_visible = False
         elif key == "stat":
             self.stat_visible = False
+        elif key == "keyconfig":
+            self.keyconfig_visible = False
+            self._capture = None
         if self._drag and self._drag[0] == key:
             self._drag = None
         if key in ("inv", "equip"):
@@ -344,8 +392,27 @@ class Panels:
             return self.assets.equip_icon(item_id)
         return self.assets.item_icon(item_id)
 
+    def handle_right_click(self, pos: Tuple[int, int], player) -> bool:
+        """右键按键设置行 → 该动作恢复默认绑法（被顶用的动作链式归位）。"""
+        if not self.keyconfig_visible or self.bindings is None:
+            return False
+        for rect, action in self._kc_rows:
+            if rect.collidepoint(pos):
+                self.bindings.reset(action)
+                self.bindings.save()
+                return True
+        return False
+
     # ── 鼠标点击（返回 True 表示事件已消费）────────────────────────
     def handle_click(self, pos: Tuple[int, int], player) -> bool:
+        if self.keyconfig_visible:
+            for rect, action in self._kc_rows:
+                if rect.collidepoint(pos):
+                    if self.bindings is not None:
+                        self._capture = None if self._capture == action else action
+                    return True
+            if self._kc_rect.collidepoint(pos):
+                return True
         if self.inv_visible or self.equip_visible:
             for rect, key in self._tab_rects:
                 if rect.collidepoint(pos):
@@ -355,6 +422,11 @@ class Panels:
             if self._inv_rect.collidepoint(pos) or self._equip_rect.collidepoint(pos):
                 return True
         if self.skill_visible:
+            for rect, grp in self._skill_tab_rects:
+                if rect.collidepoint(pos):
+                    self._skill_tab = grp
+                    self._skill_scroll = 0
+                    return True
             for rect, sid in self._skill_rows:
                 if rect.collidepoint(pos):
                     player.skills.learn(sid, player.level)
@@ -393,11 +465,16 @@ class Panels:
             self._inv_scroll[tab] = max(0, min(max_scroll, cur + amount * INV_COLS))
             return True
         if self.skill_visible and self._skill_rect.collidepoint(pos):
-            n = len(player.skills.learnable())
-            vis = SKL_ROWS
+            n = len(self._skill_view(player.skills)[2])
+            vis = self._skill_visible_rows
             max_scroll = max(0, n - vis)
             self._skill_scroll = max(0, min(max_scroll,
                                             self._skill_scroll + amount))
+            return True
+        if self.keyconfig_visible and self._kc_rect.collidepoint(pos):
+            n = len(self._kc_entries())
+            max_scroll = max(0, n - KC_ROWS)
+            self._kc_scroll = max(0, min(max_scroll, self._kc_scroll + amount))
             return True
         return False
 
@@ -478,10 +555,12 @@ class Panels:
         self._cell_rects.clear()
         self._slot_rects.clear()
         self._skill_rows.clear()
+        self._skill_tab_rects.clear()
         self._tab_rects.clear()
         self._close_rects.clear()
         self._title_rects.clear()
         self._ap_rects.clear()
+        self._kc_rows.clear()
         self._auto_rect = None
         mouse = pygame.mouse.get_pos()
         if self.inv_visible:
@@ -494,6 +573,8 @@ class Panels:
             self._draw_questlog(surface, player)
         if self.stat_visible:
             self._draw_stat(surface, player)
+        if self.keyconfig_visible:
+            self._draw_keyconfig(surface, player)
         if self._tooltip is not None:
             self._draw_tooltip(surface, mouse)
         # 拖拽中的物品图标跟手（画在最上层，窗口之外也可见）
@@ -719,7 +800,7 @@ class Panels:
         surface.blit(f.render("装备栏", True, (235, 235, 240)), (x + PAD, y + 8))
         stat = fs.render(
             f"攻 {player.attack_value()} 防 {player.defense_value()} "
-            f"SP {player.skills.sp}", True, (150, 210, 160))
+            f"SP {player.skills.total_sp}", True, (150, 210, 160))
         surface.blit(stat, (x + w - PAD - 34 - stat.get_width(), y + 9))
         self._add_chrome(surface, "equip", x, y, w, 24)
         for i, slot in enumerate(SLOT_ORDER):
@@ -763,46 +844,84 @@ class Panels:
             lines.append(f"Lv{need} 可学习")
         self._tooltip = "\n".join(lines)
 
+    def _skill_view(self, book):
+        """技能窗当前视图：(页签[(group,label)], 选中 group, 该栏技能 id 列表)。
+
+        页签按职业链旧→新排（一转/二转/三转）；选中栏默认为最新一转，或用户
+        点选后记住的 group。列表含该转全部技能（自动满级的被动也列出）。
+        """
+        tabs = [(job_sp_group(jd.code), _SKL_ORD[i] + "转")
+                for i, jd in enumerate(job_chain(book.job)) if i < len(_SKL_ORD)]
+        groups = [g for g, _ in tabs]
+        active = self._skill_tab if self._skill_tab in groups else (
+            groups[-1] if groups else job_sp_group(book.job))
+        sids = book.skills_for_group(active) if groups else []
+        return tabs, active, sids
+
+    def _draw_skill_tabs(self, surface, x, strip_y, w, tabs, active) -> None:
+        """画转数页签条并登记热区；单页（含无页）不画、直接返回。"""
+        if len(tabs) <= 1:
+            return
+        fs = self.ui.font_small
+        n = len(tabs)
+        tw = max(20, (w - 12) // n)
+        for i, (grp, label) in enumerate(tabs):
+            r = pygame.Rect(x + 6 + i * tw, strip_y, tw - 2, SKL_TAB_H - 4)
+            sel = grp == active
+            pygame.draw.rect(surface, (70, 96, 132) if sel else (38, 42, 54),
+                             r, border_radius=4)
+            if sel:
+                pygame.draw.rect(surface, (150, 190, 235), r, 1, border_radius=4)
+            t = fs.render(label, True, (245, 245, 250) if sel else (150, 156, 172))
+            surface.blit(t, (r.x + (r.w - t.get_width()) // 2,
+                             r.y + (r.h - t.get_height()) // 2))
+            self._skill_tab_rects.append((r, grp))
+
     def _draw_skills(self, surface, player) -> None:
         book = player.skills
-        f, fs = self.ui.font, self.ui.font_small
-        ft = self.ui.font_tiny
+        f, ft = self.ui.font, self.ui.font_tiny
         vw, vh = surface.get_width(), surface.get_height()
-        sids = book.learnable()
+        tabs, active, sids = self._skill_view(book)
+        learn_set = set(book.learnable(active))
+        sp_group = book.sp_for_group(active)
         bg = self._wz(SKL_BG)
         base = (vw - 4 - SHT_W - 6 - SKL_W, vh - SKL_H - BAR_RESERVE - 2)
         x, y = self._resolve_pos("skill", base, (SKL_W, SKL_H), vw, vh)
         rect = pygame.Rect(x, y, SKL_W, SKL_H)
         self._skill_rect = rect
         if bg is None:
-            self._draw_skills_fallback(surface, player, sids)
+            self._draw_skills_fallback(surface, player)
             return
         surface.blit(bg, (x, y))
         self._add_chrome(surface, "skill", x, y, SKL_W, 44)
-        # SP（浅色标题条右侧 → 深字）
-        sp = ft.render(f"SP {book.sp}", True,
-                       (150, 90, 20) if book.sp > 0 else (110, 112, 124))
+        # SP（本转结余，浅色标题条右侧 → 深字）
+        sp = ft.render(f"SP {sp_group}", True,
+                       (150, 90, 20) if sp_group > 0 else (110, 112, 124))
         surface.blit(sp, (x + 100, y + 7))
+        multi = len(tabs) > 1
+        if multi:
+            self._draw_skill_tabs(surface, x, y + 44, SKL_W, tabs, active)
+        list_top = y + (44 + SKL_TAB_H if multi else 49)
+        vis_rows = SKL_ROWS_TAB if multi else SKL_ROWS
+        self._skill_visible_rows = vis_rows
 
         sp_btn = self._wz("Skill/BtSpUp/normal/0")
 
         # 技能列表：逐行使用 Skill/skill0(已知)/skill1(未学) 原版行背景，
         # 全宽铺开以盖住 backgrnd 里烤死的深色高亮条，避免文字与底色重叠。
-        # 技能超过 SKL_ROWS 行时按滚轮滚动：scroll 为当前首行索引。
         row_h = SKL_ROW_H
         row_w = SKL_W - 12
         row_x = x + 6
         row_img_h = 38
-        top = y + 49
         mouse = pygame.mouse.get_pos()
-        max_rows = max(0, len(sids) - SKL_ROWS)
+        max_rows = max(0, len(sids) - vis_rows)
         start = max(0, min(max_rows, self._skill_scroll))
-        for i, sid in enumerate(sids[start:start + SKL_ROWS]):
+        for i, sid in enumerate(sids[start:start + vis_rows]):
             d = book.defs.get(sid)
             if d is None:
                 continue
             lv = book.levels.get(sid, 0)
-            ry = top + i * row_h
+            ry = list_top + i * row_h
             locked = lv == 0
             row_img = self._wz("Skill/skill1" if locked else "Skill/skill0")
             if row_img is not None:
@@ -826,8 +945,8 @@ class Panels:
                 surface.blit(ft.render(f"Lv{d.char_level or 1} 可学习", True, color),
                              (tx, ry + 20))
             self._skill_tip(book, d, lv, mouse, pygame.Rect(row_x, ry, row_w, row_img_h))
-            # 升级按钮（原版 BtSpUp）
-            if book.sp > 0 and lv < d.max_level:
+            # 升级按钮（原版 BtSpUp）：仅可手学的主动技能、本转有 SP 且未满级
+            if sp_group > 0 and lv < d.max_level and sid in learn_set:
                 btn = pygame.Rect(row_x + row_w - 20, ry + 3,
                                   sp_btn.get_width() if sp_btn else 12,
                                   sp_btn.get_height() if sp_btn else 12)
@@ -839,24 +958,33 @@ class Panels:
                                  (btn.x + 3, btn.y))
                 self._skill_rows.append((btn.inflate(6, 6), sid))
 
-    def _draw_skills_fallback(self, surface, player, sids) -> None:
+    def _draw_skills_fallback(self, surface, player) -> None:
         book = player.skills
         f, fs = self.ui.font, self.ui.font_small
         vw, vh = surface.get_width(), surface.get_height()
+        tabs, active, sids = self._skill_view(book)
+        learn_set = set(book.learnable(active))
+        sp_group = book.sp_for_group(active)
+        multi = len(tabs) > 1
+        tab_band = SKL_TAB_H if multi else 0
         sp_h = 52
-        vis_rows = max(1, min(len(sids), (vh - 150 - 58) // sp_h))
+        vis_rows = max(1, min(len(sids), (vh - 150 - 58 - tab_band) // sp_h))
+        self._skill_visible_rows = vis_rows
         w = 330
-        h = 46 + vis_rows * sp_h + 8
+        h = 46 + tab_band + vis_rows * sp_h + 8
         base = (vw - w - 12, vh - 150 - h)
         x, y = self._resolve_pos("skill", base, (w, h), vw, vh)
         rect = pygame.Rect(x, y, w, h)
         self._skill_rect = rect
         _panel(surface, rect)
         surface.blit(f.render("技能栏 (K)", True, (235, 235, 240)), (x + PAD, y + 8))
-        sp = f.render(f"SP {book.sp}", True,
-                      (255, 220, 90) if book.sp > 0 else (140, 146, 160))
+        sp = f.render(f"SP {sp_group}", True,
+                      (255, 220, 90) if sp_group > 0 else (140, 146, 160))
         surface.blit(sp, (x + w - PAD - 34 - sp.get_width(), y + 8))
         self._add_chrome(surface, "skill", x, y, w, 24)
+        if multi:
+            self._draw_skill_tabs(surface, x, y + 28, w, tabs, active)
+        list_top = y + 40 + tab_band
         mouse = pygame.mouse.get_pos()
         max_rows = max(0, len(sids) - vis_rows)
         start = max(0, min(max_rows, self._skill_scroll))
@@ -865,7 +993,7 @@ class Panels:
             if d is None:
                 continue
             lv = book.levels.get(sid, 0)
-            ry = y + 40 + i * sp_h
+            ry = list_top + i * sp_h
             row = pygame.Rect(x + PAD, ry, w - PAD * 2, 48)
             pygame.draw.rect(surface, (40, 46, 60), row, border_radius=4)
             icon = self.assets.skill_icon(sid)
@@ -888,7 +1016,7 @@ class Panels:
                 surface.blit(fs.render(f"Lv{d.char_level or 1} 可学习",
                                        True, (150, 156, 170)), (row.x + 52, ry + 28))
             self._skill_tip(book, d, lv, mouse, row)
-            if book.sp > 0 and lv < d.max_level:
+            if sp_group > 0 and lv < d.max_level and sid in learn_set:
                 btn = pygame.Rect(row.right - 26, ry + 4, 22, 22)
                 pygame.draw.rect(surface, (70, 130, 90), btn, border_radius=4)
                 surface.blit(f.render("+", True, (255, 255, 255)),
@@ -1122,6 +1250,77 @@ class Panels:
                           abtn.y + (abtn.h - at.get_height()) // 2))
 
     # ── 快捷栏（UIWindow/ShortCut 竖条，常驻）──────────────────────
+    # ── 按键设置窗（O）──────────────────────────────────────────────
+    def _slot_label(self, slot: int) -> str:
+        """快捷栏角标键名：改绑后显示新键（如 Q/F5），未绑回退槽号。"""
+        if self.bindings is not None:
+            kc = self.bindings.slot_key(slot)
+            if kc is not None and kc > 0:
+                return display_key(kc)
+        return str(slot)
+
+    def _kc_entries(self) -> List[Tuple[str, str]]:
+        """条目序列：分组标题行与动作行交错（绘制与滚轮共用同一序列）。"""
+        out: List[Tuple[str, str]] = []
+        last: Optional[str] = None
+        for a in ACTIONS:
+            if a.group != last:
+                out.append(("h", a.group))
+                last = a.group
+            out.append(("a", a.id))
+        return out
+
+    def _skill_of_slot(self, player, slot: int) -> str:
+        """槽位当前挂的技能名（无则空串），供「技能 N · 断魂箭」行标签。"""
+        book = getattr(player, "skills", None)
+        sid = book.hotkeys.get(slot) if book is not None else None
+        d = book.defs.get(sid) if book is not None and sid else None
+        return f" · {d.name}" if d is not None and d.name else ""
+
+    def _draw_keyconfig(self, surface, player) -> None:
+        """自绘按键设置窗：分组列表 + 键名，录入行动作显示「请按键…」。"""
+        fs = self.ui.font_small
+        vw, vh = surface.get_width(), surface.get_height()
+        w = KC_W
+        h = 24 + KC_ROWS * KC_ROW_H + 20
+        x, y = self._resolve_pos("keyconfig", (max(8, (vw - w) // 2), 52),
+                                 (w, h), vw, vh)
+        rect = pygame.Rect(x, y, w, h)
+        self._kc_rect = rect
+        _panel(surface, rect)
+        self._add_chrome(surface, "keyconfig", x, y, w, 24)
+        top = y + 26
+        entries = self._kc_entries()
+        self._kc_scroll = max(0, min(self._kc_scroll,
+                                     max(0, len(entries) - KC_ROWS)))
+        for i, (kind, payload) in enumerate(
+                entries[self._kc_scroll:self._kc_scroll + KC_ROWS]):
+            ry = top + i * KC_ROW_H
+            if kind == "h":
+                surface.blit(fs.render(f"〔{payload}〕", True, (150, 190, 235)),
+                             (x + 10, ry + 2))
+                continue
+            a = ACTION_BY_ID[payload]
+            row = pygame.Rect(x + 8, ry - 1, w - 16, KC_ROW_H)
+            capturing = self._capture == payload
+            if capturing:
+                pygame.draw.rect(surface, (66, 54, 20), row, border_radius=3)
+            label = a.label + (self._skill_of_slot(player, int(payload[6:]))
+                               if payload.startswith("skill_") else "")
+            surface.blit(fs.render(label, True, (235, 235, 225)),
+                         (row.x + 3, ry + 2))
+            if capturing:
+                key_txt = fs.render("请按键…", True, (255, 214, 92))
+            elif self.bindings is not None:
+                key_txt = fs.render(display_key(self.bindings.key_of(payload)),
+                                    True, (255, 220, 90))
+            else:
+                key_txt = fs.render("?", True, (200, 200, 200))
+            surface.blit(key_txt, (row.right - key_txt.get_width() - 3, ry + 2))
+            self._kc_rows.append((row, payload))
+        surface.blit(fs.render("左键改绑 · 右键重置 · Esc 取消", True,
+                               (140, 140, 130)), (x + 10, y + h - 16))
+
     def draw_quickslots(self, surface, player) -> None:
         fs = self.ui.font_small
         vw, vh = surface.get_width(), surface.get_height()
@@ -1157,7 +1356,7 @@ class Panels:
                 shade = pygame.Surface((cell.w, cover_h), pygame.SRCALPHA)
                 shade.fill((10, 10, 14, 150))
                 surface.blit(shade, (cell.x, cell.bottom - cover_h))
-            kb = fs.render(str(hk), True, (255, 220, 90))
+            kb = fs.render(self._slot_label(hk), True, (255, 220, 90))
             surface.blit(kb, (cell.x + 3, cell.y + 1))
             lv = player.skills.levels[sid]
             mp = fs.render(f"{d.stat(lv, 'mpCon', 0)}", True, (140, 180, 240))
@@ -1190,7 +1389,7 @@ class Panels:
                 shade = pygame.Surface((slot.w, cover_h), pygame.SRCALPHA)
                 shade.fill((10, 10, 14, 150))
                 surface.blit(shade, (slot.x, slot.y + slot.h - cover_h))
-            kb = fs.render(str(key), True, (255, 220, 90))
+            kb = fs.render(self._slot_label(key), True, (255, 220, 90))
             surface.blit(kb, (slot.x + 3, slot.y + 2))
             mp = fs.render(f"{d.stat(lv, 'mpCon', 0)}", True, (120, 170, 230))
             surface.blit(mp, (slot.right - mp.get_width() - 3,

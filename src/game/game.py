@@ -16,6 +16,7 @@ from typing import List, Optional, Tuple
 import pygame
 
 from game import settings
+from game.core.keybindings import KeyBindings
 from game.render.assets import Assets
 from game.render.effects import Effect
 from game.systems.quests import load_quest_defs, render_markup
@@ -51,6 +52,9 @@ class Game:
         self.canvas = pygame.Surface((settings.VIEW_W, settings.VIEW_H))
         self.clock = pygame.time.Clock()
         self.running = True
+
+        # 全局键位配置（独立于角色存档，缺失/损坏回退默认）
+        self.keybindings = KeyBindings.load(settings.KEYBINDINGS_FILE)
 
         # 存档概览（轻量、先读），世界构建在后台线程完成
         self.save_manager = SaveManager(settings.SAVE_FILE)
@@ -115,6 +119,7 @@ class Game:
             self.ctx = GameContext.create(self.assets, self.quest_defs,
                                           self.save_data)
             self.ctx.panels._quest_goal_lines = self._quest_extra_goal_lines
+            self.ctx.panels.attach_bindings(self.keybindings)
 
             self._boot_progress = 1.0
             self._boot_status = ""
@@ -146,7 +151,7 @@ class Game:
                                           "←→ 移动  空格 跳跃  ↓+空格 下跳  ↑ 爬绳/梯",
                                           "A 攻击  Z 拾取  数字键 技能  F 喝药",
                                           "I 道具栏  K 技能栏  B 状态  Q 任务日志  M 小地图",
-                                          "Enter 对话  R 复活",
+                                          "Enter 对话  R 复活  O 按键设置（全部键位可改）",
                                          "背包满了？双击道具使用/穿戴，把它拖出背包窗口即可扔在地上"
                                          "（已穿装备也能从纸娃娃拖出扔掉）。",
                                           "新手练到 Lv10 后，找出生点旁的赫丽娜转职弓箭手；"
@@ -206,40 +211,58 @@ class Game:
                         self.ctx.audio.play("PickUpItem", 0.3)
                 else:
                     self.ctx.panels.handle_mouse_up()
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+                if not self.dead and self.ctx.panels.keyconfig_visible:
+                    cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
+                    cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
+                    self.ctx.panels.handle_right_click(
+                        (cx, cy), self.ctx.world.player)
             elif event.type == pygame.KEYDOWN:
+                kb = self.keybindings
                 if self.dead:
-                    if event.key == pygame.K_r:
+                    if event.key == kb.key_of("respawn"):
                         self.respawn()
+                    continue
+                # 按键设置录入态：吞掉按键完成改绑（Esc 取消）
+                if self.ctx.panels.consume_binding_key(event.key):
                     continue
                 # 任务/寒暄对话框：回车/空格/Esc 交给对话层消费；其余按键照常
                 if self._dialogue.consume_keydown(event.key):
                     continue
-                # 商店 / 仓库面板：Esc 关闭
+                # Esc 固定为关闭：按键设置窗 / 商店 / 仓库
                 if event.key == pygame.K_ESCAPE:
+                    if self.ctx.panels.keyconfig_visible:
+                        self.ctx.panels.toggle_keyconfig()
+                        continue
                     if self.ctx.shop_panel.visible or self.ctx.storage_panel.visible:
                         self.ctx.shop_panel.close()
                         self.ctx.storage_panel.close()
                         continue
-                if event.key == pygame.K_i:
+                action = kb.action_for(event.key)
+                if action == "window_inventory":
                     self.ctx.panels.toggle_inventory()
-                elif event.key == pygame.K_k:
+                elif action == "window_skill":
                     self.ctx.panels.toggle_skill()
-                elif event.key == pygame.K_q:
+                elif action == "window_quest":
                     self.ctx.panels.toggle_quest_log()
-                elif event.key == pygame.K_m:
+                elif action == "window_stat":
+                    self.ctx.panels.toggle_stat()
+                elif action == "window_keyconfig":
+                    self.ctx.panels.toggle_keyconfig()
+                elif action == "minimap":
                     self.ctx.world.minimap.toggle()
-                elif event.key == pygame.K_f:
+                elif action == "potion":
                     if self.ctx.world.player.use_potion():
                         self.ctx.audio.play("PickUpItem", 0.4)
-                elif pygame.K_1 <= event.key <= pygame.K_9:
-                    self._cast_skill(event.key - pygame.K_1 + 1)
-                elif event.key == pygame.K_UP:
+                elif action is not None and action.startswith("skill_"):
+                    self._cast_skill(int(action[len("skill_"):]))
+                elif action == "move_up":
                     if not self.keys.down and self.ctx.world.portal_at_feet() is not None:
                         pass  # 站在传送门上按 ↑ → 交给 _check_portal 切图
                     elif self.keys.down:
                         self.ctx.world.player.drop_through(self.ctx.world.physics)
                     # ↑ 不再触发跳跃，仅用于传送门和爬绳（爬绳由 update 中 keys.up 驱动）
-                elif event.key == pygame.K_SPACE:
+                elif action == "jump":
                     if self.keys.down:
                         self.ctx.world.player.drop_through(self.ctx.world.physics)
                     elif self.ctx.world.player.climbing:
@@ -249,29 +272,28 @@ class Game:
                         if self.ctx.world.player.on_ground:
                             self.ctx.audio.play("Jump", 0.5)
                         self.ctx.world.player.jump()
-                elif event.key == pygame.K_z:
+                elif action == "pickup":
                     self._try_pickup()
-                elif event.key == pygame.K_a:
+                elif action == "attack":
                     if self.ctx.world.player.start_attack():
                         self.ctx.audio.play_attack(self.ctx.world.player.equips)
-                elif event.key == pygame.K_DOWN and self.keys.jump:
+                elif action == "move_down" and self.keys.jump:
                     self.ctx.world.player.drop_through(self.ctx.world.physics)
-                elif event.key == pygame.K_b:
-                    self.ctx.panels.toggle_stat()
-                elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                elif action == "talk":
                     self._dialogue.try_talk()
 
         # 加载期间不采集按键、不兜底攻击
         if self._loading:
             return
         pressed = pygame.key.get_pressed()
-        # 移动只用方向键；A 为攻击
-        self.keys.left = bool(pressed[pygame.K_LEFT])
-        self.keys.right = bool(pressed[pygame.K_RIGHT])
-        self.keys.up = bool(pressed[pygame.K_UP])
-        self.keys.down = bool(pressed[pygame.K_DOWN])
-        self.keys.attack = bool(pressed[pygame.K_a])
-        self.keys.jump = bool(pressed[pygame.K_SPACE])
+        kb = self.keybindings
+        # 移动/攻击/跳跃按绑定键轮询（A 攻击同时用于按住兜底触发）
+        self.keys.left = bool(pressed[kb.key_of("move_left")])
+        self.keys.right = bool(pressed[kb.key_of("move_right")])
+        self.keys.up = bool(pressed[kb.key_of("move_up")])
+        self.keys.down = bool(pressed[kb.key_of("move_down")])
+        self.keys.attack = bool(pressed[kb.key_of("attack")])
+        self.keys.jump = bool(pressed[kb.key_of("jump")])
 
         # 兜底：弹窗瞬间按住的 A 等按键事件会被模态分支吞掉，
         # 用持续按键状态补触发攻击（按下即生效，无需等松开重按）
@@ -288,7 +310,7 @@ class Game:
         return False
 
     def _cast_skill(self, hotkey: int) -> None:
-        """按数字快捷键施放技能（读职业动态快捷键表）。成功则播放施放特效。"""
+        """按技能槽施放（键位经 KeyBindings 解析成槽号）。成功则播放施放特效。"""
         sid = self.ctx.world.player.skills.hotkeys.get(hotkey)
         if sid is None:
             return

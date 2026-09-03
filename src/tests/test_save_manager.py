@@ -98,30 +98,22 @@ def test_inventory_to_from_dict_empty():
 
 
 def test_skillbook_to_from_dict_roundtrip():
-    """SkillBook → dict → SkillBook，sp 與 levels 一致。"""
+    """SkillBook → dict → SkillBook，各转 SP 池与 levels 一致。"""
     from game.systems.skills import SkillBook
-    class FakeAssets:
-        class FakeWz:
-            class Root:
-                images = {}
-                subdirs = {}
-            root = Root()
-        def __init__(self):
-            self.wz = {"Skill": self.FakeWz(), "String": self.FakeWz()}
-    sb = SkillBook(FakeAssets(), 0)
-    sb.sp = 10
-    sb.levels["1001004"] = 3
-    sb.levels["1001005"] = 1
+    sb = SkillBook(None, 3000, defs={})
+    sb.add_sp(300, 10)
+    sb.levels["3001004"] = 3
+    sb.levels["3001005"] = 1
 
     d = sb.to_dict()
-    assert d["sp"] == 10
-    assert d["levels"] == {"1001004": 3, "1001005": 1}
+    assert d["sp_by_job"] == {"300": 10}
+    assert d["levels"] == {"3001004": 3, "3001005": 1}
 
-    sb2 = SkillBook(FakeAssets(), 0)
+    sb2 = SkillBook(None, 3000, defs={})
     sb2.from_dict(d)
-    assert sb2.sp == 10
-    assert sb2.levels["1001004"] == 3
-    assert sb2.levels["1001005"] == 1
+    assert sb2.sp_for_group(300) == 10
+    assert sb2.levels["3001004"] == 3
+    assert sb2.levels["3001005"] == 1
 
 
 def test_questlog_to_from_dict_roundtrip():

@@ -66,6 +66,21 @@ JOBS: Dict[int, JobDef] = {
         advance_lv=10, trainer_npc=1012100, starter_weapon="1452002",
         hp_gain=20, mp_gain=12, auto_ap={"dex": 1},
     ),
+    # 弓箭手 2 转：猎人。Skill.wz/310.img；被动 精準之弓/終極之弓；
+    # 沿用同一导师赫丽娜，等级门槛 Lv30；已有武器故不再补发初始武器。
+    3100: JobDef(
+        code=3100, name="猎人", tree_imgs=["310.img"],
+        passive_ids=[3100000, 3100001],
+        advance_lv=30, prejob=3000, trainer_npc=1012100,
+        hp_gain=20, mp_gain=12, auto_ap={"dex": 1},
+    ),
+    # 弓箭手 3 转：神射手。Skill.wz/311.img；被动 疾风步/致命箭；门槛 Lv70。
+    3110: JobDef(
+        code=3110, name="神射手", tree_imgs=["311.img"],
+        passive_ids=[3110000, 3110001],
+        advance_lv=70, prejob=3100, trainer_npc=1012100,
+        hp_gain=20, mp_gain=12, auto_ap={"dex": 1},
+    ),
 }
 
 
@@ -75,10 +90,17 @@ def can_advance(player, jobdef: JobDef) -> bool:
             and player.level >= jobdef.advance_lv)
 
 
-def job_for_trainer(npc_id) -> Optional["JobDef"]:
-    """回传以 npc_id 为导师的职业定义（用于转职对话；无则 None）。"""
+def job_for_trainer(npc_id, player_job: Optional[int] = None) -> Optional["JobDef"]:
+    """回传导师 npc_id 对应的转职目标职业（无则 None）。
+
+    给定 player_job 时按职业链解析：返回以该 NPC 为导师、且前置职业恰为玩家
+    当前职业的那一阶（赫丽娜一人承担 1/2/3 转）；已达最高阶或职业不符则 None。
+    不给 player_job 时回退旧语义：首个匹配该导师的职业。
+    """
     for jd in JOBS.values():
-        if jd.trainer_npc is not None and str(jd.trainer_npc) == str(npc_id):
+        if jd.trainer_npc is None or str(jd.trainer_npc) != str(npc_id):
+            continue
+        if player_job is None or jd.prejob == player_job:
             return jd
     return None
 
@@ -100,4 +122,42 @@ def skill_ids_for_job(assets, code: int) -> List[str]:
             ids.extend(c.name for c in node.children() if c.name.isdigit())
         except Exception:
             continue
+    return ids
+
+
+def job_chain(code: int) -> List[JobDef]:
+    """职业链：沿 prejob 上溯到根，回传有技能树的职业（旧→新，如 猎人 → [弓箭手, 猎人]）。
+
+    新手（无 tree_imgs）不入链；用于累积加载各转技能树与逐转 SP 归集。
+    """
+    out: List[JobDef] = []
+    seen: set = set()
+    cur = code
+    while cur in JOBS and cur not in seen:
+        seen.add(cur)
+        jd = JOBS[cur]
+        if jd.tree_imgs:
+            out.append(jd)
+        if jd.prejob == cur:
+            break
+        cur = jd.prejob
+    out.reverse()
+    return out
+
+
+def sp_group_of_skill(skill_id: str) -> int:
+    """技能 id → 所属 SP 职业组（技能图前三位，如 3101002→310、3000000→300）。"""
+    return int(resolve_skill_img(skill_id)[:3])
+
+
+def job_sp_group(code: int) -> int:
+    """职业代码 → SP 职业组（3000→300、3110→311）。"""
+    return code // 10
+
+
+def skill_ids_for_chain(assets, code: int) -> List[str]:
+    """职业链上所有职业的技能 id 并集（累积多转技能树，需 WZ）。"""
+    ids: List[str] = []
+    for jd in job_chain(code):
+        ids.extend(skill_ids_for_job(assets, jd.code))
     return ids

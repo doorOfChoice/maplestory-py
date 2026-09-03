@@ -263,7 +263,8 @@ class World:
             if self.player.is_ranged():
                 if not self.player.attack_projectile_spawned:
                     self.player.attack_projectile_spawned = True
-                    self.combat.spawn_arrows(self.player, self.player.pending_skill)
+                    self.combat.spawn_arrows(self.player, self.player.pending_skill,
+                                             self.monsters)
             else:
                 self.combat.player_attack(self.player, self.monsters)
 

@@ -137,3 +137,91 @@ def test_update_arrows_removes_dead():
     for _ in range(10):
         combat.update_arrows(1 / 60.0, [], player=None)
     assert combat.arrows == []
+
+
+# ── 原版式瞄准：射程圈内朝向上的最近怪，箭沿其方向斜射 ──────────────
+import math
+
+
+class AimP:
+    x, y = 0.0, 100.0
+    facing_right = True
+    level = 10
+    def attack_range(self):
+        return (50, 50)
+    def crit_rate(self):
+        return 0.0
+    def crit_mult(self):
+        return 1.5
+
+
+def combat_with_balls() -> Combat:
+    class FakeAssets:
+        def skill_ball_frames(self, sid):
+            return []
+        def skill_hit_frames(self, sid):
+            return []
+        def normal_arrow_frames(self):
+            return []
+    return Combat(FakeAssets())
+
+
+def test_spawn_arrows_aims_at_mob_above():
+    """圈内上方有怪：朝其中心斜射，合速仍为 ARROW_SPEED。"""
+    from game import settings
+    combat = combat_with_balls()
+    mob = FakeTarget(x=200.0, cy=110.0, h=80)   # 身体中心 (200, 70) 在手点(16,92)上方
+    combat.spawn_arrows(AimP(), None, [mob])
+    a = combat.arrows[0]
+    assert a.vx > 0 and a.vy < 0                # 上方怪 → 向上斜射
+    assert math.isclose(math.hypot(a.vx, a.vy), settings.ARROW_SPEED, rel_tol=1e-3)
+
+
+def test_spawn_arrows_aim_prefers_nearest():
+    """圈内有两只怪：瞄准更近的那只方向。"""
+    combat = combat_with_balls()
+    near = FakeTarget(x=150.0, cy=210.0, h=80)   # 中心 (150,170) 在下方
+    far = FakeTarget(x=230.0, cy=60.0, h=80)      # 中心 (230,20) 在上方
+    combat.spawn_arrows(AimP(), None, [far, near])
+    assert combat.arrows[0].vy > 0               # 近怪在下 → 向下射
+
+
+def test_spawn_arrows_ignores_mob_behind():
+    """身后的怪不瞄：保持水平直射。"""
+    combat = combat_with_balls()
+    mob = FakeTarget(x=-200.0, cy=140.0, h=80)
+    combat.spawn_arrows(AimP(), None, [mob])
+    assert combat.arrows[0].vy == 0.0
+
+
+def test_spawn_arrows_out_of_radius_fires_straight():
+    """超出瞄准圈的怪：直射。"""
+    from game import settings
+    combat = combat_with_balls()
+    mob = FakeTarget(x=settings.ARROW_AIM_RADIUS + 300.0, cy=140.0, h=80)
+    combat.spawn_arrows(AimP(), None, [mob])
+    assert combat.arrows[0].vy == 0.0
+
+
+def test_spawn_arrows_all_bullets_aim_same_target():
+    """多支箭（双发类技能）瞄向同一最近目标。"""
+    combat = combat_with_balls()
+    mob = FakeTarget(x=180.0, cy=160.0, h=80)
+    skill = {"id": "3001005", "damage": 0.92, "mob_count": 1,
+             "bullet_count": 2, "mp_con": 10, "hp_con": 0, "range": 0}
+    combat.spawn_arrows(AimP(), skill, [mob])
+    assert len(combat.arrows) == 2
+    assert combat.arrows[0].vy > 0 and combat.arrows[1].vy > 0
+    assert abs(combat.arrows[0].vx - combat.arrows[1].vx) < 10.0  # 近平行同目标
+
+
+def test_aimed_arrow_flies_straight_line():
+    """斜射箭沿直线匀速前进（无重力）。"""
+    combat = combat_with_balls()
+    mob = FakeTarget(x=200.0, cy=110.0, h=80)
+    combat.spawn_arrows(AimP(), None, [mob])
+    a = combat.arrows[0]
+    sx, sy, ratio = a.x, a.y, a.vy / a.vx
+    for _ in range(10):
+        a.update(1 / 60.0, [], combat, player=None)   # 怪移开：不转向、保持直线
+    assert math.isclose((a.y - sy) / (a.x - sx), ratio, rel_tol=1e-6)

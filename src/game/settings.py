@@ -16,6 +16,7 @@ REGION = "EMS"
 
 SAVE_DIR = PROJECT_ROOT / "saves"
 SAVE_FILE = SAVE_DIR / "save.json"
+KEYBINDINGS_FILE = SAVE_DIR / "keybindings.json"   # 全局键位（跨角色共用）
 SAVE_INTERVAL = 60.0          # 定时自动存档秒数
 
 MAP_ID = "100010000"            # 弓箭手村东部小山（49 怪 + 2 NPC）
@@ -154,7 +155,8 @@ TRAINER_SPAWN_MAP = "100010000"  # 导师注入的地图（出生图：弓箭手
 TRAINER_SPAWN = (-520.0, 455.0)  # 导师站立点（出生 portal 旁地面 foothold，脚底坐标）
 
 # ── 远程弹道（直线快箭 + 穿透计数）──────────────────────────────────
-ARROW_SPEED = 900.0              # 箭矢水平速度 px/s
+ARROW_SPEED = 900.0              # 箭矢飞行速度 px/s（瞄准后为合速）
+ARROW_AIM_RADIUS = 240.0         # 原版式瞄准圈：圈内面朝一侧的最近怪会被瞄
 ARROW_LIFETIME = 0.6             # 箭矢存活秒数（超程消失）
 NORMAL_ARROW_ITEM_ID = "02060000"  # 普攻箭矢贴图来源：金币箭物品的 bullet 节点
 

@@ -31,8 +31,8 @@ function M:snapshot()
 	elseif self.state == "confirm" then
 		return { npc = c.npc_name,
 			lines = { "你想成为" .. c.jobdef.name .. "吗？",
-				"达到 Lv" .. c.jobdef.advance_lv .. " 的新手可以转职为" .. c.jobdef.name .. "，",
-				"转职后我会送你武器并教你该职业的技能。" },
+				"达到 Lv" .. c.jobdef.advance_lv .. " 就可以转职为" .. c.jobdef.name .. "，",
+				"转职后我会教你该职业的技能。" },
 			mode = "quest", options = { "yes", "no" } }
 	elseif self.state == "declined" then
 		return { npc = c.npc_name,

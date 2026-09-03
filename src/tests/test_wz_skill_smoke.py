@@ -37,6 +37,30 @@ def test_bowman_tree_contains_bowman_skills():
 
 
 @needs_wz
+def test_bowman_second_third_job_trees_load():
+    """2/3 转（猎人/神射手）技能树自 WZ 正常加载，转职附赠被动满级生效。"""
+    pygame.init()
+    pygame.display.set_mode((8, 8))
+    from game.render.assets import Assets
+    from game.core.jobs import JOBS, skill_ids_for_job
+    from game.systems.skills import SkillBook
+    assets = Assets(settings.TRAINER_SPAWN_MAP)
+    try:
+        assert "3101005" in skill_ids_for_job(assets, 3100)
+        assert "3111006" in skill_ids_for_job(assets, 3110)
+        hunter = SkillBook(assets, 3100)
+        hunter.on_advance(JOBS[3100])
+        assert hunter.levels["3100000"] == hunter.defs["3100000"].max_level
+        hm = hunter.passive_mods()
+        assert hm["acc"] > 0 and hm["crit_mult"] >= 200
+        bm = SkillBook(assets, 3110)
+        bm.on_advance(JOBS[3110])
+        assert bm.levels["3110001"] == bm.defs["3110001"].max_level
+    finally:
+        assets.close()
+
+
+@needs_wz
 def test_buff_skill_level_has_time_field():
     """真实 buff 技能：疾風步(3001003) level 表含 time（秒，70s）与 mpCon。"""
     pygame.init()

@@ -31,16 +31,28 @@ class FakeAssets:
 
 
 class FakeSkills:
+    """最小技能书替身：只提供面板滚动路径用到的公开接口。"""
     def __init__(self, n: int):
+        self.job = 3000
         self.defs = {f"s{i}": SimpleNamespace(id=f"s{i}", name=f"技{i}", desc="",
                                               max_level=1, char_level=1,
                                               invisible=False,
                                               stat=lambda lv, k, d=0: d)
                      for i in range(n)}
         self.levels = {}
-        self.sp = 0
+        self.sp_by_job = {}
 
-    def learnable(self):
+    @property
+    def total_sp(self):
+        return 0
+
+    def sp_for_group(self, group):
+        return 0
+
+    def skills_for_group(self, group):
+        return sorted(self.defs)
+
+    def learnable(self, owner_group=None):
         return sorted(self.defs)
 
 

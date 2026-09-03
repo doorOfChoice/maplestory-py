@@ -311,11 +311,16 @@ def test_build_advance_quest_defs_trainer_collect():
     assert [it.qid for it in items] == ["adv_3000"]
 
 
-def test_build_advance_quest_defs_hidden_after_job():
-    """已转职（job=3000）后，转职任务不再出现在列表。"""
+def test_advance_quests_follow_job_chain():
+    """同一导师按职业链给任务：新手→adv_3000，弓箭手→adv_3100，猎人→adv_3110，神射手→无。"""
     defs = build_advance_quest_defs()
     log = QuestLog(defs)
-    player = SimpleNamespace(level=30, job=3000, x=0.0, y=0.0,
+    player = SimpleNamespace(level=10, job=0, x=0.0, y=0.0,
                              inventory=SimpleNamespace(etcs={}, consumes={}))
-    items = collect_npc_quests(defs, log, "1012100", player)
-    assert items == []
+    assert [it.qid for it in collect_npc_quests(defs, log, "1012100", player)] == ["adv_3000"]
+    player.job = 3000
+    assert [it.qid for it in collect_npc_quests(defs, log, "1012100", player)] == ["adv_3100"]
+    player.job = 3100
+    assert [it.qid for it in collect_npc_quests(defs, log, "1012100", player)] == ["adv_3110"]
+    player.job = 3110
+    assert collect_npc_quests(defs, log, "1012100", player) == []

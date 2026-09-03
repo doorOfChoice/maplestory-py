@@ -9,6 +9,7 @@ Game 主循环持有 Combat，负责：
 
 from __future__ import annotations
 
+import math
 import random
 from typing import List, Optional, Protocol, Tuple
 
@@ -263,6 +264,7 @@ class Arrow:
         self.hit_ids: set = set()
         self.dead = False
         self._flipped: Optional[list] = None
+        self._rot_cache: dict = {}
 
     def rect(self) -> pygame.Rect:
         return pygame.Rect(int(self.x - 6), int(self.y - 6), 12, 12)
@@ -299,6 +301,20 @@ class Arrow:
 
     def draw(self, surface: pygame.Surface, camera) -> None:
         if not self.frames:
+            return
+        if abs(self.vy) > 1e-6:
+            # 斜射弹道：贴图按速度方向旋转（角度量化缓存）
+            idx = Animation.frame_at(self.frames, self.age * 1000.0)
+            img, _, _ = self.frames[idx]
+            deg = math.degrees(math.atan2(-self.vy, self.vx))
+            q = int(round(deg / 5.0) * 5)
+            key = (idx, q)
+            rot = self._rot_cache.get(key)
+            if rot is None:
+                rot = pygame.transform.rotate(img, q)
+                self._rot_cache[key] = rot
+            sx, sy = camera.to_screen(self.x, self.y)
+            surface.blit(rot, rot.get_rect(center=(int(sx), int(sy))))
             return
         frames = self.frames
         if self.vx < 0:
@@ -386,10 +402,34 @@ class Combat:
                 self._on_kill(player, mob)
 
     # ── 远程弹道 ───────────────────────────────────────────────────
-    def spawn_arrows(self, player: Combatant,
-                     skill_data: Optional[dict]) -> None:
-        """一次远程起手：按 bulletCount 生成错峰直线箭，从手部位置出发。
+    def _aim_point(self, player: Combatant, facing: int,
+                   monsters) -> Optional[Tuple[float, float]]:
+        """原版式瞄准：瞄准圈内、面朝一侧最近的怪 → 其身体中心；无则 None（直射）。"""
+        if not monsters:
+            return None
+        ref_y = player.y - 8.0
+        best: Optional[Tuple[float, float]] = None
+        best_d = float("inf")
+        r2 = settings.ARROW_AIM_RADIUS ** 2
+        for mob in monsters:
+            if getattr(mob, "dead", False):
+                continue
+            dx = mob.x - player.x
+            if dx * facing <= 0:
+                continue
+            cy = mob.cy - mob.sprite_h / 2.0
+            d2 = dx * dx + (cy - ref_y) ** 2
+            if d2 > r2 or d2 >= best_d:
+                continue
+            best, best_d = (mob.x, cy), d2
+        return best
 
+    def spawn_arrows(self, player: Combatant, skill_data: Optional[dict],
+                     monsters=None) -> None:
+        """一次远程起手：按 bulletCount 生成错峰箭，从手部位置出发。
+
+        原版式瞄准：瞄准圈内面朝一侧有怪时，箭沿出手点→怪身体中心方向斜射
+        （多发技能所有箭瞄向同一最近目标）；无目标则水平直射。
         skill_data=None 为普攻：单箭、攻击力 100%、红色飘字，
         弹道贴图用箭矢物品的 bullet 节点（原版同款）。
         """
@@ -416,11 +456,19 @@ class Combat:
             frames = self.assets.skill_ball_frames(sid) if self.assets else []
             hit_frames = self.assets.skill_hit_frames(sid) if self.assets else []
         facing = 1 if player.facing_right else -1
+        aim = self._aim_point(player, facing, monsters)
+        speed = settings.ARROW_SPEED
         for i in range(n):
             offset = (i - (n - 1) / 2.0) * 7.0     # 多支箭纵向错峰
+            ax, ay = player.x + facing * 16.0, player.y - 8.0 + offset
+            vx, vy = facing * speed, 0.0
+            if aim is not None:
+                dx, dy = aim[0] - ax, aim[1] - ay
+                dist = math.hypot(dx, dy)
+                if dist > 1e-6:
+                    vx, vy = dx / dist * speed, dy / dist * speed
             self.arrows.append(Arrow(
-                x=player.x + facing * 16.0, y=player.y - 8.0 + offset,
-                vx=facing * settings.ARROW_SPEED, vy=0.0,
+                x=ax, y=ay, vx=vx, vy=vy,
                 frames=frames, hit_frames=hit_frames,
                 dmg=dmg, mob_count=mob_count, kind=kind, crit=crit,
                 life=settings.ARROW_LIFETIME))

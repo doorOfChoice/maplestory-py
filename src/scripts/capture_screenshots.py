@@ -94,7 +94,7 @@ def main() -> None:
 
     # ── 4. 技能欄：升級學會兩個技能後開啟 ─────────────────────────
     game.player.level = 10
-    game.player.skills.gain_sp(8)
+    game.player.skills.gain_sp_for_level(game.player.level, 8)
     game.player.skills.learn_or_upgrade("1001005", game.player.level)
     for _ in range(2):
         game.player.skills.learn_or_upgrade("1001004", game.player.level)
