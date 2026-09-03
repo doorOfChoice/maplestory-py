@@ -36,6 +36,7 @@ class _Keys:
     jump = False       # 按住跳
     attack = False
     drop = False       # 下跳
+    pickup = False     # 按住 Z 连捡
 
 
 class Game:
@@ -135,6 +136,7 @@ class Game:
         self._dialogue = NpcDialogueController(self.ctx, self.quest_defs)
         self._banner: Optional[Tuple[str, str]] = None
         self._banner_timer = 0.0
+        self._pickup_timer = 0.0
         self.spawn_grace = settings.SPAWN_GRACE
         self.fade = 1.0        # 开屏进入游戏时黑场淡入
 
@@ -274,6 +276,7 @@ class Game:
                         self.ctx.world.player.jump()
                 elif action == "pickup":
                     self._try_pickup()
+                    self._pickup_timer = settings.PICKUP_HOLD_INTERVAL
                 elif action == "attack":
                     if self.ctx.world.player.start_attack():
                         self.ctx.audio.play_attack(self.ctx.world.player.equips)
@@ -294,6 +297,7 @@ class Game:
         self.keys.down = bool(pressed[kb.key_of("move_down")])
         self.keys.attack = bool(pressed[kb.key_of("attack")])
         self.keys.jump = bool(pressed[kb.key_of("jump")])
+        self.keys.pickup = bool(pressed[kb.key_of("pickup")])
 
         # 兜底：弹窗瞬间按住的 A 等按键事件会被模态分支吞掉，
         # 用持续按键状态补触发攻击（按下即生效，无需等松开重按）
@@ -434,6 +438,14 @@ class Game:
             return
         if self.dead:
             return
+
+        # 按住 Z 连捡：冷却结束后再触发；成功则进入下一轮间隔，
+        # 失败（周边没掉落物）保持 0 待机，一有掉落即刻捡取
+        if self.keys.pickup:
+            if self._pickup_timer > 0.0:
+                self._pickup_timer -= dt
+            elif self._try_pickup():
+                self._pickup_timer = settings.PICKUP_HOLD_INTERVAL
 
         # 对话框不再暂停世界；走远 / 切图自动收起
         self._dialogue.update()
