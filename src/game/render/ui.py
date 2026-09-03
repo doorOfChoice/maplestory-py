@@ -145,11 +145,6 @@ class UI:
         return None
 
     # ── 任务对话框 ─────────────────────────────────────────────────
-    @property
-    def quest_entries(self) -> List[Tuple[str, int]]:
-        """旧接口兼容别名：蓝字链接行（迁移完成后可删）。"""
-        return self.quest_links
-
     def show_conv(self, title: str, lines: List[str],
                   links: List[Tuple[str, int]], buttons: List[str],
                   terminal: bool) -> None:
