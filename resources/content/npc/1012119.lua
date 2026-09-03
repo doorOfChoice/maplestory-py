@@ -61,7 +61,7 @@ function M.talk(ctx)
             click = function(c) return "chat" end },
         },
       },
-      accepted = { text = { "太好了！收集 10 个红药水就来找我吧。",
+      accepted = { text = { "太好了！收集 10 个 #t2000000# 就来找我吧。",
                            "按 Q 查看任务日志。" } },
       rewarded = { text = { "这是你的奖励！" } },
       not_yet  = { text = { "还差一些，继续加油！" } },

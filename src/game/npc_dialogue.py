@@ -252,8 +252,15 @@ class NpcDialogueController:
         self._show_conv()
 
     def _show_conv(self) -> None:
+        """渲染当前快照；文本统一过官方标记解析（#t#o#m#p、#b/#r、\\n）。
+
+        适配器（quest_flow）已 qmark 过的文本不含残留标记，重复解析无损。
+        """
         snap = self._conv.current()
-        self.ctx.ui.show_conv(snap.title, snap.lines, snap.links,
+        self.ctx.ui.show_conv(snap.title,
+                              [self._qmark(l) for l in snap.lines],
+                              [(self._qmark(label), note)
+                               for label, note in snap.links],
                               snap.buttons, snap.terminal)
 
     def _close_conv(self) -> None:

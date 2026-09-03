@@ -95,7 +95,7 @@ class UI:
         # ── 会话面板（黑正文行 + 蓝字链接行 + 按钮，同一 UtilDlgEx）──
         self.quest_visible = False
         self.quest_title = ""
-        self.quest_lines: List[str] = []                        # 黑正文行（原文）
+        self.quest_lines: List[str] = []                        # 黑正文行（已解析标记）
         self.quest_links: List[Tuple[str, int]] = []            # 蓝字 (标注, Lv)
         self.quest_button_keys: List[str] = []                  # yes/no 子集
         self.quest_terminal = False                             # 终态画 BtOK

@@ -125,6 +125,28 @@ def test_advancement_flow_uses_script(game):
     game._draw()   # 转职后正常出帧
 
 
+def test_conversation_text_renders_official_markers(game):
+    """talk() 的黑文本与蓝字渲染前统一过官方标记解析（#t<id># → 物品名）。"""
+    pytest.importorskip("lupa")
+    from game.systems.conversation import Conversation, make_ctx_view
+    _boot(game)
+    src = """
+local M = {}
+function M.talk(ctx)
+  return { start = "s", steps = { s = {
+    text = { "#t2000000#在这里" },
+    links = { { label = "点 #t2000003#" } } } } }
+end
+return M
+"""
+    host = game.ctx.world.player
+    ctx = make_ctx_view(host, "1012100", "赫丽娜", game.ctx.assets.map_id)
+    conv = Conversation.from_source(src, {}, ctx, title="T")
+    game._dialogue._set_conv(conv, _fake_npc())
+    assert game.ctx.ui.quest_lines == ["假物品在这里"]
+    assert game.ctx.ui.quest_links[0][0] == "点 假物品"
+
+
 def test_advance_quest_registered_in_boot(game):
     """启动装配后 quest_defs 含转职任务，Lv10 新手在导师处可见。"""
     from game.systems.quests import collect_npc_quests
