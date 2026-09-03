@@ -8,7 +8,8 @@
 交互：点货架物品选中（高亮），点「购买」买入一件；点背包物品选中，点
 「出售」把整堆/整件卖出（消耗品/其他按 SELL_RATE×数量，装备按单件）。
 自制卷轴（234xxxxx 段）无 WZ 图标，用自绘卷轴贴图兜底。点右上角 ×、
-原版离开商店按钮或按 Esc 关闭；背包列表超长可用滚轮滚动。
+原版离开商店按钮或按 Esc 关闭；货架 / 背包列表超长可用滚轮滚动，滚轮
+作用于光标所在栏（左半货架、右半背包，两栏独立）。
 """
 
 from __future__ import annotations
@@ -60,7 +61,8 @@ class ShopPanel:
         self.tab = 0
         self.sel_shelf: Optional[int] = None
         self.sel_bag: Optional[int] = None
-        self._scroll = 0
+        self._scroll = 0              # 背包（右栏）滚动
+        self._scroll_shelf = 0        # 货架（左栏）滚动
         self.rect = pygame.Rect(0, 0, PANEL_W, PANEL_H)
         self._close_rect = pygame.Rect(0, 0, 0, 0)
         self._tab_rects: List[Tuple[pygame.Rect, str]] = []
@@ -93,6 +95,7 @@ class ShopPanel:
         self.sel_shelf = None
         self.sel_bag = None
         self._scroll = 0
+        self._scroll_shelf = 0
 
     def close(self) -> None:
         self.visible = False
@@ -155,6 +158,7 @@ class ShopPanel:
             if rect.collidepoint(pos):
                 self.tab = self.shop_ids.index(shop_id)
                 self.sel_shelf = None
+                self._scroll = self._scroll_shelf = 0
                 return True
         for rect, idx in self._shelf_rects:
             if rect.collidepoint(pos):
@@ -175,9 +179,17 @@ class ShopPanel:
     def handle_wheel(self, pos: Tuple[int, int], amount: int, player) -> bool:
         if not self.visible or not self.rect.collidepoint(pos):
             return False
-        entries = self._bag_entries(player)
-        max_scroll = max(0, len(entries) - self._vis_rows())
-        self._scroll = max(0, min(max_scroll, self._scroll + amount))
+        official = self._wz("backgrnd") is not None
+        rows = BG_NROWS if official else self._vis_rows()
+        # 光标在左半 → 滚货架；右半 → 滚背包
+        if pos[0] - self.rect.x < self.rect.w // 2:
+            items = self._shelf_items()
+            max_scroll = max(0, len(items) - rows)
+            self._scroll_shelf = max(0, min(max_scroll, self._scroll_shelf + amount))
+        else:
+            entries = self._bag_entries(player)
+            max_scroll = max(0, len(entries) - rows)
+            self._scroll = max(0, min(max_scroll, self._scroll + amount))
         return True
 
     def _do_buy(self, player, combat) -> None:
@@ -298,20 +310,24 @@ class ShopPanel:
         meso_s = self.ui.font_tiny.render(f"{combat.meso:,}", True, (120, 96, 40))
         surface.blit(meso_s, (x + BG_MESO_X, y + BG_MESO_Y))
 
-        # ── 左栏：货架物品（买）─────────────────────────────────────
+        # ── 左栏：货架物品（买，可滚动）─────────────────────────────
         items = self._shelf_items()
+        self._scroll_shelf = max(0, min(self._scroll_shelf,
+                                        max(0, len(items) - BG_NROWS)))
         row_x = x + BG_LCOL_X
         row_w = BG_LCOL_W
-        for i, item_id in enumerate(items):
-            if i >= BG_NROWS:
+        for j in range(BG_NROWS):
+            i = self._scroll_shelf + j
+            if i >= len(items):
                 break
-            rect = self._row_rect(row_x, row_w, y + BG_ROW_Y0, BG_ROW_H, i)
-            self._draw_buy_row(surface, rect, item_id, fs,
+            rect = self._row_rect(row_x, row_w, y + BG_ROW_Y0, BG_ROW_H, j)
+            self._draw_buy_row(surface, rect, items[i], fs,
                                i == self.sel_shelf)
             self._shelf_rects.append((rect, i))
 
         # ── 右栏：背包物品（卖，可滚动）────────────────────────────
         entries = self._bag_entries(player)
+        self._scroll = max(0, min(self._scroll, max(0, len(entries) - BG_NROWS)))
         bag_x = x + BG_RCOL_X
         bag_w = BG_RCOL_W
         for j in range(BG_NROWS):
@@ -443,12 +459,19 @@ class ShopPanel:
             self._tab_rects.append((tr, shop_id))
             tx += tr.w + 6
 
-        # 货架（左栏）
+        # 货架（左栏，可滚动）
         shelf_x = x + 14
         shelf_y = y + TITLE_H + TAB_H + 4
         items = self._shelf_items()
-        for i, item_id in enumerate(items):
-            ry = shelf_y + i * ROW_H
+        shelf_rows = self._vis_rows()
+        self._scroll_shelf = max(0, min(self._scroll_shelf,
+                                        max(0, len(items) - shelf_rows)))
+        for j in range(shelf_rows):
+            i = self._scroll_shelf + j
+            if i >= len(items):
+                break
+            item_id = items[i]
+            ry = shelf_y + j * ROW_H
             rect = pygame.Rect(shelf_x, ry, SHELF_W, ROW_H - 4)
             pygame.draw.rect(surface, (60, 78, 96) if i == self.sel_shelf
                              else (36, 42, 54), rect, border_radius=4)
