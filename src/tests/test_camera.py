@@ -1,5 +1,6 @@
 """相机：center_on 把视口位置取整成整数像素，消除地图 blit 与实体绘制的 ±1px 抖动。"""
 
+from game import settings
 from game.core.camera import Camera
 
 
@@ -12,8 +13,8 @@ def test_center_on_snaps_to_integer():
     """center_on 用浮点玩家坐标算出的视口位置会被取整成像素。"""
     cam = make_camera()
     cam.center_on(2500.7, 1000.3)
-    assert cam.x == 2020   # int(2500.7 - 480)
-    assert cam.y == 676    # int(1000.3 - 540*0.6)
+    assert cam.x == int(2500.7 - settings.VIEW_W / 2)
+    assert cam.y == int(1000.3 - settings.VIEW_H * 0.6)
     assert cam.x == int(cam.x) and cam.y == int(cam.y)
 
 

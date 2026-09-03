@@ -23,8 +23,8 @@ MAP_ID = "100010000"            # 弓箭手村东部小山（49 怪 + 2 NPC）
 
 # ── 窗口 / 视口 ──────────────────────────────────────────────────────
 # 内部视口直接 = 窗口像素，scale=1 让画面按原生尺寸显示（不再放大）。
-VIEW_W = 960
-VIEW_H = 540
+VIEW_W = 800
+VIEW_H = 600
 WINDOW_SCALE = 1
 WINDOW_W = VIEW_W * WINDOW_SCALE
 WINDOW_H = VIEW_H * WINDOW_SCALE

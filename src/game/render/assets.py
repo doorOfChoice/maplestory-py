@@ -2,7 +2,9 @@
 
 职责：
   · 打开全部需要的 WZ 档案（Map / Character / Mob / Npc / String / Sound）
-  · 预渲染整张地图为一张大 Surface（相机按视口 blit 子区域）
+  · 预渲染整张地图（tiles/objects）为一张大 Surface（相机按视口 blit 子区域）；
+    back 背景层不烤进整图，解码为 back_layers 由 world 逐帧相对相机绘制
+    （视差 + 平铺铺满视口，见 game/render/backgrounds.py）
   · 按 (equips, pose, flip) 缓存角色姿态帧；按 (mob, action, flip) 缓存怪物帧；
     按 (npc, action, flip) 缓存 NPC 帧 —— 均为 [(pygame.Surface, delay_ms)] + 锚点信息
   · 名字查询（地图 / 怪物 / NPC / 物品）与 BGM / 音效字节提取
@@ -34,6 +36,7 @@ from game import settings
 from game.core.jobs import (is_ranged_weapon, is_two_handed_weapon,
                             resolve_skill_img)
 from game.core.localize import to_simplified
+from game.render.backgrounds import BackLayer
 
 # 攻击姿态候选表（玩家攻击用）：双手武器优先 swingT*/stabT*，其余 swingO*/stabO*
 ONE_HANDED_ATTACK_POSES = ("swingO1", "swingO2", "swingO3", "stabO1", "stabO2")
@@ -114,12 +117,16 @@ class Assets:
         self._closed = False
         self._load_result: Optional[Dict] = None
 
-        # 整图 LRU 缓存：map_id → {desc, img(PIL), bgm, px}，跨图往返免重渲染
+        # 整图 LRU 缓存：map_id → {desc, img/img_bg(PIL), backs, bgm, px}，
+        # 跨图往返免重渲染
         self._map_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._map_cache_px = 0
         self._cache_lock = threading.Lock()
 
-        # 地图静态数据
+        # 地图静态数据（load_map 内赋值）
+        self.map_surface: Optional[pygame.Surface] = None
+        self.minimap_base: Optional[pygame.Surface] = None
+        self.back_layers: List[BackLayer] = []
         self.load_map(map_id)
 
         # 后台预热各类常用素材，避免首次使用时主线程卡顿
@@ -206,10 +213,14 @@ class Assets:
         self.life = self.map_desc["life"]
         if entry is not None and entry.get("img") is not None:
             self.map_surface = pil_to_surface(entry["img"])
+            self.minimap_base = pil_to_surface(entry["img_bg"])
+            self.back_layers = self._build_back_layers(entry["backs"])
         else:
-            img = self._compose_map(map_id)
+            img, img_bg, backs = self._compose_map_all(map_id)
             self.map_surface = pil_to_surface(img)
-            self._cache_put(map_id, self.map_desc, img,
+            self.minimap_base = pil_to_surface(img_bg)
+            self.back_layers = self._build_back_layers(backs)
+            self._cache_put(map_id, self.map_desc, img, img_bg, backs,
                             self._bgm_path_of(map_id, self.map_desc))
         self.map_width = self.bounds["width"]
         self.map_height = self.bounds["height"]
@@ -223,14 +234,16 @@ class Assets:
                 self._map_cache.move_to_end(map_id)
             return entry
 
-    def _cache_put(self, map_id: str, desc: Dict, img, bgm: str) -> None:
+    def _cache_put(self, map_id: str, desc: Dict, img, img_bg,
+                   backs, bgm: str) -> None:
         """写入整图缓存，并按像素预算淘汰最久未用项（当前图不淘汰）。"""
-        px = int(desc["bounds"]["width"]) * int(desc["bounds"]["height"])
+        px = (int(desc["bounds"]["width"]) * int(desc["bounds"]["height"]) * 2)
         with self._cache_lock:
             old = self._map_cache.pop(map_id, None)
             if old is not None:
                 self._map_cache_px -= old["px"]
             self._map_cache[map_id] = {"desc": desc, "img": img,
+                                       "img_bg": img_bg, "backs": backs,
                                        "bgm": bgm, "px": px}
             self._map_cache_px += px
             while (self._map_cache_px > settings.MAP_CACHE_BUDGET_PX
@@ -242,15 +255,49 @@ class Assets:
                 dropped = self._map_cache.pop(victim)
                 self._map_cache_px -= dropped["px"]
 
-    def _compose_map(self, map_id: str):
-        """渲染整图为 RGBA PIL Image。"""
+    def _compose_map(self, map_id: str, backgrounds: bool = False):
+        """渲染整图为 RGBA PIL Image。
+
+        默认不含 back 背景层：背景由 world 逐帧相对相机绘制（视差 + 平铺
+        铺满视口），烤进整图会在宽视口下露出硬边 / 空缺。
+        """
         img = self.map_renderer.compose(
             map_id, scale=1.0, time_ms=0,
+            backgrounds=backgrounds,
             life=False, reactors=False, portals=False,
         )
         if img.mode != "RGBA":
             img = img.convert("RGBA")
         return img
+
+    def _compose_map_all(self, map_id: str):
+        """主视图整图（无背景）+ 小地图底图（含背景）+ back 层原始数据。"""
+        return (self._compose_map(map_id),
+                self._compose_map(map_id, backgrounds=True),
+                self.map_renderer.back_items(map_id))
+
+    def _build_back_layers(self, raw_items: List[Dict[str, Any]]
+                           ) -> List[BackLayer]:
+        """back 原始数据 → BackLayer：flip / 半透明预烘焙进 Surface。"""
+        layers: List[BackLayer] = []
+        for item in raw_items:
+            frames = []
+            for pil_img, (ox, oy), delay in item["frames"]:
+                if item["flip"]:
+                    pil_img = pil_img.transpose(
+                        Image.Transpose.FLIP_LEFT_RIGHT)
+                    ox = pil_img.width - ox
+                if item["alpha"] < 255:
+                    pil_img = pil_img.copy()
+                    channel = pil_img.getchannel("A").point(
+                        lambda value: value * item["alpha"] // 255)
+                    pil_img.putalpha(channel)
+                frames.append((pil_to_surface(pil_img), (ox, oy), delay))
+            layers.append(BackLayer(
+                x=item["x"], y=item["y"], rx=item["rx"], ry=item["ry"],
+                bg_type=item["type"], cx=item["cx"], cy=item["cy"],
+                front=item["front"], frames=frames))
+        return layers
 
     def _bgm_path_of(self, map_id: str, desc: Dict) -> str:
         try:
@@ -301,16 +348,18 @@ class Assets:
                 if is_real:
                     self._load_result = {
                         "map_id": map_id, "desc": entry["desc"],
-                        "img": entry["img"], "bgm_path": entry["bgm"]}
+                        "img": entry["img"], "img_bg": entry["img_bg"],
+                        "backs": entry["backs"], "bgm_path": entry["bgm"]}
                 return
             desc = entry["desc"] if entry is not None \
                 else self.map_renderer.describe(map_id)
-            img = self._compose_map(map_id)
+            img, img_bg, backs = self._compose_map_all(map_id)
             bgm = self._bgm_path_of(map_id, desc)
-            self._cache_put(map_id, desc, img, bgm)
+            self._cache_put(map_id, desc, img, img_bg, backs, bgm)
             if is_real:
                 self._load_result = {"map_id": map_id, "desc": desc,
-                                     "img": img, "bgm_path": bgm}
+                                     "img": img, "img_bg": img_bg,
+                                     "backs": backs, "bgm_path": bgm}
         except Exception as e:
             traceback.print_exc()
             if is_real:
@@ -354,6 +403,8 @@ class Assets:
         self.map_width = self.bounds["width"]
         self.map_height = self.bounds["height"]
         self.map_surface = pil_to_surface(result["img"])
+        self.minimap_base = pil_to_surface(result["img_bg"])
+        self.back_layers = self._build_back_layers(result["backs"])
         self._load_result = None
         return result["bgm_path"]
 

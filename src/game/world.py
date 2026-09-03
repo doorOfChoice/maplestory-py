@@ -19,6 +19,7 @@ from game import settings
 from game.core import travel
 from game import features
 from game.core.animation import Animation
+from game.render import backgrounds
 from game.render.assets import Assets
 from game.core.camera import Camera
 from game.systems.combat import Combat, DamageNumber
@@ -61,7 +62,7 @@ class World:
             assets.map_width, assets.map_height,
             mag=(assets.map_desc.get("minimap") or {}).get("mag"),
             canvas=assets.minimap_surface(),
-            map_surface=assets.map_surface)
+            map_surface=assets.minimap_base)
 
         spawn = self._find_spawn()
         self.spawn_x, self.spawn_y = spawn[0], spawn[1]
@@ -86,6 +87,7 @@ class World:
         self._respawn_queue: List[Tuple[float, dict]] = []
         self._portal_cooldown = 0.0
         self._portal_pulse = 0.0
+        self.elapsed = 0.0   # 本图累计时间（背景滚动 / 动画用）
         self.spawn_life()
 
     # ── 出生 / 生成 ───────────────────────────────────────────────
@@ -211,7 +213,7 @@ class World:
             self.assets.bounds, self.assets.map_width, self.assets.map_height,
             mag=(self.assets.map_desc.get("minimap") or {}).get("mag"),
             canvas=self.assets.minimap_surface(),
-            map_surface=self.assets.map_surface)
+            map_surface=self.assets.minimap_base)
         self.place_player_at_spawn()
         self.spawn_life()
         self.combat.drops.clear()
@@ -237,6 +239,7 @@ class World:
         回传要切换的传送门（Game 据此启动地图加载），否则 None。
         """
         self._portal_pulse += dt
+        self.elapsed += dt
 
         # 玩家
         self.player.update(dt, keys, self.physics, audio)
@@ -304,7 +307,16 @@ class World:
 
     # ── 绘制 ───────────────────────────────────────────────────────
     def draw(self, surface: pygame.Surface, npc_marker, player_visible: bool) -> None:
-        """画本图所有世界实体（地图/传送门/掉落/NPC/怪物/玩家/箭/特效）。"""
+        """画本图所有世界实体（背景/地图/传送门/掉落/NPC/怪物/玩家/箭/特效）。
+
+        背景分两层逐帧相对相机绘制（视差 + 平铺铺满视口）：
+        front=False 在地图整图之前，front=True 在所有实体之后。
+        """
+        t_ms = self.elapsed * 1000.0
+        backgrounds.draw_layers(
+            surface, self.assets.back_layers,
+            self.camera.x, self.camera.y,
+            settings.VIEW_W, settings.VIEW_H, t_ms, front=False)
         self.assets_map_surface_blit(surface)
         self.draw_portals(surface)
         self.combat.draw(surface, self.camera)
@@ -317,6 +329,10 @@ class World:
         self.combat.draw_attracting(surface, self.camera)
         self.combat.draw_arrows(surface, self.camera)
         self.combat.draw_effects(surface, self.camera)
+        backgrounds.draw_layers(
+            surface, self.assets.back_layers,
+            self.camera.x, self.camera.y,
+            settings.VIEW_W, settings.VIEW_H, t_ms, front=True)
 
     def assets_map_surface_blit(self, surface: pygame.Surface) -> None:
         surface.blit(

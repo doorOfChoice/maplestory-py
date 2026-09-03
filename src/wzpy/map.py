@@ -469,6 +469,53 @@ class MapRenderer:
                 } if minimap is not None else None),
             }
 
+    def back_items(self, map_id: Any) -> List[Dict[str, Any]]:
+        """Extract the back layer for per-frame, camera-relative drawing.
+
+        Unlike ``compose`` (which bakes backgrounds into a full-map export),
+        this returns each back entry's raw fields plus its decoded animation
+        frames so a live renderer can apply camera parallax and tile to the
+        viewport the way the game client does.  Entries that fail to decode
+        are skipped, mirroring ``_draw_background``'s tolerance.
+        """
+        with self._lock:
+            root, _source_id = self._map_root(map_id)
+            back = root.get("back")
+            result: List[Dict[str, Any]] = []
+            if back is None:
+                return result
+            for item in back.children():
+                background_set = _str(item.get("bS"))
+                asset = self._asset_root(self.map, f"Back/{background_set}.img")
+                if asset is None:
+                    continue
+                number = str(_int(item.get("no")))
+                source = (asset.get(f"ani/{number}") if bool(_int(item.get("ani")))
+                          else asset.get(f"back/{number}"))
+                frames: List[Tuple[Image.Image, Tuple[int, int], int]] = []
+                for frame in self._frames(source):
+                    pixels = self._pixels(frame, self.map)
+                    if pixels is None or pixels.width <= 1 or pixels.height <= 1:
+                        continue
+                    delay = max(1, _int(frame.get("delay"), 100))
+                    frames.append((pixels, self._origin(frame), delay))
+                if not frames:
+                    continue
+                result.append({
+                    "x": _int(item.get("x")),
+                    "y": _int(item.get("y")),
+                    "rx": _int(item.get("rx")),
+                    "ry": _int(item.get("ry")),
+                    "type": _int(item.get("type")),
+                    "cx": _int(item.get("cx")),
+                    "cy": _int(item.get("cy")),
+                    "alpha": max(0, min(255, _int(item.get("a"), 255))),
+                    "flip": bool(_int(item.get("f"))),
+                    "front": bool(_int(item.get("front"))),
+                    "frames": frames,
+                })
+            return result
+
     # -- asset and frame resolution -------------------------------------------
 
     def _asset_root(self, source: Any, path: str) -> Optional[WzSubProperty]:

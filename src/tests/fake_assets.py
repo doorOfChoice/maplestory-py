@@ -65,6 +65,8 @@ class FakeAssets:
             "Effect", "Skill", "Quest")}
         self._tile = pygame.Surface((16, 16))
         self.map_surface = pygame.Surface((self.map_width, self.map_height))
+        self.minimap_base = pygame.Surface((self.map_width, self.map_height))
+        self.back_layers: List = []
 
     # ── 地图描述 / 名字查询 ──────────────────────────────────────────
     @property
