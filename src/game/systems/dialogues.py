@@ -1,10 +1,7 @@
 """NPC 寒暄台词表。
 
-官方客户端的 NPC 对话脚本不在 WZ 资产里（在 Quest/*.js 中），故按 NPC 人设
-手写台词：每个 NPC 若干套，每次对话随机取一套；未收录的 NPC 回退到通用池，
-保证不同 NPC 的对话内容不再千篇一律。
-
-Lua 脚本可通过导出 dialogues() 注册台词池，启动时合并进 DIALOGUES。
+官方客户端的 NPC 对话脚本不在 WZ 资产里（在 Quest/*.js 中），故为未被
+任务/商店/传送等结构化对话覆盖的 NPC 提供通用寒暄池，随机取一套作气泡。
 """
 
 from __future__ import annotations
@@ -26,11 +23,6 @@ GENERIC: List[List[str]] = [
     ["呵呵，看你装备渐佳，是个人物。",
      "有空常来坐坐。"],
 ]
-
-
-def register_lua_dialogue(npc_id: str, lines: List[List[str]]) -> None:
-    """把 Lua 脚本的台词池合并进 DIALOGUES。"""
-    DIALOGUES[str(npc_id)] = [list(s) for s in lines]
 
 
 def get_dialog(npc_id: str, npc_name: str = "") -> List[str]:

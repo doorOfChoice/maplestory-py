@@ -111,15 +111,6 @@ def test_register_lua_shop_for_unknown_npc():
     assert shops_of("9999998") == []
 
 
-def test_register_lua_dialogue():
-    """dialogues.register_lua_dialogue 注册的台词优先于硬编码 DIALOGUES。"""
-    dialogues.register_lua_dialogue("9999999", [["Lua 台词 1", "Lua 台词 2"]])
-    got = dialogues.get_dialog("9999999")
-    assert got == ["Lua 台词 1", "Lua 台词 2"]
-    # 清理
-    dialogues.DIALOGUES.pop("9999999", None)
-
-
 def test_get_dialogue_fallback_to_generic():
     """未收录 NPC 回退通用池。"""
     got = dialogues.get_dialog("9999998", "路人")

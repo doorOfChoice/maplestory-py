@@ -1,4 +1,4 @@
--- 1012119（商店 NPC 托德）自定义任务与商店/对话示例
+-- 1012119（商店 NPC 托德）自定义任务与商店示例
 local M = {}
 
 function M.shops()
@@ -37,17 +37,10 @@ function M.shops()
   }
 end
 
-function M.dialogues()
-  return {
-    {"欢迎光临！", "有什么需要帮忙的吗？"},
-    {"我的药水品质有保障，", "冒险者尽管放心。"},
-    {"货架上的东西都标好价了，", "要买要卖尽管开口，银货两讫。"},
-  }
-end
-
-function M.quests(ctx)
+function M.entries(ctx)
   return {
     {
+      type = "quest",
       name = "收集红药水",
       lvmin = 1,
       end_items = {{2000000, 10}},

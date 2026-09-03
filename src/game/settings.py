@@ -191,3 +191,6 @@ ENABLED_QUESTS = {
 # 不再使用白名单。以下为整图 Surface LRU 缓存与切图横幅参数。
 MAP_CACHE_BUDGET_PX = 50_000_000   # 缓存整图像素预算（RGBA 约 200MB 上限）
 BANNER_TIME = 3.0                  # 切图「街道名·地图名」横幅时长（秒）
+
+# 出租车传送目的地改由 content/npc/<id>.lua 的 entries() 定义（type="teleport"），
+# Python 不再持有出租车名单与目的地表。

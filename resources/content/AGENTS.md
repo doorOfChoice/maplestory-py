@@ -142,11 +142,13 @@ end
 - 新增 `.lua` 后，宿主调用侧需传对应的 `build_lua_session("<脚本名>", ...)`；
   脚本名要一致。
 
-## 自定义任务脚本（npc/<npc_id>.lua）
+## 自定义 NPC 条目脚本（npc/<npc_id>.lua）
 
-每个 NPC 可在 `npc/<npc_id>.lua` 里定义**多个自定义任务**，启动时由
-`lua_quests.load_lua_quest_defs()` 扫描 `resources/content/npc/` 加载并翻译成
-`QuestDef` 合并进 `quest_defs` —— 与官方任务（Quest.wz）走同一套状态机/存档/头顶灯泡/多任务列表。
+每个 NPC 可在 `npc/<npc_id>.lua` 里定义**多条带类型条目**（任务、传送……），启动时由
+`lua_quests.load_lua_quest_defs()` 扫描 `resources/content/npc/` 加载并分流：
+quest 条目翻译成 `QuestDef` 合并进 `quest_defs`（与官方任务走同一套状态机/存档/头顶灯泡），
+teleport 条目注册为该 NPC 的传送目的地（出租车）。玩家与 NPC 对话时，任务与
+传送条目合成**同一个选择菜单**（UtilDlgEx 蓝字列表），点选按类型路由。
 
 ### 导出函数契约
 
@@ -154,9 +156,8 @@ end
 
 | 函数 | 返回 | 说明 |
 |---|---|---|
-| `quests(ctx)` | 数组[QuestDef] | 自定义任务定义 |
+| `entries(ctx)` | 数组[条目] | NPC 对话条目；每条带 `type` 字段：`"quest"`（缺省）或 `"teleport"` |
 | `shops()` | 数组[ShopDef] | NPC 的商店定义 |
-| `dialogues()` | 数组[数组[string]] | NPC 的寒暄台词池 |
 
 ### 商店定义（`shops()`）
 
@@ -180,26 +181,31 @@ end
 - `name` 为页签显示名，缺省回退 `shop_id`
 - `items` 中的 `price` 为买价（脚本价优先于 WZ `info.price` 与兜底表）；卖价按 `SELL_RATE` 自动计算
 
-### 对话定义（`dialogues()`）
+### 传送条目（`type = "teleport"`）
 
-返回台词池数组，每个元素是一套台词（若干行）：
+`entries()` 里的传送条目每个元素是一个表（出租车等 NPC 用）：
 
 ```lua
-{
-  {"欢迎光临！", "有什么需要帮忙的吗？"},
-  {"我的药水品质有保障，", "冒险者尽管放心。"},
-}
+function M.entries(ctx)
+  return {
+    { type = "teleport", label = "射手村",   map = "100000000" },
+    { type = "teleport", label = "魔法密林", map = "101000000" },
+  }
+end
 ```
 
 要点：
-- 每次对话随机取一套
-- Lua 定义的台词优先于硬编码配置
-- 与 `quests()` 同文件，同一 NPC 的任务和对话分开写
+- Lua 是传送目的地的**唯一事实来源**：Python 不再持有出租车名单或目的地表
+- `label` 为菜单显示名，`map` 为目标地图 id（字符串）
+- 目的地可包含本镇：运行时按玩家当前地图自动剔除
+- 玩家点选后经 `Game._enter_map` 切图，落在目标图的 `sp` 出生门
+- 未知 `type` 的条目会被跳过并记录 warning
 
-### 任务定义字段
+### 任务条目（`type = "quest"`，缺省）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
+| `type` | string | `"quest"` 或省略（缺省即 quest） |
 | `name` | string | 任务名（必填，缺失则该条任务跳过） |
 | `lvmin` / `lvmax` | number | 接取等级下限 / 上限（0 = 不限） |
 | `jobs` | 数组[number] | 职业限制，空 = 不限 |

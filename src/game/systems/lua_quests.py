@@ -1,27 +1,27 @@
-"""Lua 自定义任务定义翻译器：把 content/npc/*.lua 的 quests() 返回值翻译成 QuestDef。
+"""Lua NPC 内容翻译器：把 content/npc/*.lua 的 entries() 分流到各系统。
 
-扫描脚本目录，加载每个 Lua 脚本，调用 quests(ctx) 拿到任务数组，
-逐条翻译成 QuestDef 后合并到 quest_defs 字典，供游戏流程使用。
+扫描脚本目录，加载每个 Lua 脚本，调用 entries(ctx) 拿到带类型的条目数组：
+- type="quest"    → 翻译成 QuestDef 合并到 quest_defs，走任务状态机
+- type="teleport" → 注册到 travel 的 NPC 传送目的地表（出租车），走统一对话菜单
+条目缺省 type 视为 "quest"；未知类型跳过并记录 warning。
 
-同时支持 shops() 和 dialogues()：
-- shops() 返回 [{shop_id, items: [{item_id, price}, ...]}, ...]
-- dialogues() 返回 [[line1, line2], [line3, line4], ...]
+同时支持 shops()：返回 [{shop_id, items: [{item_id, price}, ...]}, ...]
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import lupa
 from lupa import LuaRuntime
 
 from game import settings
+from game.core import travel
 from game.core.jobs import JOBS
 from game.systems.quests import QuestDef
 from game.systems.shop import register_lua_shop, register_shop_profile
-from game.systems.dialogues import register_lua_dialogue
 
 # 内容脚本目录：resources/content/npc/<npc_id>.lua
 _SCRIPT_DIR = settings.RESOURCE_DIR / "content" / "npc"
@@ -162,33 +162,51 @@ def _load_lua_shops(npc_id: str, lua: LuaRuntime, mod) -> None:
         register_lua_shop(npc_id, shop_ids)
 
 
-def _load_lua_dialogues(npc_id: str, lua: LuaRuntime, mod) -> None:
-    """从 Lua 脚本注册对话台词池。"""
-    dialogues_fn = mod["dialogues"]
-    if dialogues_fn is None:
+def _entry_type(tbl) -> str:
+    """条目类型字段；缺省视为 "quest"。"""
+    try:
+        t = tbl["type"]
+    except (TypeError, LookupError):
+        return "quest"
+    return str(t) if t else "quest"
+
+
+def _load_lua_entries(npc_id: str, mod, defs: Dict[str, QuestDef]) -> None:
+    """entries() 分流：quest → QuestDef，teleport → travel 传送注册表。"""
+    entries_fn = mod["entries"]
+    if entries_fn is None:
         return
-    dialogues_tbl = dialogues_fn()
-    if dialogues_tbl is None:
+    entries_tbl = entries_fn(None)
+    if entries_tbl is None:
         return
-    lines_pool: List[List[str]] = []
-    for i in range(1, len(dialogues_tbl) + 1):
-        group = dialogues_tbl[i]
-        if group is None:
+    teleports: List[Tuple[str, str]] = []
+    for i in range(1, len(entries_tbl) + 1):
+        item = entries_tbl[i]
+        if item is None:
             continue
-        lines = _lines(group)
-        if lines:
-            lines_pool.append(lines)
-    if lines_pool:
-        register_lua_dialogue(npc_id, lines_pool)
+        etype = _entry_type(item)
+        if etype == "quest":
+            d = _quest_to_def(npc_id, i, item)
+            if d is not None:
+                defs[d.qid] = d
+        elif etype == "teleport":
+            label, mid = item["label"], item["map"]
+            if label and mid:
+                teleports.append((str(label), str(mid)))
+            else:
+                logging.warning("Lua teleport [%s/%d] missing label/map", npc_id, i)
+        else:
+            logging.warning("Lua entry [%s/%d] unknown type: %s", npc_id, i, etype)
+    if teleports:
+        travel.register_teleports(npc_id, teleports)
 
 
 def load_lua_quest_defs(
     script_dir: Optional[Path] = None,
-    ctx: Any = None,
 ) -> Dict[str, QuestDef]:
-    """扫描 script_dir 下 *.lua，加载 quests() 翻译成 {qid: QuestDef}。
+    """扫描 script_dir 下 *.lua，加载 entries()/shops() 并分流到各系统。
 
-    同时加载 shops() 和 dialogues()（如果脚本导出的话）。
+    返回 {qid: QuestDef}；teleport 条目副作用进 travel 注册表。
     """
     script_dir = script_dir or _SCRIPT_DIR
     defs: Dict[str, QuestDef] = {}
@@ -200,22 +218,9 @@ def load_lua_quest_defs(
             lua = _sandbox()
             src = path.read_text(encoding="utf-8")
             mod = lua.execute(src, str(path))
-            # 加载任务定义
-            quests_fn = mod["quests"]
-            if quests_fn is not None:
-                quests_tbl = quests_fn(ctx)
-                if quests_tbl is not None:
-                    for i in range(1, len(quests_tbl) + 1):
-                        item = quests_tbl[i]
-                        if item is None:
-                            continue
-                        d = _quest_to_def(npc_id, i, item)
-                        if d is not None:
-                            defs[d.qid] = d
+            _load_lua_entries(npc_id, mod, defs)
             # 加载商店定义
             _load_lua_shops(npc_id, lua, mod)
-            # 加载对话定义
-            _load_lua_dialogues(npc_id, lua, mod)
         except Exception:
             logging.warning("Lua script %s load failed", path, exc_info=True)
     return defs

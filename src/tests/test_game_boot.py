@@ -153,11 +153,11 @@ def test_npc_quest_menu_select_opens_quest(game):
     dlg.quest_defs = defs
     items = collect_npc_quests(defs, player.quests, "1012100", player)
     assert [it.qid for it in items] == ["1", "2"]
-    dlg._open_quest_menu(npc, items)
+    dlg._open_choice_menu(npc, items, [])
     assert game.ctx.ui.quest_visible
     assert game.ctx.ui.quest_entries == [("弓箭手入门", 10), ("打菇菇", 5)]
     game._draw()   # 出菜单帧不崩溃
     dlg._open_npc_quest(npc, items[1])
     assert dlg._quest_flow == {"npc": npc, "quest": "2", "stage": "offer"}
-    dlg._close_quest_menu()
+    dlg._close_menu()
     game._draw()

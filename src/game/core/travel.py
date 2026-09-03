@@ -11,7 +11,8 @@ Map.wz 每个 portal 自带 tm（目标地图）/ tn（落点门名），地图�
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
+
 
 NO_TARGET = 999999999        # WZ 无目标传送门的 tm 哨兵值
 PORTAL_UP = 2                # pv 普通门：按 ↑ 传送（画 pv 动画）
@@ -68,3 +69,26 @@ def usable_portals(portals: List[Dict],
         q["same_map"] = current_map is not None and tm == current_map
         result.append(q)
     return result
+
+
+# ── NPC 传送目的地（由 content/npc/*.lua 的 entries() 注册）──────────
+
+# npc_id → [(目的地名, 地图 id), ...]；出租车等传送 NPC 的唯一事实来源在 Lua
+_NPC_TELEPORTS: Dict[str, List[Tuple[str, str]]] = {}
+
+
+def register_teleports(npc_id: str, dests: List[Tuple[str, str]]) -> None:
+    """登记某 NPC 的传送目的地（启动期由 lua_quests 调用）。"""
+    _NPC_TELEPORTS[str(npc_id)] = list(dests)
+
+
+def teleports_of(npc_id: str,
+                 current_map: Optional[str] = None) -> List[Tuple[str, str]]:
+    """该 NPC 的目的地 (名字, 地图 id)；玩家已在某图时剔除该图。"""
+    return [(name, mid) for name, mid in _NPC_TELEPORTS.get(str(npc_id), [])
+            if mid != current_map]
+
+
+def clear_teleports() -> None:
+    """清空注册表（测试隔离用）。"""
+    _NPC_TELEPORTS.clear()

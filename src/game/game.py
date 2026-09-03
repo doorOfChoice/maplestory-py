@@ -134,6 +134,8 @@ class Game:
         self.keys = _Keys()
         self.dead = False
         self._dialogue = NpcDialogueController(self.ctx, self.quest_defs)
+        # 出租车菜单点选目的地 → 走与传送门同一套切图加载（落目标图出生门）
+        self._dialogue.warp = lambda map_id: self._enter_map(map_id, None)
         self._banner: Optional[Tuple[str, str]] = None
         self._banner_timer = 0.0
         self._pickup_timer = 0.0

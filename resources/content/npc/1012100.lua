@@ -1,9 +1,10 @@
 -- 1012100（转职教官 赫丽娜）新手任务
 local M = {}
 
-function M.quests(ctx)
+function M.entries(ctx)
   return {
     {
+      type = "quest",
       name = "新手入门1",
       lvmin = 1,
       jobs = { 0 },
@@ -18,6 +19,7 @@ function M.quests(ctx)
       complete_stop = { "还差一些蓝宝，继续加油！" },
     },
     {
+      type = "quest",
       name = "新手入门2",
       lvmin = 1,
       jobs = { 0 },
@@ -31,14 +33,6 @@ function M.quests(ctx)
       complete_yes = { "这是你的新手奖励，好好利用它继续成长吧！" },
       complete_stop = { "还差一些蓝宝，继续加油！" },
     },
-  }
-end
-
-function M.dialogues()
-  return {
-    {"弓不是玩具，冒险者。", "拉满弓之前，先学会站稳。", "攻击按 J，击败怪物可获得经验与掉落物。"},
-    {"风、距离、呼吸——弓箭手要计算的东西，比你想的多。", "先去山丘上练练手，回来再跟我说话。"},
-    {"我见过很多拿弓的人，能坚持下来的不多。", "让我看看你能坚持到哪一步。"},
   }
 end
 

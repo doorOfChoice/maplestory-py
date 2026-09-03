@@ -1,4 +1,4 @@
-"""Lua 自定义任务定义：验证 quests() 翻译成 QuestDef 的字段映射与边界。
+"""Lua 自定义任务定义：验证 entries() 的 quest 条目翻译成 QuestDef 的字段映射与边界。
 
 透过公开 seam _quest_to_def 测试；用 lupa 快捷建表构造输入，不依赖 WZ。
 """
@@ -147,7 +147,7 @@ def test_load_lua_quest_defs_single_npc():
     try:
         _write_script(tmp, "1012100.lua", """\
 local M = {}
-function M.quests(ctx)
+function M.entries(ctx)
   return {
     { name = "任务1", lvmin=1, accept_lines = {"a1"}, complete_lines = {"c1"} },
     { name = "任务2", lvmin=5, end_items = {{2000000, 3}},
@@ -174,12 +174,12 @@ def test_load_lua_quest_defs_two_npcs():
     try:
         _write_script(tmp, "1012100.lua", """\
 local M = {}
-function M.quests(ctx) return {{ name = "N1", accept_lines = {"a"}, complete_lines = {"c"} }} end
+function M.entries(ctx) return {{ name = "N1", accept_lines = {"a"}, complete_lines = {"c"} }} end
 return M
 """)
         _write_script(tmp, "1012119.lua", """\
 local M = {}
-function M.quests(ctx) return {{ name = "N2", accept_lines = {"b"}, complete_lines = {"d"} }} end
+function M.entries(ctx) return {{ name = "N2", accept_lines = {"b"}, complete_lines = {"d"} }} end
 return M
 """)
         defs = load_lua_quest_defs(script_dir=tmp)
@@ -190,8 +190,8 @@ return M
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def test_load_lua_quest_defs_no_quests():
-    """脚本没有 quests 函数，跳过。"""
+def test_load_lua_quest_defs_no_entries():
+    """脚本没有 entries 函数，跳过。"""
     tmp = Path(tempfile.mkdtemp())
     try:
         _write_script(tmp, "empty.lua", "local M = {} return M\n")
@@ -207,7 +207,7 @@ def test_load_lua_quest_defs_one_bad_skip():
     try:
         _write_script(tmp, "1012100.lua", """\
 local M = {}
-function M.quests(ctx)
+function M.entries(ctx)
   return {
     { name = "good", accept_lines = {"a"}, complete_lines = {"c"} },
     { },  -- 没 name → 跳过
