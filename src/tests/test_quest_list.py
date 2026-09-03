@@ -35,7 +35,7 @@ def test_row_rects_start_below_title_and_advance():
 def test_single_quest_dialog_keeps_native_width():
     """单任务对话框面板用原生宽 DLG_W：文字换行区（16+348）不越出 ic 白纸区。"""
     ui = UI(FakeAssets())
-    ui.show_quest("任务", ["测" * 80], ["yes", "no"])
+    ui.show_conv("任务", ["测" * 80], [], ["yes", "no"], False)
     ui.draw_quest(pygame.Surface((960, 540), pygame.SRCALPHA))
     assert ui.quest_rect.width == DLG_W
     assert DLG_TEXT_X + DLG_TEXT_W <= ui.quest_rect.width * 0.79
@@ -68,11 +68,11 @@ def test_conv_link_hit_returns_index():
     assert ui.conv_link_hit(outside) is None
 
 
-def test_show_quest_and_list_delegate_to_conv():
-    """旧接口语义折进统一状态：show_quest 只有按钮、show_quest_list 只有链接。"""
+def test_show_conv_folds_all_slots_into_state():
+    """统一会话状态：黑正文/蓝字链接/yes-no 按钮/终态各槽位独立装载。"""
     ui = UI(FakeAssets())
-    ui.show_quest("Q", ["台词"], ["yes", "no"])
-    assert ui.quest_lines == ["台词"] and ui.quest_links == []
+    ui.show_conv("Q", ["台词"], [("任务", 10)], ["yes", "no"], False)
+    assert ui.quest_lines == ["台词"] and ui.quest_links == [("任务", 10)]
     assert ui.quest_button_keys == ["yes", "no"] and not ui.quest_terminal
-    ui.show_quest_list("M", [("任务", 10)])
-    assert ui.quest_links == [("任务", 10)] and ui.quest_button_keys == []
+    ui.show_conv("T", [], [], [], True)
+    assert ui.quest_terminal and ui.quest_button_keys == []

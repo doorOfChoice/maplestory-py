@@ -29,11 +29,16 @@ class Link:
 
 @dataclass
 class Step:
-    """一个对话步骤。buttons 值为步名（str）或副作用函数（callable）。"""
+    """一个对话步骤。buttons 值为步名（str）或副作用函数（callable）。
+
+    text_fn：Lua `text = function(ctx)` 的惰性求值闭包（spec §5：函数文本在
+    current() 时刻求值，能读到点击产生的最新副作用）；None 时用静态 text。
+    """
     text: List[str] = field(default_factory=list)
     links: List[Link] = field(default_factory=list)
     buttons: Dict[str, Target] = field(default_factory=dict)
     next: Optional[str] = None                        # 终态「确定」后的跳转
+    text_fn: Optional[Callable[[], List[str]]] = None
 
 
 @dataclass
@@ -91,9 +96,10 @@ class Conversation:
 
     def current(self) -> Snapshot:
         step = self._def.steps[self._step]
+        lines = step.text_fn() if step.text_fn is not None else list(step.text)
         self._visible = [l for l in step.links if _safe_show(l.show)]
         keys = [k for k in ("yes", "no") if k in step.buttons]
-        return Snapshot(self._def.title, list(step.text),
+        return Snapshot(self._def.title, lines,
                         [(l.label, l.note) for l in self._visible], keys,
                         terminal=not step.links and not step.buttons)
 
@@ -163,7 +169,7 @@ def _safe_show(fn: Callable[[], bool]) -> bool:
 
 # ═══ Lua talk() 编译 ═══════════════════════════════════════════════
 
-# 沙箱里禁止的系统库/加载函数（与 scripting.py / lua_quests.py 保持一致）
+# 沙箱里禁止的系统库/加载函数（与 lua_quests.py 保持一致）
 _FORBIDDEN = ("os", "io", "package", "debug", "dofile", "loadfile")
 
 
@@ -206,7 +212,13 @@ def _fold_conv(ctx_tbl: Any, root: Any, fallback_title: str) -> ConversationDef:
 
 
 def _fold_step(ctx_tbl: Any, s: Any) -> Step:
-    text = _fold_text(s["text"], ctx_tbl)
+    raw_text = s["text"]
+    if _is_fn(raw_text):
+        # 函数文本不在此刻求值：保留 lupa 引用，current() 时再穿 Lua
+        text_fn = (lambda f: lambda: _fold_text(f(ctx_tbl)))(raw_text)
+        text: List[str] = []
+    else:
+        text_fn, text = None, _fold_text(raw_text)
     links: List[Link] = []
     lt = s["links"]
     if lt is not None:
@@ -226,7 +238,7 @@ def _fold_step(ctx_tbl: Any, s: Any) -> Step:
             else:
                 buttons[key] = str(v)
     nxt = s["next"]
-    return Step(text, links, buttons, str(nxt) if nxt else None)
+    return Step(text, links, buttons, str(nxt) if nxt else None, text_fn)
 
 
 def _fold_link(ctx_tbl: Any, l: Any) -> Link:
@@ -251,8 +263,8 @@ def _is_fn(v: Any) -> bool:
     return lupa.lua_type(v) == "function"
 
 
-def _fold_text(raw: Any, ctx_tbl: Any) -> List[str]:
-    tbl = raw(ctx_tbl) if _is_fn(raw) else raw
+def _fold_text(tbl: Any) -> List[str]:
+    """Lua 文本数组 → Python 行列表；nil 视为空。"""
     out: List[str] = []
     if tbl is None:
         return out

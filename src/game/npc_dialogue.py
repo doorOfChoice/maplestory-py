@@ -2,34 +2,38 @@
 
 对话状态统一为单一 `self._conv: Conversation`（通用步骤图会话）：
 
-· try_talk()        找脚下的 NPC 并路由（默认会话 > 直开商店 > 寒暄气泡）
+· try_talk()        找脚下的 NPC 并路由（talk() 脚本 > 默认会话 > 直开商店 > 寒暄气泡）
 · consume_click()   鼠标是否被对话层消费（链接/按钮/气泡关闭）
 · consume_keydown() 回车/空格/Esc 是否被对话层消费
 · update()          走远自动收起各对话框
 · close_all()       切图 / 重生 / 进入任务前清空
 · portal_blocked()  是否有对话框屏蔽传送门
 
+NPC 有 `content/npc/<id>.lua` 的 `talk(ctx)` 则完全接管对话；Lua 驱动任务
+（QuestDef.script 非空，如转职 advance.lua）同走 `_open_script_conv` 通道。
 无 talk() 脚本的 NPC 走模块级 `build_menu_conversation` 合成的默认会话：
 任务（可交付/可接/进行中）、出租车传送、商店入口折成一张蓝字列表；
 任务链接点开 `quest_flow.build_quest_conversation` 的子会话。
-链接的传送/商店副作用不直接执行，只登记意图（_next_warp/_next_shop），
+链接的传送/商店副作用不直接执行，只登记意图（_next_warp/_next_shop，
+脚本会话则经宿主 ctx.pending_warp 由 teleport() 登记），
 由 `_after_turn` 在会话关闭后统一消费。
-
-过渡期（Task 6 前）：Lua 驱动任务（QuestDef.script 非空，如转职 adv_*）
-仍走旧 `_advance_*` LuaSession 通道，与新 `_conv` 并存。
 """
 
 from __future__ import annotations
 
+import logging
+from types import SimpleNamespace
 from typing import Any, Callable, List, Optional, Tuple
 
 import pygame
 
+from game import settings
 from game.systems import dialogues
-from game.systems.conversation import Conversation, ConversationDef, Link, Step
+from game.systems.conversation import (
+    Conversation, ConversationDef, Link, Step, make_ctx_view)
 from game.systems.quest_flow import build_quest_conversation
 from game.systems.quests import NpcQuest, collect_npc_quests, render_markup
-from game.systems.scripting import build_lua_session
+from game.systems.script_api import make_globals
 from game.systems.shop import STORAGE_NPC, shops_of
 from game.core import travel
 from game.core.jobs import JOBS, job_for_trainer
@@ -37,6 +41,9 @@ from game.core.jobs import JOBS, job_for_trainer
 # 对话层「消费」某次点击后，game.py 不再把该事件交给商店/面板
 # 玩家走远超过该横坐标距离即自动收起对话
 TALK_RANGE = 140
+
+# 内容脚本目录：resources/content/<script>.lua（talk() 契约见 content/AGENTS.md）
+_CONTENT_DIR = settings.RESOURCE_DIR / "content"
 
 
 # ═══ 默认会话合成 ═══════════════════════════════════════════════════
@@ -89,28 +96,25 @@ class NpcDialogueController:
         self.quest_defs = quest_defs
 
         self._talk_npc: Optional[object] = None        # 当前寒暄气泡的 NPC
-        # 统一会话状态：默认菜单 / 任务子会话（talk() 脚本 Task 6 接入）
+        # 统一会话状态：talk() 脚本会话 / 默认菜单 / 任务子会话
         self._conv: Optional[Conversation] = None
         self._conv_npc: Optional[object] = None        # 会话锚点 NPC（距离收起）
-        self._conv_host: Optional[Any] = None          # 脚本会话宿主（Task 6）
-        self._conv_qid: Optional[str] = None           # 脚本会话所属任务（Task 6）
+        self._conv_host: Optional[Any] = None          # 脚本会话宿主 ctx
+        self._conv_qid: Optional[str] = None           # 脚本会话所属任务（转职善后）
         self._next_warp: Optional[str] = None          # 会话登记的传送意图
         self._next_shop: bool = False                  # 会话登记的开店意图
-        # 过渡期旧通道：Lua 驱动任务（转职 adv_*）仍走 LuaSession，Task 6 退役
-        self._advance_session = None
-        self._advance_ctx: Optional[Any] = None
-        self._advance_npc: Optional[object] = None
-        self._advance_qid: Optional[str] = None
         # warp 由 Game 注入（map_id → 切图），本控制器不感知加载细节。
         self.warp: Optional[Callable[[str], None]] = None
 
     # ── 入口：找 NPC 并路由 ─────────────────────────────────────────
     def try_talk(self) -> None:
-        """与脚下 NPC 对话：默认会话（任务/传送/商店链接）> 直开商店 > 寒暄。"""
+        """与脚下 NPC 对话：talk() 脚本 > 默认会话（任务/传送/商店链接）> 直开商店 > 寒暄。"""
         for npc in self.ctx.world.npcs:
             if npc.rect().colliderect(
                     pygame.Rect(int(self.ctx.world.player.x - 20),
                                 int(self.ctx.world.player.y - 40), 40, 80)):
+                if self._open_npc_talk(npc):
+                    return
                 self._talk_npc = npc
                 qlist = collect_npc_quests(
                     self.quest_defs, self.ctx.world.player.quests,
@@ -144,8 +148,7 @@ class NpcDialogueController:
     def consume_click(self, pos: Tuple[int, int]) -> bool:
         """鼠标左键是否被对话层消费（返回 True 时 game.py 不再转交面板/商店）。
 
-        优先序：会话（链接 > 按钮 > 点外关闭）> 旧转职会话 > 商店/仓库按钮 >
-        点击气泡关闭。
+        优先序：会话（链接 > 按钮 > 点外关闭）> 商店/仓库按钮 > 点击气泡关闭。
         """
         if self._conv is not None:
             idx = self.ctx.ui.conv_link_hit(pos)
@@ -159,13 +162,6 @@ class NpcDialogueController:
                     self._after_turn()
                 elif not self.ctx.ui.quest_dialog_hit(pos):
                     self._close_conv()   # 点面板外 → 收起会话
-            return True
-        if self._advance_session is not None:
-            btn = self.ctx.ui.conv_button_hit(pos)
-            if btn is not None:
-                self._advance_button(btn)
-            elif not self.ctx.ui.quest_dialog_hit(pos):
-                pass   # 旧转职框：点空白不关闭（选项型，同现状）
             return True
         dkey = self.ctx.ui.dialog_button_hit(pos)
         if dkey is not None:
@@ -188,12 +184,6 @@ class NpcDialogueController:
                 return True                 # 会话打开时吃掉其它键
             self._after_turn()
             return True
-        if self._advance_session is not None:
-            if key == pygame.K_ESCAPE:
-                self._advance_button("close")
-            elif key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-                self._advance_button("confirm")
-            return True
         if self.ctx.ui.dialog_visible:
             if key in (pygame.K_RETURN, pygame.K_KP_ENTER,
                        pygame.K_SPACE, pygame.K_ESCAPE):
@@ -214,23 +204,12 @@ class NpcDialogueController:
         if self._conv is not None and self._conv_npc is not None:
             if abs(player.x - self._conv_npc.rect().centerx) > TALK_RANGE:
                 self._close_conv()
-        # 旧转职会话（Task 6 退役）
-        if self._advance_session is not None and self._advance_npc is not None:
-            if abs(player.x - self._advance_npc.rect().centerx) > TALK_RANGE:
-                self.ctx.ui.hide_quest()
-                self._advance_session = None
-                self._advance_npc = None
 
     # ── 绘制 / 清理 / 查询 ──────────────────────────────────────────
     def close_all(self) -> None:
         self.ctx.ui.hide_dialog()
         self._talk_npc = None
         self._close_conv()
-        self.ctx.ui.hide_quest()
-        self._advance_session = None
-        self._advance_ctx = None
-        self._advance_npc = None
-        self._advance_qid = None
 
     def portal_blocked(self) -> bool:
         return self.ctx.ui.quest_visible or self.ctx.ui.dialog_visible
@@ -249,13 +228,12 @@ class NpcDialogueController:
         return out
 
     def _open_quest_conv(self, npc, item: NpcQuest) -> None:
-        """任务链接 → 子会话（offer/complete/status）；Lua 驱动任务走旧通道。"""
+        """任务链接 → 子会话（offer/complete/status）；Lua 驱动任务走 talk() 脚本。"""
         d = self.quest_defs.get(item.qid)
         if d is None:
             return
-        if d.script:   # 转职 adv_*：Task 6 前仍由 LuaSession 旧通道承接
-            self._close_conv()
-            self._begin_lua_quest(npc, item.qid, d.script)
+        if d.script:   # 转职 adv_*：content/<script>.lua 的 talk() 会话；失败则不开
+            self._open_script_conv(npc, item.qid, d.script)
             return
         stage = "status" if item.state == "accepted" else item.state
         conv = build_quest_conversation(
@@ -321,7 +299,14 @@ class NpcDialogueController:
             self._show_conv()
 
     def _finish_conv(self) -> None:
-        """会话自然结束（done）的善后。转职善后逻辑在 Task 6 补入。"""
+        """会话正常结束（done）时的善后：转职音效/灯泡/force_complete。"""
+        if (self._conv_qid is not None and self._conv_host is not None
+                and self._conv_host.advanced):
+            self.ctx.audio.play("LevelUp", 0.6)
+            self.ctx.panels.flash(
+                f"转职成功：{JOBS[self.ctx.world.player.job].name}")
+            # 转职任务完成：置为已完成，不再出现在可接列表
+            self.ctx.world.player.quests.force_complete(self._conv_qid)
         self._close_conv()
 
     def _dialog_button(self, key: str) -> None:
@@ -335,57 +320,40 @@ class NpcDialogueController:
             self.ctx.shop_panel.close()
             self.ctx.storage_panel.open()
 
-    # ── Lua 驱动的任务对话（转职旧通道，Task 6 退役）───────────────────
-    def _begin_lua_quest(self, npc, qid: str, script: str) -> None:
-        """由 Lua 会话驱动的任务对话：按玩家状态路由，并记住所属任务 qid。"""
-        jobdef = job_for_trainer(npc.npc_id, self.ctx.world.player.job)
-        sess, ctx = build_lua_session(
-            script, player=self.ctx.world.player, jobdef=jobdef,
-            npc_name=npc.name, assets=self.assets)
-        self._advance_session = sess
-        self._advance_ctx = ctx
-        self._advance_npc = npc
-        self._advance_qid = qid
-        self._show_session_snapshot()
+    # ── Lua 脚本会话（talk() 契约）───────────────────────────────────
+    def _host_ctx(self, npc, jobdef=None) -> Any:
+        """脚本会话的宿主 ctx：script_api 闭包读它，teleport 置 pending_warp。"""
+        return SimpleNamespace(player=self.ctx.world.player,
+                               world=self.ctx.world, jobdef=jobdef,
+                               assets=self.assets, npc_name=npc.name,
+                               quest_defs=self.quest_defs,
+                               advanced=False, pending_warp=None)
 
-    def _show_session_snapshot(self) -> None:
-        """把当前对话会话的快照（说话人/文本/选项）渲染到原版任务框。"""
-        snap = self._advance_session.snapshot()
-        self.ctx.ui.show_quest(snap.npc, snap.lines,
-                               [o.label for o in snap.options])
+    def _open_script_conv(self, npc, qid: Optional[str],
+                          script_name: str) -> bool:
+        """content/<script>.lua 的 talk() 会话；失败返回 False 由调用方回落。"""
+        path = _CONTENT_DIR / f"{script_name}.lua"
+        if not path.is_file():
+            return False
+        host = self._host_ctx(npc, jobdef=job_for_trainer(
+            npc.npc_id, self.ctx.world.player.job))
+        ctx_view = make_ctx_view(host.player, npc.npc_id, npc.name,
+                                 self.assets.map_id, jobdef=host.jobdef)
+        try:
+            conv = Conversation.from_source(path.read_text("utf-8"),
+                                            make_globals(host), ctx_view,
+                                            title=npc.name)
+        except Exception:
+            logging.warning("对话脚本 %s 加载失败", script_name, exc_info=True)
+            return False
+        self._conv_host = host
+        self._conv_qid = qid
+        self._set_conv(conv, npc)
+        return True
 
-    def _advance_button(self, key: str) -> None:
-        """转职对话框按钮回调：yes / no / ok（或确认/关闭意图）。"""
-        sess = self._advance_session
-        if sess is None:
-            self.ctx.ui.hide_quest()
-            return
-        labels = [o.label for o in sess.snapshot().options]
-        if key == "confirm":
-            target = "yes" if "yes" in labels else ("ok" if "ok" in labels else None)
-        elif key == "close":
-            target = "no" if "no" in labels else None
-        else:
-            target = key if key in labels else None
-        if target is None:
-            target = "ok"
-        sess.choose(target)
-        if sess.done:
-            self.ctx.ui.hide_quest()
-            self._advance_session = None
-            self._advance_npc = None
-            advanced = getattr(self._advance_ctx, "advanced", False)
-            self._advance_ctx = None
-            if advanced:
-                self.ctx.audio.play("LevelUp", 0.6)
-                self.ctx.panels.flash(
-                    f"转职成功：{JOBS[self.ctx.world.player.job].name}")
-                # 转职任务完成：置为已完成，不再出现在可接列表
-                if self._advance_qid is not None:
-                    self.ctx.world.player.quests.force_complete(self._advance_qid)
-            self._advance_qid = None
-            return
-        self._show_session_snapshot()
+    def _open_npc_talk(self, npc) -> bool:
+        """NPC 自带 talk() 脚本（content/npc/<id>.lua）则接管对话，最高优先级。"""
+        return self._open_script_conv(npc, None, f"npc/{npc.npc_id}")
 
     # ── 文本标记渲染 ────────────────────────────────────────────────
     def _qmark(self, text: str) -> str:

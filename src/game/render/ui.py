@@ -144,7 +144,7 @@ class UI:
                 return key
         return None
 
-    # ── 任务对话框 ─────────────────────────────────────────────────
+    # ── 会话面板（show_conv：黑正文 + 蓝字链接 + 按钮）───────────────
     def show_conv(self, title: str, lines: List[str],
                   links: List[Tuple[str, int]], buttons: List[str],
                   terminal: bool) -> None:
@@ -160,19 +160,6 @@ class UI:
         self.quest_terminal = terminal
         self.quest_buttons = []
         self.quest_entry_rects = []
-
-    def show_quest(self, title: str, lines: List[str],
-                   buttons: Optional[List[str]] = None) -> None:
-        """显示任务对话框（show_conv 薄壳）。buttons: ['yes','no'] / ['ok'] 等。"""
-        bs = list(buttons or ["ok"])
-        self.show_conv(title, lines, [], [b for b in bs if b != "ok"], "ok" in bs)
-
-    def show_quest_list(self, title: str, entries: List[Tuple[str, int]]) -> None:
-        """显示多任务选择列表（show_conv 薄壳）：条目为可点击蓝字行。
-
-        ``entries`` 为 (任务标题, 等级) 列表；等级为 0 时不显示右侧 Lv 标注。
-        """
-        self.show_conv(title, [], entries, [], False)
 
     def hide_quest(self) -> None:
         self.quest_visible = False
@@ -206,10 +193,6 @@ class UI:
     def quest_dialog_hit(self, pos) -> bool:
         return (self.quest_visible and self.quest_rect is not None
                 and self.quest_rect.collidepoint(pos))
-
-    # 兼容别名（迁移完成后可删）
-    quest_hit = conv_button_hit
-    quest_list_hit = conv_link_hit
 
     def show_death(self) -> None:
         self.death_visible = True

@@ -105,21 +105,23 @@ def _fake_npc(npc_id: str = "1012100") -> SimpleNamespace:
 
 
 def test_advancement_flow_uses_script(game):
-    """转职经脚本会话：Lv10 新手对导师点 yes → 转职为弓箭手，会话结束。"""
-    from game.core.jobs import JOBS
+    """转职经 talk() 脚本会话：Lv10 新手对导师点 yes → 改职，确认结束并善后。"""
     _boot(game)
     game.ctx.world.player.job = 0
     game.ctx.world.player.level = 10
     npc = _fake_npc()
     dlg = game._dialogue
-    dlg._begin_lua_quest(npc, "adv_3000", "advance")
-    assert dlg._advance_session is not None
-    assert [o.label for o in dlg._advance_session.snapshot().options] == ["yes", "no"]
-    dlg._advance_button("yes")
+    assert dlg._open_script_conv(npc, "adv_3000", "advance")
+    assert dlg._conv.current().buttons == ["yes", "no"]
+    dlg._conv.press("yes")
+    dlg._after_turn()
     assert game.ctx.world.player.job == 3000
-    assert dlg._advance_session is not None      # 停在「恭喜转职」节点
-    dlg._advance_button("ok")
-    assert dlg._advance_session is None
+    assert dlg._conv.current().lines[0] == "恭喜！你已转职为"   # 停在「恭喜转职」节点
+    assert dlg._conv_host.advanced is True
+    dlg._conv.press("confirm")
+    dlg._after_turn()
+    assert dlg._conv is None
+    assert game.ctx.world.player.quests.is_completed("adv_3000")
     game._draw()   # 转职后正常出帧
 
 

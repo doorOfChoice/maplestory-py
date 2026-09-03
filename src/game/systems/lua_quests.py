@@ -26,7 +26,7 @@ from game.systems.shop import register_lua_shop, register_shop_profile
 # 内容脚本目录：resources/content/npc/<npc_id>.lua
 _SCRIPT_DIR = settings.RESOURCE_DIR / "content" / "npc"
 
-# 沙箱里禁止的系统库/加载函数（与 scripting.py 保持一致）
+# 沙箱里禁止的系统库/加载函数（与 conversation.py 保持一致）
 _FORBIDDEN = ("os", "io", "package", "debug", "dofile", "loadfile")
 
 

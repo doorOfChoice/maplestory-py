@@ -3,9 +3,11 @@
 内容脚本（content/*.lua）只引用这些名字，不 import 任何游戏模块；因此改台词/流程
 只动 .lua，自定义发奖数值直接写在 Lua（give_reward）。所有函数闭包持有宿主上下文
 ``ctx``（SimpleNamespace）：
-- 转职：can_advance() / advance_job()（改真身并置 ctx.advanced）
+- 转职（当 ctx 携带 jobdef 时注册）：can_advance() / advance_job()（改真身并置 ctx.advanced）
 - 发奖（当 ctx 携带 world 时注册）：give_reward(exp, meso, items)——直接给玩家发奖励，
   items 为 [[item_id, count], ...]，负数=收回
+- 切图（当 ctx 携带 world 时注册）：teleport(map_id)——置 ctx.pending_warp，
+  解释器结束会话后由宿主执行
 - 任务（当 ctx 携带 world/quest_defs 时注册）：quest_available / quest_completable /
   quest_state / accept_quest / complete_quest / quest_info（薄封装，复用 quests.py 逻辑）
 - 商店（当 ctx 携带 world 时注册）：get_shop_items(shop_id) / shop_buy(item_id, count) /
@@ -39,12 +41,23 @@ def make_globals(ctx: Any) -> Dict[str, Callable]:
         ctx.player.advance_to(ctx.jobdef.code, ctx.assets)
         ctx.advanced = True
 
-    globals_: Dict[str, Callable] = {"can_advance": can_advance, "advance_job": advance_job}
+    globals_: Dict[str, Callable] = {}
+    # 转职函数仅当 ctx 携带 jobdef 时注册（普通 NPC 会话调用即报错，防误改真身）
+    if getattr(ctx, "jobdef", None) is not None:
+        globals_["can_advance"] = can_advance
+        globals_["advance_job"] = advance_job
 
-    # 发奖：仅当 ctx 携带世界时注册（转职上下文无 world → 不注册，调用即报错）
+    # 发奖/切图：仅当 ctx 携带世界时注册（转职上下文无 world → 不注册，调用即报错）
     world = getattr(ctx, "world", None)
     if world is not None:
         from game.systems.quests import QuestLog
+
+        def teleport(map_id) -> bool:
+            """登记切图请求：解释器结束会话后由宿主执行。"""
+            ctx.pending_warp = str(map_id)
+            return True
+
+        globals_["teleport"] = teleport
 
         def give_reward(exp=0, meso=0, items=None) -> bool:
             """按 Lua 指定直接发奖：exp/金币/物品；物品负数量=收回。"""
