@@ -1,10 +1,18 @@
-"""步骤图对话引擎：show 过滤、click 跳步、nil 结束、buttons 路由、错误兜底。"""
+"""步骤图对话引擎：show 过滤、click 跳步、nil 结束、buttons 路由、错误兜底。
+
+含 Lua talk() 编译层：内嵌合成 Lua 源码驱动 from_source，不依赖 WZ。
+"""
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
+
+import pytest
 
 from game.systems.conversation import (
-    Conversation, ConversationDef, Link, Step)
+    Conversation, ConversationDef, Link, Step, make_ctx_view)
+
+pytest.importorskip("lupa")
 
 
 def one_link_conv(click_ret, visible=True):
@@ -134,3 +142,93 @@ def test_step_next_used_on_terminal_confirm():
     conv.press("confirm")
     assert not conv.done
     assert conv.current().lines == ["问"]
+
+
+# ── Lua talk() 编译层 ─────────────────────────────────────────
+
+_TALK_LUA = """
+local M = {}
+function M.talk(ctx)
+  return {
+    title = "托德",
+    start = "greet",
+    steps = {
+      greet = {
+        text = function(c)
+          return { "等级 " .. c.player.level, "静态行" }
+        end,
+        links = {
+          { label = "接任务",
+            show = function(c) return c.player.level >= 10 end,
+            click = function(c) return "after" end },
+          { label = function(c) return "动态蓝字 " .. c.npc.name end,
+            click = function(c) take_item(c.player.level) return nil end },
+        },
+        buttons = { yes = "after", no = function(c) return nil end },
+      },
+      after = { text = { "到达。" }, next = "greet" },
+    },
+  }
+end
+return M
+"""
+
+
+def compile_talk(level=10, env=None):
+    calls = []
+    env = env or {"take_item": lambda n: calls.append(n)}
+    ctx = make_ctx_view(SimpleNamespace(level=level, job=0),
+                        "1012119", "托德", 100000000)
+    conv = Conversation.from_source(_TALK_LUA, env, ctx)
+    return conv, calls
+
+
+def test_lua_talk_compiles_steps():
+    """talk() 步骤图折进引擎：文本（函数式插值）、按钮、next。"""
+    conv, _ = compile_talk(10)
+    snap = conv.current()
+    assert snap.title == "托德"
+    assert snap.lines == ["等级 10", "静态行"]
+    assert snap.buttons == ["yes", "no"]
+    assert snap.terminal is False
+
+
+def test_lua_link_show_filters_by_ctx():
+    """链接 show 读 ctx：等级不足时隐藏。"""
+    conv, _ = compile_talk(level=5)
+    assert [l for l, _ in conv.current().links] == ["动态蓝字 托德"]
+
+
+def test_lua_link_click_jumps_step():
+    """Lua click 返回步名 → 跳转。"""
+    conv, _ = compile_talk(10)
+    conv.current()
+    conv.click_link(0)
+    assert conv.current().lines == ["到达。"]
+    conv.press("confirm")           # after 的 next = greet → 回首步
+    assert not conv.done
+
+
+def test_lua_click_nil_and_env_side_effect():
+    """Lua click 调宿主函数并返回 nil → 副作用发生、会话结束。"""
+    conv, calls = compile_talk(10)
+    conv.current()
+    conv.click_link(1)
+    assert calls == [10]
+    assert conv.done
+
+
+def test_lua_buttons_yes_jumps_no_ends():
+    """buttons：yes 折成步名跳转，no 函数返回 nil 结束。"""
+    conv, _ = compile_talk(10)
+    conv.press("yes")
+    assert conv.current().lines == ["到达。"]
+    conv2, _ = compile_talk(10)
+    conv2.press("no")
+    assert conv2.done
+
+
+def test_missing_talk_raises():
+    """脚本没有 talk() → LookupError，供调用方回落。"""
+    with pytest.raises(LookupError):
+        Conversation.from_source("return {}", {}, {})
