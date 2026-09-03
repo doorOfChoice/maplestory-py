@@ -404,21 +404,25 @@ class Combat:
     # ── 远程弹道 ───────────────────────────────────────────────────
     def _aim_point(self, player: Combatant, facing: int,
                    monsters) -> Optional[Tuple[float, float]]:
-        """原版式瞄准：瞄准圈内、面朝一侧最近的怪 → 其身体中心；无则 None（直射）。"""
+        """原版式瞄准：瞄准扇形（半径 × 朝向 ±半顶角）内最近的怪 → 其身体中心；无则 None（直射）。"""
         if not monsters:
             return None
         ref_y = player.y - 8.0
         best: Optional[Tuple[float, float]] = None
         best_d = float("inf")
         r2 = settings.ARROW_AIM_RADIUS ** 2
+        tan_half = math.tan(math.radians(settings.ARROW_AIM_HALF_ANGLE_DEG))
         for mob in monsters:
             if getattr(mob, "dead", False):
                 continue
-            dx = mob.x - player.x
-            if dx * facing <= 0:
+            adx = (mob.x - player.x) * facing        # 朝向前分量
+            if adx <= 0:
                 continue
             cy = mob.cy - mob.sprite_h / 2.0
-            d2 = dx * dx + (cy - ref_y) ** 2
+            dy = cy - ref_y
+            if abs(dy) > adx * tan_half:             # 夹角超出扇形半顶角
+                continue
+            d2 = adx * adx + dy * dy
             if d2 > r2 or d2 >= best_d:
                 continue
             best, best_d = (mob.x, cy), d2

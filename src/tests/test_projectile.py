@@ -203,6 +203,23 @@ def test_spawn_arrows_out_of_radius_fires_straight():
     assert combat.arrows[0].vy == 0.0
 
 
+def test_spawn_arrows_ignores_mob_outside_fan():
+    """圈内但夹角超出瞄准扇形（几乎正上方）的怪：不瞄，直射。"""
+    combat = combat_with_balls()
+    # 身体中心 (40, -68)：距手点(0,92) 约 165 < 360，但与水平夹角约 76° > 30°
+    mob = FakeTarget(x=40.0, cy=-28.0, h=80)
+    combat.spawn_arrows(AimP(), None, [mob])
+    assert combat.arrows[0].vy == 0.0
+
+
+def test_spawn_arrows_aims_at_mob_in_fan_edge():
+    """扇形边缘内（约 25° 斜上方）的怪仍会被瞄。"""
+    combat = combat_with_balls()
+    mob = FakeTarget(x=200.0, cy=39.0, h=80)    # 身体中心 (200, -1)，俯角约 25°
+    combat.spawn_arrows(AimP(), None, [mob])
+    assert combat.arrows[0].vy < 0.0
+
+
 def test_spawn_arrows_all_bullets_aim_same_target():
     """多支箭（双发类技能）瞄向同一最近目标。"""
     combat = combat_with_balls()
