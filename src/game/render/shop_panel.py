@@ -38,6 +38,12 @@ BG_RCOL_SLOT_CX = 253               # 右栏图标槽盒子中心 x（面板坐�
 BG_RCOL_NAME_X = 273                # 右栏名称起点 x（面板坐标，随槽盒子右沿）
 BG_MESO_X, BG_MESO_Y = 365, 65      # 右栏顶部金币金额文字起点 x/y（随底图金币图标）
 BTN_W, BTN_H = 70, 19               # 原版 BtBuy/BtSell/BtExit 尺寸
+BG_BTN_Y = 88                       # 买/卖按钮放在右框金币金额下方的空隙处（避让物品行）
+
+# ── 滚动条几何（两栏各自独立，叠在行区右缘）────────────────────────
+SCROLLBAR_W = 9                     # 拇指宽度
+SCROLLBAR_PAD = 4                   # 距栏位右缘分隔的留白
+SCROLLBAR_MIN_THUMB = 18            # 拇指最小高度（防过短难点）
 
 # ── 旧式深色回退面板几何（素材缺失时用）────────────────────────────
 PANEL_W, PANEL_H = 620, 340
@@ -70,6 +76,11 @@ class ShopPanel:
         self._bag_rects: List[Tuple[pygame.Rect, int]] = []
         self._buy_rect = pygame.Rect(0, 0, 0, 0)
         self._sell_rect = pygame.Rect(0, 0, 0, 0)
+        self._shelf_bar = pygame.Rect(0, 0, 0, 0)     # 左栏滚动条轨道
+        self._bag_bar = pygame.Rect(0, 0, 0, 0)       # 右栏滚动条轨道
+        self._shelf_bar_thumb = pygame.Rect(0, 0, 0, 0)
+        self._bag_bar_thumb = pygame.Rect(0, 0, 0, 0)
+        self._drag_bar: Optional[str] = None           # 正在拖动的滚动条（shelf/bag）
         self._scroll_icon: Optional[pygame.Surface] = None
         self._toast: Optional[Tuple[str, float]] = None
         self._wz_cache: dict = {}        # Shop/<path> → Surface
@@ -148,6 +159,56 @@ class ShopPanel:
         return self._scroll_icon
 
     # ── 交互 ───────────────────────────────────────────────────────
+    def _rows(self) -> int:
+        """当前布局可视行数。"""
+        return BG_NROWS if self._wz("backgrnd") is not None else self._vis_rows()
+
+    def _bar_thumb(self, track: pygame.Rect, scroll: int, total: int) -> pygame.Rect:
+        """按滚动比例计算拇指矩形；无可滚内容返回空矩形。"""
+        if total <= self._rows():
+            return pygame.Rect(0, 0, 0, 0)
+        span = track.h - SCROLLBAR_MIN_THUMB
+        frac = scroll / max(1, total - self._rows())
+        h = SCROLLBAR_MIN_THUMB
+        if total > 0:
+            h = max(SCROLLBAR_MIN_THUMB, int(track.h * self._rows() / total))
+        y = track.y + int(frac * max(0, track.h - h))
+        return pygame.Rect(track.x, y, track.w, h)
+
+    def _update_bars(self, player) -> None:
+        """根据两组列表长度刷新滚轮钳制与拇指矩形。"""
+        rows = self._rows()
+        n_shelf = len(self._shelf_items())
+        self._scroll_shelf = max(0, min(self._scroll_shelf, max(0, n_shelf - rows)))
+        self._shelf_bar_thumb = self._bar_thumb(self._shelf_bar, self._scroll_shelf, n_shelf)
+        n_bag = len(self._bag_entries(player))
+        self._scroll = max(0, min(self._scroll, max(0, n_bag - rows)))
+        self._bag_bar_thumb = self._bar_thumb(self._bag_bar, self._scroll, n_bag)
+
+    def _bar_from_pos(self, pos: Tuple[int, int]) -> Tuple[bool, str]:
+        """命中滚动条：返回 (命中, 'shelf'|'bag')。"""
+        if self._shelf_bar_thumb.collidepoint(pos):
+            return True, "shelf"
+        if self._bag_bar_thumb.collidepoint(pos):
+            return True, "bag"
+        return False, ""
+
+    def _jump_bar(self, key: str, pos_y: int, player) -> None:
+        """点轨道空白：让拇指中心平移到光标处（跳页）。"""
+        track = self._shelf_bar if key == "shelf" else self._bag_bar
+        total = (len(self._shelf_items()) if key == "shelf"
+                 else len(self._bag_entries(player)))
+        rows = self._rows()
+        thumb = self._bar_thumb(track, 0, total)
+        span = max(1, track.h - thumb.h)
+        frac = (pos_y - track.y - thumb.h / 2) / span
+        frac = max(0.0, min(1.0, frac))
+        scroll = int(frac * max(0, total - rows))
+        if key == "shelf":
+            self._scroll_shelf = scroll
+        else:
+            self._scroll = scroll
+
     def handle_click(self, pos: Tuple[int, int], player, combat) -> bool:
         if not self.visible:
             return False
@@ -160,13 +221,20 @@ class ShopPanel:
                 self.sel_shelf = None
                 self._scroll = self._scroll_shelf = 0
                 return True
+        # 滚动条优先（覆盖行区右缘，避免误选中物品行）
+        hit, key = self._bar_from_pos(pos)
+        if hit:
+            self._drag_bar = key
+            return True
+        if self._shelf_bar.collidepoint(pos) and self._shelf_bar_thumb.width:
+            self._jump_bar("shelf", pos[1], player)
+            return True
+        if self._bag_bar.collidepoint(pos) and self._bag_bar_thumb.width:
+            self._jump_bar("bag", pos[1], player)
+            return True
         for rect, idx in self._shelf_rects:
             if rect.collidepoint(pos):
                 self.sel_shelf, self.sel_bag = idx, None
-                return True
-        for rect, idx in self._bag_rects:
-            if rect.collidepoint(pos):
-                self.sel_bag, self.sel_shelf = idx, None
                 return True
         if self._buy_rect.collidepoint(pos):
             self._do_buy(player, combat)
@@ -174,13 +242,47 @@ class ShopPanel:
         if self._sell_rect.collidepoint(pos):
             self._do_sell(player, combat)
             return True
+        for rect, idx in self._bag_rects:
+            if rect.collidepoint(pos):
+                self.sel_bag, self.sel_shelf = idx, None
+                return True
         return bool(self.rect.collidepoint(pos))
+
+    def handle_mouse_motion(self, pos: Tuple[int, int], player) -> None:
+        """拖动拇指时连续滚动；若尚未抓到拇指但点中轨道，则抓住并跟随。"""
+        if self._drag_bar is None:
+            if self._shelf_bar.collidepoint(pos) and self._shelf_bar_thumb.width:
+                self._drag_bar = "shelf"
+            elif self._bag_bar.collidepoint(pos) and self._bag_bar_thumb.width:
+                self._drag_bar = "bag"
+            else:
+                return
+        if self._drag_bar == "shelf":
+            track = self._shelf_bar
+            total = len(self._shelf_items())
+        else:
+            track = self._bag_bar
+            total = len(self._bag_entries(player))
+        thumb = self._bar_thumb(track, 0, total)
+        span = max(1, track.h - thumb.h)
+        frac = (pos[1] - track.y - thumb.h / 2) / span
+        frac = max(0.0, min(1.0, frac))
+        scroll = int(frac * max(0, total - self._rows()))
+        if self._drag_bar == "shelf":
+            self._scroll_shelf = scroll
+        else:
+            self._scroll = scroll
+
+    def handle_mouse_up(self) -> None:
+        self._drag_bar = None
+
+    def is_dragging(self) -> bool:
+        return self._drag_bar is not None
 
     def handle_wheel(self, pos: Tuple[int, int], amount: int, player) -> bool:
         if not self.visible or not self.rect.collidepoint(pos):
             return False
-        official = self._wz("backgrnd") is not None
-        rows = BG_NROWS if official else self._vis_rows()
+        rows = self._rows()
         # 光标在左半 → 滚货架；右半 → 滚背包
         if pos[0] - self.rect.x < self.rect.w // 2:
             items = self._shelf_items()
@@ -316,6 +418,9 @@ class ShopPanel:
                                         max(0, len(items) - BG_NROWS)))
         row_x = x + BG_LCOL_X
         row_w = BG_LCOL_W
+        self._shelf_bar = pygame.Rect(row_x + row_w - SCROLLBAR_W - 2,
+                                      y + BG_ROW_Y0, SCROLLBAR_W,
+                                      BG_NROWS * BG_ROW_H - 6)
         for j in range(BG_NROWS):
             i = self._scroll_shelf + j
             if i >= len(items):
@@ -330,6 +435,9 @@ class ShopPanel:
         self._scroll = max(0, min(self._scroll, max(0, len(entries) - BG_NROWS)))
         bag_x = x + BG_RCOL_X
         bag_w = BG_RCOL_W
+        self._bag_bar = pygame.Rect(bag_x + bag_w - SCROLLBAR_W - 2,
+                                    y + BG_ROW_Y0, SCROLLBAR_W,
+                                    BG_NROWS * BG_ROW_H - 6)
         for j in range(BG_NROWS):
             i = self._scroll + j
             if i >= len(entries):
@@ -339,8 +447,13 @@ class ShopPanel:
                                 i == self.sel_bag)
             self._bag_rects.append((rect, i))
 
-        # ── 底部：买/卖按钮 + 金币 ─────────────────────────────────
-        by = y + BG_PANEL_H - 34
+        # ── 两栏滚动条（叠在行区右缘，内容左对齐不冲突）──────────────
+        self._update_bars(player)
+        self._draw_scrollbar(surface, self._shelf_bar, self._shelf_bar_thumb)
+        self._draw_scrollbar(surface, self._bag_bar, self._bag_bar_thumb)
+
+        # ── 头区右框：买/卖按钮放在金币金额下方空隙，不叠物品行 ───────
+        by = y + BG_BTN_Y
         buy_img = self._wz("BtBuy/normal/0")
         sell_img = self._wz("BtSell/normal/0")
         bx = x + BG_PANEL_W - 18 - (BTN_W * 2 + 8)
@@ -357,6 +470,17 @@ class ShopPanel:
                 pygame.draw.rect(surface, color, rect, border_radius=4)
                 surface.blit(fs.render(label, True, (240, 240, 245)),
                              (rect.x + (rect.w - fs.size(label)[0]) // 2, rect.y + 4))
+
+    def _draw_scrollbar(self, surface, track: pygame.Rect,
+                        thumb: pygame.Rect) -> None:
+        """画一条竖向滚动条：无可滚内容时不画淡轨，仅画可拖拇指。"""
+        if track.width <= 0 or thumb.width <= 0:
+            return
+        # 轨道背景
+        pygame.draw.rect(surface, (176, 186, 198), track, border_radius=3)
+        # 拇指（上小圆头，拖动更直观）
+        pygame.draw.rect(surface, (205, 214, 224), thumb, border_radius=3)
+        pygame.draw.rect(surface, (120, 132, 148), thumb, 1, border_radius=3)
 
     def _blit_row_content(self, surface, rect: pygame.Rect, icon, fs,
                           name_txt: str, name_c, price_txt, price_c,

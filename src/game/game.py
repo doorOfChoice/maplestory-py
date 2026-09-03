@@ -185,11 +185,18 @@ class Game:
                     elif self.ctx.panels.handle_wheel((cx, cy), amount, self.ctx.world.player):
                         pass   # 背包 / 技能窗滚轮，已消费
             elif event.type == pygame.MOUSEMOTION:
-                if self.ctx.panels.is_dragging():
+                if self.ctx.shop_panel.visible and self.ctx.shop_panel.is_dragging():
+                    cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
+                    cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
+                    self.ctx.shop_panel.handle_mouse_motion((cx, cy), self.ctx.world.player)
+                elif self.ctx.panels.is_dragging():
                     cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
                     cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
                     self.ctx.panels.handle_mouse_motion((cx, cy))
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                if self.ctx.shop_panel.visible and self.ctx.shop_panel.is_dragging():
+                    self.ctx.shop_panel.handle_mouse_up()
+                    continue
                 if not self.dead:
                     cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
                     cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
