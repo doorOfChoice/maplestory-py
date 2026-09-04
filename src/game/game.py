@@ -335,8 +335,6 @@ class Game:
         for iid, count in d.end_items:
             cur = q.item_progress(self.ctx.world.player, qid, iid)
             lines.append(f"收集 #c{iid}# {self.assets.item_name(str(iid)) or ''}  {cur}/{count}")
-        if not lines and d.desc1:
-            lines.append(self._qmark(d.desc1))
         if d.reward_exp:
             lines.append(f"奖励：经验 {d.reward_exp}")
         if d.reward_money:

@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Dict, List, Optional, Tuple
 
 import pygame
@@ -33,6 +34,21 @@ BAR_RESERVE = 58               # 底部状态栏预留高度
 BTN_W, BTN_H = 57, 17          # BtDetail / BtGiveup
 BODY_TOP, BODY_BOT = 126, DET_H - 34   # 详情白色内容区（滚动视口）上下缘
 HEADER_BLUE = (68, 136, 187)   # backgrnd2 蓝头底色（fallback 与选中行同色）
+
+# 官方 desc 里的静态目标行：以 #t/#c/#o 等实体宏开头、以 /N 结尾（如 "#t4000011# …/10"）
+_STATIC_GOAL_RE = re.compile(r"^#\w\d+#.*?/\d+\s*$")
+
+
+def strip_static_goal_lines(desc: str) -> str:
+    """剔除 desc 中的官方静态目标行（原始客户端只有文字描述、无进度可显示）。
+
+    进行中页会另挂动态进度行（收集 … 0/N），两者并存会重复展示同一目标；
+    仅整行为「实体宏 … /N」才剔除，正文中间引用宏的句子不受影响。
+    """
+    out = desc.replace("\\r\\n", "\n").replace("\\n", "\n")
+    kept = [ln for ln in out.split("\n") if not _STATIC_GOAL_RE.match(ln.strip())]
+    return "\n".join(kept)
+
 
 TAB_KEYS = ("ready", "active", "done")
 # 官方页签文字烤死在底图内（可執行/進行中/完成），此表仅素材缺失 fallback 用
@@ -241,7 +257,7 @@ class QuestLogWindow(Window):
             self.info_rect = self.giveup_rect = None
             return
         self._draw_detail_header(surface, dx, y, d, qid, f, fs)
-        self._draw_detail_body(surface, dx, y, d, qid, fs)
+        self._draw_detail_body(surface, dx, y, qid, fs)
         self._draw_detail_buttons(surface, dx, y, fs)
 
     def _draw_tabs(self, surface, x: int, y: int, fs) -> None:
@@ -265,7 +281,7 @@ class QuestLogWindow(Window):
                                        if key == self.tab else (90, 96, 110)),
                              (rect.x + 6, rect.y + 2))
             self.tab_rects[key] = rect
-            tx = rect.right + 1
+            tx = rect.right + 6
 
     def _draw_rows(self, surface, x: int, y: int, ids: List[str], fs) -> None:
         self.row_rects.clear()
@@ -304,8 +320,8 @@ class QuestLogWindow(Window):
             pygame.draw.rect(surface, HEADER_BLUE,
                              pygame.Rect(dx + 8, y + 28, DET_W - 16, 90))
         name = widgets.ellipsize(self._clean(d.name), f, 150)
-        surface.blit(f.render(name, True, (255, 255, 255)), (dx + 24, y + 32))
-        ty = y + 52
+        surface.blit(f.render(name, True, (255, 255, 255)), (dx + 32, y + 40))
+        ty = y + 58
         surface.blit(fs.render(self._level_text(d), True, (235, 242, 248)),
                      (dx + 24, ty))
         ty += 16
@@ -375,7 +391,7 @@ class QuestLogWindow(Window):
                              (gx, gy, int(gw * done / total), 8))
         txt = f"{done}/{total}"
         surface.blit(self.svc.ui.font_small.render(txt, True, (0, 0, 0)),
-                     (gx + gw + 6, gy - 2))
+                     (gx + gw + 6, gy + 1))
 
     def _draw_npc_portrait(self, surface, dx: int, y: int, d) -> None:
         npc_id = d.end_npc if d.end_npc is not None else d.start_npc
@@ -401,11 +417,11 @@ class QuestLogWindow(Window):
         surface.blit(img, (bx + (box_w - img.get_width()) // 2,
                            y + 118 - img.get_height() - 4))
 
-    def _draw_detail_body(self, surface, dx: int, y: int, d, qid: str,
-                          fs) -> None:
-        width = DET_W - 40
-        top = y + BODY_TOP
-        view_h = BODY_BOT - BODY_TOP
+    def detail_chunks(self, qid: str) -> List[str]:
+        """详情正文行序列：奖励视图，或说明（+进行中的动态目标行，去重静态行）。"""
+        d = self.svc.player().quests.defs.get(qid)
+        if d is None:
+            return []
         chunks: List[str] = []
         if self.show_reward:
             chunks.append("—— 完成奖励 ——")
@@ -414,15 +430,29 @@ class QuestLogWindow(Window):
             if d.reward_money:
                 chunks.append(f"金币：{d.reward_money}")
             for iid, cnt in d.reward_items:
-                nm = self.svc.assets.item_name(str(abs(iid))) or str(iid)
-                chunks.append(f"#c{abs(iid)}# {nm} ×{cnt}")
-        else:
-            desc = (d.desc0 if self.tab == "ready"
-                    else d.desc2 if self.tab == "done" else d.desc1)
-            if desc:
-                chunks.append(desc)
-            if self.tab == "active" and self.svc.quest_goal_lines is not None:
-                chunks.extend(self.svc.quest_goal_lines(qid) or ())
+                if cnt <= 0:
+                    continue
+                nm = self.svc.assets.item_name(str(iid)) or str(iid)
+                chunks.append(f"#c{iid}# {nm} ×{cnt}")
+            return chunks
+        desc = (d.desc0 if self.tab == "ready"
+                else d.desc2 if self.tab == "done" else d.desc1)
+        goals: List[str] = []
+        if self.tab == "active" and self.svc.quest_goal_lines is not None:
+            goals = self.svc.quest_goal_lines(qid) or []
+        if desc:
+            # 仅当动态行会逐条列出击杀/收集目标时才剔静态行；否则静态行是唯一目标信息
+            dup = bool(d.kills or d.end_items)
+            chunks.append(strip_static_goal_lines(desc) if (goals and dup) else desc)
+        chunks.extend(goals)
+        return chunks
+
+    def _draw_detail_body(self, surface, dx: int, y: int, qid: str,
+                          fs) -> None:
+        width = DET_W - 40
+        top = y + BODY_TOP
+        view_h = BODY_BOT - BODY_TOP
+        chunks = self.detail_chunks(qid)
         scratch = pygame.Surface((DET_W - 20, 4000), pygame.SRCALPHA)
         ty = 0
         for text in chunks:

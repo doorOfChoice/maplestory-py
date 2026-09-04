@@ -6,7 +6,8 @@ from types import SimpleNamespace
 from typing import Callable, List, Optional
 
 from game.render.windows.questlog import (BAR_RESERVE, GAP, LIST_W,
-                                          QUEST_WIN_W, QuestLogWindow)
+                                          QUEST_WIN_W, QuestLogWindow,
+                                          strip_static_goal_lines)
 from tests.windows_harness import (close_button_pos, draw_once, make_manager,
                                    make_services, press, wheel)
 
@@ -211,6 +212,46 @@ def test_detail_offset_resets_on_selection():
     row_q2 = next(r for r, qid in win.row_rects if qid == "q2")
     press(mgr, row_q2.center)
     assert win.detail_offset == 0
+
+
+# ── 静态目标行去重 ─────────────────────────────────────────────────
+def test_strip_static_goal_lines_removes_item_objective_rows():
+    """desc1 里官方自带的静态目标行（#t/#c 开头、/N 结尾）被剔除，正文保留。"""
+    desc = ("剧情说明……\\n\\n"
+            "#t4000011# #b#c4000011##k/10 \\n"
+            "#t4000001# #b#c4000001##k/40")
+    out = strip_static_goal_lines(desc)
+    assert out.startswith("剧情说明")
+    assert "#t4000011#" not in out and "/10" not in out and "/40" not in out
+
+
+def test_strip_static_goal_lines_keeps_prose_with_macros():
+    """正文中间引用物品宏的句子不会被误删。"""
+    desc = "把#t4000011#交给#p9000320#。"
+    assert strip_static_goal_lines(desc) == desc.replace("\\n", "\n")
+
+
+def test_active_detail_drops_static_goals_when_dynamic_exist():
+    """进行中页：有收集/击杀动态目标行时，desc1 里的重复静态行被剔除。"""
+    defs = {"q1": make_def(
+        "任务一",
+        desc1="剧情……\\n\\n#t4000011# #b#c4000011##k/10")}
+    defs["q1"].end_items = [(4000011, 10)]
+    win, _ = open_log(make_player(["q1"], defs),
+                      lambda qid: ["收集 #c4000011# 0/10"])
+    body = win.detail_chunks("q1")
+    assert any("0/10" in c for c in body)
+    assert not any("#k/10" in c for c in body)
+
+
+def test_active_detail_keeps_static_goals_without_dynamic_rows():
+    """无动态目标行（如纯交对话任务）时，desc1 原样保留（静态行是唯一目标信息）。"""
+    defs = {"q1": make_def(
+        "任务一",
+        desc1="剧情……\\n\\n#t4000011# #b#c4000011##k/10")}
+    win, _ = open_log(make_player(["q1"], defs))
+    body = win.detail_chunks("q1")
+    assert any("#k/10" in c for c in body)
 
 
 # ── chrome / 事件 / 锚点 ───────────────────────────────────────────
