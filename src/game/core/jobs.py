@@ -44,6 +44,9 @@ class JobDef:
     code: int
     name: str
     tree_imgs: List[str] = field(default_factory=list)   # Skill.wz 图名
+    # 树内白名单：None = 全树加载；给定则只取列出的技能 id
+    # （1000.img 是占位树，混满乘骑/合成等杂项，新手只露蜗牛投掷术）
+    skill_ids: Optional[List[str]] = None
     passive_ids: List[int] = field(default_factory=list)  # 转职附赠满级的被动
     advance_lv: int = 0                                   # 转职所需人物等级
     prejob: int = 0                                       # 转职前置职业（新手）
@@ -56,7 +59,10 @@ class JobDef:
 
 
 JOBS: Dict[int, JobDef] = {
-    0: JobDef(code=0, name="新手"),
+    # 新手技能树：Skill.wz/1000.img 的 10001000（台版名「嫩寶丟擲術」，即经典
+    # 蜗牛投掷术；该树只有图标占位，数值表由 skills.py 合成）
+    0: JobDef(code=0, name="新手", tree_imgs=["1000.img"],
+              skill_ids=["10001000"]),
     # 弓箭手 1 转：Skill.wz/300.img；被动 精準強化/霸王箭/百步穿楊；
     # 导师赫丽娜(1012100)；转职附赠木弓(1452002，需求 Lv10 无属性要求，
     # 短弓 1452000 需求 Lv25/DEX80 转职时穿不上)
@@ -122,6 +128,9 @@ def skill_ids_for_job(assets, code: int) -> List[str]:
             ids.extend(c.name for c in node.children() if c.name.isdigit())
         except Exception:
             continue
+    if jobdef.skill_ids is not None:
+        allow = set(jobdef.skill_ids)
+        ids = [i for i in ids if i in allow]
     return ids
 
 
@@ -151,8 +160,11 @@ def sp_group_of_skill(skill_id: str) -> int:
 
 
 def job_sp_group(code: int) -> int:
-    """职业代码 → SP 职业组（3000→300、3110→311）。"""
-    return code // 10
+    """职业代码 → SP 职业组（3000→300、3110→311）。
+
+    新手特殊：其技能在 1000.img（id 前缀组 100），与 sp_group_of_skill 对齐。
+    """
+    return 100 if code == 0 else code // 10
 
 
 def skill_ids_for_chain(assets, code: int) -> List[str]:

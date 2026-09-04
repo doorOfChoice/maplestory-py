@@ -441,6 +441,7 @@ class Combat:
         crit_mult = player.crit_mult()
         player_level = player.level
         atk_lo, atk_hi = player.attack_range()
+        speed, life = settings.ARROW_SPEED, settings.ARROW_LIFETIME
         if skill_data is None:
             dmg, crit = stats_mod.roll_damage(
                 atk_lo, atk_hi, 1.0, 0, player_level, 0, random,
@@ -459,9 +460,10 @@ class Combat:
             kind = "violet"
             frames = self.assets.skill_ball_frames(sid) if self.assets else []
             hit_frames = self.assets.skill_hit_frames(sid) if self.assets else []
+            speed = skill_data.get("speed", speed)
+            life = skill_data.get("life", life)
         facing = 1 if player.facing_right else -1
         aim = self._aim_point(player, facing, monsters)
-        speed = settings.ARROW_SPEED
         for i in range(n):
             offset = (i - (n - 1) / 2.0) * 7.0     # 多支箭纵向错峰
             ax, ay = player.x + facing * 16.0, player.y - 8.0 + offset
@@ -475,7 +477,7 @@ class Combat:
                 x=ax, y=ay, vx=vx, vy=vy,
                 frames=frames, hit_frames=hit_frames,
                 dmg=dmg, mob_count=mob_count, kind=kind, crit=crit,
-                life=settings.ARROW_LIFETIME))
+                life=life))
 
     def update_arrows(self, dt: float, monsters, player=None) -> None:
         for a in self.arrows:

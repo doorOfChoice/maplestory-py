@@ -20,6 +20,28 @@ from game.core.keybindings import SKILL_SLOT_COUNT
 from game.core.localize import to_simplified
 
 
+# 蜗牛投掷术：v113 TW 的 1000.img 该节点只有图标与名字、数值表为空，
+# 按同系新手技能的量级合成 3 级数值（100%→120%，MP 消耗固定 4）。
+_SNAIL_LEVELS = [{"mpCon": 4, "damage": 100 + 10 * i} for i in range(3)]
+
+
+def apply_synthesized(defs: Dict[str, "SkillDef"], job: int) -> None:
+    """把合成数值表并入技能定义（WZ 有名有图标、缺数值的新手树）。
+
+    树里已有占位节点（职业链含新手、从 WZ 加载到）→ 补数值；
+    新手期无 WZ（纯逻辑测试）→ 直接创建；其他职业的显式 defs 不受污染。
+    """
+    sid = settings.SNAIL_THROW_SKILL_ID
+    if sid in defs:
+        d = defs[sid]
+        d.levels = [dict(lv) for lv in _SNAIL_LEVELS]
+        d.max_level = len(d.levels)
+    elif job == 0:
+        defs[sid] = SkillDef(sid, "蜗牛投掷术", "消耗MP向怪物投掷蜗牛。",
+                             [dict(lv) for lv in _SNAIL_LEVELS],
+                             len(_SNAIL_LEVELS))
+
+
 class SkillDef:
     def __init__(self, skill_id: str, name: str, desc: str,
                  levels: List[dict], max_level: int,
@@ -130,6 +152,7 @@ class SkillBook:
         if defs is None:
             defs = load_skill_defs(assets, skill_ids_for_chain(assets, job)) \
                 if assets is not None else {}
+        apply_synthesized(defs, job)
         self.defs = defs
         self.job = job
         self.levels: Dict[str, int] = {}
@@ -296,7 +319,7 @@ class SkillBook:
         if self.cooldowns.get(skill_id, 0.0) > 0.0:
             return None
         self.cooldowns[skill_id] = settings.SKILL_COOLDOWN.get(skill_id, 0.8)
-        return {
+        data = {
             "id": skill_id,
             "def": d,
             "level": lv,
@@ -307,6 +330,11 @@ class SkillBook:
             "mob_count": d.stat(lv, "mobCount", 1),
             "bullet_count": max(1, d.stat(lv, "bulletCount", 1)),
         }
+        if skill_id == settings.SNAIL_THROW_SKILL_ID:
+            data["projectile"] = True                  # 弹道技：不进近战命中框
+            data["speed"] = settings.SNAIL_THROW_SPEED
+            data["life"] = settings.SNAIL_THROW_LIFETIME
+        return data
 
     def tick(self, dt: float) -> None:
         for sid in list(self.cooldowns):

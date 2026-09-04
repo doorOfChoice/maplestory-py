@@ -58,8 +58,13 @@ class SkillWindow(Window):
         页签按职业链旧→新排（一转/二转/三转）；选中栏默认为最新一转，或用户
         点选后记住的 group。列表含该转全部技能（自动满级的被动也列出）。
         """
-        tabs = [(job_sp_group(jd.code), _SKL_ORD[i] + "转")
-                for i, jd in enumerate(job_chain(book.job)) if i < len(_SKL_ORD)]
+        tabs, n = [], 0
+        for jd in job_chain(book.job):        # 新手页单列名，其余按转数排
+            if jd.code == 0:
+                tabs.append((job_sp_group(jd.code), "新手"))
+            elif n < len(_SKL_ORD):
+                tabs.append((job_sp_group(jd.code), _SKL_ORD[n] + "转"))
+            n += 1
         groups = [g for g, _ in tabs]
         active = self._tab if self._tab in groups else (
             groups[-1] if groups else job_sp_group(book.job))

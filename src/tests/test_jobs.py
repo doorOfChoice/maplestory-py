@@ -70,15 +70,15 @@ def test_job_for_trainer_terminal_and_unknown():
 
 
 def test_job_chain_orders_from_first_to_current():
-    """职业链：旧→新，猎人 → [弓箭手, 猎人]，神射手含全部三阶。"""
-    assert [j.code for j in job_chain(3100)] == [3000, 3100]
-    assert [j.code for j in job_chain(3110)] == [3000, 3100, 3110]
-    assert [j.code for j in job_chain(3000)] == [3000]
+    """职业链：旧→新，猎人 → [新手, 弓箭手, 猎人]，神射手含全部四阶。"""
+    assert [j.code for j in job_chain(3100)] == [0, 3000, 3100]
+    assert [j.code for j in job_chain(3110)] == [0, 3000, 3100, 3110]
+    assert [j.code for j in job_chain(3000)] == [0, 3000]
 
 
-def test_job_chain_newbie_is_empty():
-    """新手无技能树 → 空链。"""
-    assert job_chain(0) == []
+def test_job_chain_newbie_has_snail_tree():
+    """新手有树（1000.img 蜗牛投掷）→ 链含新手。"""
+    assert [j.code for j in job_chain(0)] == [0]
 
 
 def test_sp_group_of_skill_and_job():
@@ -88,3 +88,5 @@ def test_sp_group_of_skill_and_job():
     assert sp_group_of_skill("3110000") == 311
     assert job_sp_group(3000) == 300
     assert job_sp_group(3110) == 311
+    assert job_sp_group(0) == 100          # 新手组对齐 1000.img 前缀
+    assert sp_group_of_skill("10001000") == 100

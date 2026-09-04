@@ -105,7 +105,7 @@ def test_skill_tab_click_switches_group_and_resets_scroll():
     player = make_player(n_skills=10, job=3110)
     mgr, win = open_window(player)
     groups = [job_sp_group(jd.code) for jd in job_chain(player.skills.job)]
-    assert len(win._tab_rects) == 3 and groups[-1] == 311
+    assert len(win._tab_rects) == 4 and groups[-1] == 311   # 新手 + 三转
     wheel(mgr, win.rect.center, up=False)          # 先滚开一行
     tab_rect, grp = win._tab_rects[0]
     assert press(mgr, tab_rect.center)

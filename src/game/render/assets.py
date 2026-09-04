@@ -1134,8 +1134,26 @@ class Assets:
 
     def skill_ball_frames(self, skill_id: str) -> List:
         """技能弹道贴图（如箭矢 ball/*），[(Surface, origin, delay_ms)]。"""
+        if skill_id == settings.SNAIL_THROW_SKILL_ID:
+            return self.snail_frames()      # WZ 无 ball 节点：借蜗牛怪贴图
         return self.effect_frames("Skill", resolve_skill_img(skill_id),
                                   f"skill/{skill_id}/ball")
+
+    def snail_frames(self) -> List:
+        """新手普攻「蜗牛投掷」的弹道贴图：借藍寶（蜗牛怪）的 stand 帧。"""
+        key = "snailball"
+        hit = self._effect_cache.get(key)
+        if hit is not None:
+            return hit
+        result: List[Tuple[pygame.Surface, Tuple[int, int], int]] = []
+        for cv in self._mob_action_canvases(settings.SNAIL_THROW_MOB_ID, "stand"):
+            pil = _decode_canvas_prop(cv, self.region, self.wz["Mob"])
+            if pil is None:
+                continue
+            result.append((pil_to_surface(pil), _canvas_origin(cv),
+                           _canvas_delay(cv)))
+        self._effect_cache[key] = result
+        return result
 
     def normal_arrow_frames(self) -> List:
         """普攻箭矢贴图：原版用箭矢物品（金币箭 2060000）的 bullet 节点渲染。"""

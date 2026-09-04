@@ -261,9 +261,10 @@ class World:
                 settings.FALL_OUT_DAMAGE, "blue"))
             self.place_player_at_spawn()
 
-        # 攻击判定：远程起手一次性生成箭（近战仍在首帧结算）
+        # 攻击判定：远程/弹道技能起手一次性生成弹道（近战仍在首帧结算）
         if self.player.attacking:
-            if self.player.is_ranged():
+            skill = self.player.pending_skill
+            if self.player.is_ranged() or (skill and skill.get("projectile")):
                 if not self.player.attack_projectile_spawned:
                     self.player.attack_projectile_spawned = True
                     self.combat.spawn_arrows(self.player, self.player.pending_skill,
