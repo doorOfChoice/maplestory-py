@@ -45,7 +45,6 @@ ACTIONS: List[ActionDef] = [
     ActionDef("jump", "跳跃", GROUP_ACT, pygame.K_SPACE),
     ActionDef("attack", "普通攻击", GROUP_ACT, pygame.K_a),
     ActionDef("pickup", "拾取", GROUP_ACT, pygame.K_z),
-    ActionDef("potion", "快捷药水", GROUP_ACT, pygame.K_f),
     ActionDef("talk", "对话", GROUP_ACT, pygame.K_e),
     ActionDef("chat", "聊天", GROUP_ACT, pygame.K_RETURN),
     ActionDef("respawn", "原地复活", GROUP_ACT, pygame.K_r),

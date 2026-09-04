@@ -346,8 +346,8 @@ class InventoryWindow(Window):
         coin = widgets.wz_surface(self.svc, "Item/BtCoin/normal/0")
         if coin is not None:
             surface.blit(coin, (x + 10, y + 266))
-        surface.blit(fs.render(f"金币 {_meso_of(self.svc):,}", True, (110, 68, 18)),
-                     (x + 28, y + 265))
+        surface.blit(fs.render(f"{_meso_of(self.svc):,}", True, (110, 68, 18)),
+                     (x + 28, y + 268))
 
     def _draw_fallback(self, surface, items: List[Item]) -> None:
         """素材缺失 → 旧自绘背包（布局逐行对齐 panels._draw_inventory_fallback）。"""

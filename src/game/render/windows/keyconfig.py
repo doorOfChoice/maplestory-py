@@ -38,7 +38,7 @@ SHORT_LABELS = {
     "move_left": "左移", "move_right": "右移",
     "move_up": "上爬", "move_down": "下跳",
     "jump": "跳跃", "attack": "攻击", "pickup": "拾取",
-    "potion": "药水", "talk": "对话", "chat": "聊天", "respawn": "复活",
+    "talk": "对话", "chat": "聊天", "respawn": "复活",
     "window_inventory": "背包", "window_skill": "技能",
     "window_stat": "状态", "window_quest": "任务",
     "minimap": "地图", "window_keyconfig": "按键",

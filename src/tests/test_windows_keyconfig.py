@@ -187,10 +187,10 @@ def test_drop_skill_onto_key_binds_its_slot():
     pk = DragPickup(source=("skill", "3001000"), item=None,
                     home=win.rect, kind="skill", payload="3001000",
                     label="魔法箭")
-    assert win.handle_drop(pk, cell_for(win, pygame.K_f).center)
+    assert win.handle_drop(pk, cell_for(win, pygame.K_z).center)
     assert player.skills.hotkeys == {1: "3001000"}
-    assert kb.key_of("skill_1") == pygame.K_f      # 顶掉的药水换到 1 键
-    assert kb.key_of("potion") == pygame.K_1
+    assert kb.key_of("skill_1") == pygame.K_z      # 顶掉的拾取换到 1 键
+    assert kb.key_of("pickup") == pygame.K_1
 
 
 def test_skill_keycap_text_uses_bound_skill_name():

@@ -25,7 +25,6 @@ SKL_ROWS = 6             # 技能窗一屏可见行数（(SKL_H-49)//SKL_ROW_H�
 SKL_ROWS_TAB = 5         # 带转数页签条时的一屏可见行数（页签占 header 下方一条）
 SKL_TAB_H = 22           # 转数页签条高度
 _SKL_ORD = ("一", "二", "三", "四", "五", "六")   # 转数中文序数
-SHT_W = 93               # 快捷栏宽：技能窗锚在其左侧
 BAR_RESERVE = 58         # 底部状态栏预留高度
 PAD = 10
 
@@ -46,7 +45,7 @@ class SkillWindow(Window):
 
     # ── 定位 ───────────────────────────────────────────────────────
     def anchor(self, vw: int, vh: int) -> Tuple[int, int]:
-        return (vw - 4 - SHT_W - 6 - SKL_W, vh - SKL_H - BAR_RESERVE - 2)
+        return (vw - 4 - SKL_W, vh - SKL_H - BAR_RESERVE - 2)
 
     # ── 视图状态 ───────────────────────────────────────────────────
     def _hotkey_of(self, book, sid: str) -> Optional[int]:
@@ -111,9 +110,9 @@ class SkillWindow(Window):
         surface.blit(widgets.wz_surface(self.svc, SKL_BG), (x, y))
         self.add_chrome(surface, x, y, SKL_W, 44)
         # SP（本转结余，浅色标题条右侧 → 深字）
-        sp = ft.render(f"SP {sp_group}", True,
-                       (150, 90, 20) if sp_group > 0 else (110, 112, 124))
-        surface.blit(sp, (x + 100, y + 7))
+        sp = ft.render(f"{sp_group}", True,
+                       (0, 0, 0) if sp_group > 0 else (0, 0, 0))
+        surface.blit(sp, (x + 75, y + SKL_H - 20))
         multi = len(tabs) > 1
         if multi:
             self._draw_tabs(surface, x, y + 44, SKL_W, tabs, active)

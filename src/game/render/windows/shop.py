@@ -614,7 +614,7 @@ class ShopWindow(Window):
         pygame.draw.line(surface, (70, 76, 90), (x + 12, by), (x + PANEL_W - 12, by))
         meso = combat.meso if combat is not None else 0
         surface.blit(fs.render(f"金币 {meso:,}", True, (255, 216, 96)),
-                     (x + 14, by + 14))
+                     (x + 14, by + 28))
         sel_desc = ""
         if self.sel_shelf is not None and self.sel_shelf < len(items):
             price = shop_mod.buy_price(self._shop_id(), items[self.sel_shelf],

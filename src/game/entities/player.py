@@ -274,17 +274,6 @@ class Player:
         self.hp = min(self.hp, self.max_hp)
         self.mp = min(self.mp, self.max_mp)
 
-    def use_potion(self) -> bool:
-        """快捷喝药：优先 HP 药水，其次 MP 药水。返回是否使用成功。"""
-        order = sorted(self.inventory.consumes.values(),
-                       key=lambda i: 0 if i.info.get("spec", {}).get("hp") else 1)
-        for item in order:
-            if not item.info.get("spec"):
-                continue
-            if self.use_item_by_id(item.id):
-                return True
-        return False
-
     def use_item_by_id(self, item_id: str) -> bool:
         """使用指定消耗品（键位绑定的物品宏走这里）；结算 hp/mp 恢复。"""
         spec = self.inventory.use_consume(item_id)

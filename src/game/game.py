@@ -188,9 +188,9 @@ class Game:
         else:
             self.ctx.ui.show_dialog("欢迎", ["冒险岛 v113 · 弓箭手村东部小山",
                                           "←→ 移动  空格 跳跃  ↓+空格 下跳  ↑ 爬绳/梯",
-                                          "A 攻击  Z 拾取  数字键 技能  F 喝药",
+                                          "A 攻击  Z 拾取  数字键 技能",
                                           "I 道具栏  K 技能栏  B 状态  Q 任务日志  M 小地图",
-                                          "E 对话  R 复活  O 按键设置（全部键位可改）",
+                                          "E 对话  R 复活  O 按键设置（消耗品可从背包拖到键上快捷使用）",
                                           "Enter 聊天  输入 /help 可查看 GM 指令（/warp 传图等）",
                                          "背包满了？双击道具使用/穿戴，把它拖出背包窗口即可扔在地上"
                                          "（已穿装备也能从纸娃娃拖出扔掉）。",
@@ -271,9 +271,6 @@ class Game:
                     self.ctx.windows.get("keyconfig").toggle()
                 elif action == "minimap":
                     self.ctx.world.minimap.toggle()
-                elif action == "potion":
-                    if self.ctx.world.player.use_potion():
-                        self.ctx.audio.play("PickUpItem", 0.4)
                 elif action is not None and action.startswith("skill_"):
                     self._cast_skill(int(action[len("skill_"):]))
                 elif action is not None and item_id_of_action(action):

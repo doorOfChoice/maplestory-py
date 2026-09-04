@@ -18,7 +18,6 @@ from game.render.windows import WindowManager, WindowServices
 from game.render.windows.inventory import EquipWindow, InventoryWindow
 from game.render.windows.keyconfig import KeyConfigWindow
 from game.render.windows.questlog import QuestLogWindow
-from game.render.windows.quickslot import QuickSlotBar
 from game.render.windows.shop import ShopWindow
 from game.render.windows.skill import SkillWindow
 from game.render.windows.stat import StatWindow
@@ -51,7 +50,7 @@ class GameContext:
                              player=lambda: world.player,
                              combat=world.combat)
         windows = WindowManager(svc)
-        for win in (QuickSlotBar(svc), InventoryWindow(svc), EquipWindow(svc),
+        for win in (InventoryWindow(svc), EquipWindow(svc),
                     SkillWindow(svc), QuestLogWindow(svc), StatWindow(svc),
                     KeyConfigWindow(svc), ShopWindow(svc), StorageWindow(svc)):
             windows.add(win)

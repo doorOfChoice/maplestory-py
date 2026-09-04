@@ -73,7 +73,7 @@ def test_unlearned_row_is_not_draggable():
 
 
 def test_drag_skill_from_skill_window_binds_key():
-    """拖「技能00」到 F 键：槽 1 的动作键变 F，原占键的药水被顶到 1 键。"""
+    """拖「技能00」到 F 键：槽 1 的动作键变 F，原默认键 1 腾空。"""
     mgr, skillw, keyw, book, kb = build()
     row = skill_row(skillw, MAGIC_ARROW)
     assert press(mgr, row.center)
@@ -83,7 +83,7 @@ def test_drag_skill_from_skill_window_binds_key():
     assert release(mgr, target.center)
     assert book.hotkeys == {1: MAGIC_ARROW}
     assert kb.key_of("skill_1") == pygame.K_f
-    assert kb.key_of("potion") == pygame.K_1
+    assert kb.action_for(pygame.K_1) is None
 
 
 def test_drag_skill_released_off_keyboard_is_noop():

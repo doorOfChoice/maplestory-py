@@ -42,7 +42,7 @@ class Window:
     key: str = ""
     escape_closes: bool = False        # Esc 优先关闭（按键设置 / 商店 / 仓库）
     closes_on_map_change: bool = False  # 切图自动关闭（NPC 绑定窗口）
-    interactive: bool = True           # 常驻装饰（快捷栏）置 False：不置顶、不拦事件
+    interactive: bool = True           # 常驻装饰类面板置 False：不置顶、不拦事件
 
     def __init__(self, svc: WindowServices) -> None:
         self.svc = svc
