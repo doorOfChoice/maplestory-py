@@ -576,16 +576,9 @@ class Player:
                                     self.cur_fh, layer=self.ground_layer)
         now_feet = self.y + settings.FEET_OFFSET
 
-        # 落地检测（下落时穿过某条线段）
-        if self.vy >= 0 and not self.on_ground:
-            fh = physics.landing_candidate(self.x, prev_feet, now_feet, self.drop_layers)
-            if fh is not None:
-                self.y = fh.y_at(self.x) - settings.FEET_OFFSET
-                self.vy = 0.0
-                self.on_ground = True
-                self.cur_fh = fh
-                self.drop_layers.discard(fh.layer)
-        elif self.on_ground:
+        # 落地检测：下落（vy>=0）用垂直穿线带；上升帧只跑沿迹重接
+        # （击退大横位移插进坡体时坡面抬升快过穿线，须即时接回）
+        if self.on_ground:
             # 贴坡只认"当前链"：cur_fh 覆盖脚下 → 跟坡插值；越过端点 →
             # 仅接受 prev/next 链接的一级台阶续段。前景坡/悬垂平台等
             # 无链接的邻近面不参与贴坡（原版行走=沿 foothold 链游走）。
@@ -599,7 +592,8 @@ class Player:
                 # 大步长（如切窗回来 dt 尖峰）会瞬时沉到容差之外：
                 # 同帧用穿线检测兜底找回地面，避免误判成坠落而穿透
                 surf = physics.landing_candidate(
-                    self.x, prev_feet, now_feet, self.drop_layers)
+                    self.x, prev_feet, now_feet, self.drop_layers,
+                    prev_x=prev_x)
             if surf is not None:
                 self.y = surf.y_at(self.x) - settings.FEET_OFFSET
                 self.cur_fh = surf
@@ -608,6 +602,16 @@ class Player:
             else:
                 self.on_ground = False
                 self.cur_fh = None
+        else:
+            fh = physics.landing_candidate(self.x, prev_feet, now_feet,
+                                           self.drop_layers, prev_x=prev_x,
+                                           band=self.vy >= 0)
+            if fh is not None:
+                self.y = fh.y_at(self.x) - settings.FEET_OFFSET
+                self.vy = 0.0
+                self.on_ground = True
+                self.cur_fh = fh
+                self.drop_layers.discard(fh.layer)
 
         # 贴墙状态刷新（供下一帧的贴墙下滑 / 蹬墙跳使用）
         self.wall_dir = 0

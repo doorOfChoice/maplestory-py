@@ -97,6 +97,16 @@ class Physics:
             self.vr_right: Optional[float] = float(bounds["right"]) - r
         else:
             self.vr_left = self.vr_right = None
+        # 地图边缝缺口：VR bounds 常宽于最外侧可行走 foothold，两者之间的
+        # 边缝没有任何地面，走到即坠出世界。把可行走 vr 边界收紧到最外侧
+        # 非竖直 foothold 边缘，令玩家顶到边界即停（原版此处是墙）。
+        if self.vr_left is not None:
+            horiz = [f for f in self.footholds if f.x1 != f.x2]
+            if horiz:
+                self.vr_left = max(self.vr_left,
+                                   min(f.xmin for f in horiz))
+                self.vr_right = min(self.vr_right,
+                                    max(f.xmax for f in horiz))
         # 竖直墙（x1==x2）：不可站立/落点，只用于水平阻挡。
         # 按 (layer, x) 分组合并成墙链，每层各自按 x 排序供二分查询。
         self.chains: List[WallChain] = self._build_chains()
@@ -139,10 +149,17 @@ class Physics:
 
     # ── 支撑面查询 ────────────────────────────────────────────────
     def landing_candidate(self, x: float, prev_feet: float, now_feet: float,
-                          ignore_layers=None) -> Optional[Foothold]:
+                          ignore_layers=None, prev_x: Optional[float] = None,
+                          band: bool = True) -> Optional[Foothold]:
         """下落时本帧穿过(或刚好到达)的最近支撑面。
 
         ignore_layers: 下跳期间要忽略的平台 layer 集合。
+        prev_x / band: 水平大位移（如受击击退）上坡方向受击时，坡面随 x
+        抬升快过垂直下落，当前 x 的垂直穿线带会一直错过线（等 vy>=0 时脚已
+        深陷坡体）。故当带 prev_x 时补一条"沿迹穿越"判定：上帧脚在该面线上、
+        本帧已到线下方 → 判穿过。此判定不含方向假设，空中每帧都可安全运行
+        （普通跳台是脚从下方上穿，不满足"上方→下方"，不会误接）。band=False
+        时只用沿迹判定、跳过垂直带（上升帧专用，避免把跳台途中吸附）。
         """
         ignore = ignore_layers or set()
         best: Optional[Foothold] = None
@@ -152,9 +169,13 @@ class Physics:
             if f.x1 == f.x2 or f.layer in ignore or not f.covers(x):
                 continue
             y_a = f.y_at(x)
-            if lo <= y_a <= hi:
-                if best is None or y_a < best_y:
-                    best, best_y = f, y_a
+            hit = band and lo <= y_a <= hi
+            if not hit and prev_x is not None and prev_x != x:
+                xp = min(max(prev_x, f.xmin), f.xmax)
+                hit = (prev_feet <= f.y_at(xp) + 1.0
+                       and now_feet >= y_a - 1.0)
+            if hit and (best is None or y_a < best_y):
+                best, best_y = f, y_a
         return best
 
     def grounded_surface(self, x: float, feet: float) -> Optional[Foothold]:

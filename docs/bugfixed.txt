@@ -15,3 +15,20 @@
    挂绳与攀爬期间把角色 x 钉在该中心线上并清零水平速度，
    不再被攻击惯性/按键残留带偏。
    回归：src/tests/test_rope_climb.py::test_climb_snaps_player_to_rope_center
+
+4. [已解决] 在斜坡上被怪物打有时会掉出地面
+   根因：受击给横向击退 + 小跳，落地判定只按「当前 x 的垂直穿线带」采样；
+   朝上坡方向受击时坡面随 x 抬升快过垂直下落，线一直在带上方 → 永漏判，
+   脚从侧面插进坡体一路坠出世界。
+   修复：Physics.landing_candidate 增补「沿迹穿越」判定（传 prev_x）：上帧
+   脚在该面线上、本帧已到线下 → 判穿过并即时接回。此判定无方向假设，空中
+   每帧安全运行（普通跳台是从下方上穿，不满足条件，不误吸）；垂直穿线带仍
+   只在 vy>=0 生效。Player.update 落地/贴坡两分支重排为 on_ground / else。
+   回归：src/tests/test_slope_hurt_fallthrough.py
+
+5. [已解决] 走到地图边界有大缺口会掉下去
+   根因：VR bounds 常宽于最外侧可行走 foothold，两者之间的边缝没有任何
+   地面，走出最外段端点即坠入无底缺口。
+   修复：Physics 构造时把可行走 vr 水平边界收紧到最外侧非竖直 foothold
+   边缘（等效原版此处隐形墙），玩家顶到边界即停、走不进边缝。
+   回归：src/tests/test_map_edge_gap.py（+ test_wall_collision 边界用例）
