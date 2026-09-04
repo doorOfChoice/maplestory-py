@@ -19,6 +19,7 @@ from game import settings
 from game.core.keybindings import KeyBindings, item_id_of_action
 from game.render.assets import Assets
 from game.render.effects import Effect
+from game.render.ui import KEY_BUTTON_WINDOWS
 from game.systems.quests import load_quest_defs, render_markup
 from game.systems.lua_quests import build_advance_quest_defs, load_lua_quest_defs
 from game.npc_dialogue import NpcDialogueController
@@ -185,6 +186,19 @@ class Game:
                         self.ctx.world.combat.drop_player_item(
                             self.ctx.world.player, dropped)
                         self.ctx.audio.play("PickUpItem", 0.3)
+                else:
+                    # 无人消费的左键事件再给 HUD Key 按钮：命中即 toggle 对应窗口
+                    vpos = to_view_pos(event.pos)
+                    hit = self.ctx.ui.handle_mouse_event(event, vpos)
+                    if hit is not None:
+                        win = self.ctx.windows.get(KEY_BUTTON_WINDOWS[hit])
+                        win.toggle()
+                    elif (event.type == pygame.MOUSEBUTTONDOWN
+                          and event.button == 1):
+                        # 点中场景里的 NPC 直接开对话（不限玩家距离）
+                        cam = self.ctx.world.camera
+                        self._dialogue.try_talk_at(vpos[0] + cam.x,
+                                                   vpos[1] + cam.y)
             elif event.type == pygame.KEYDOWN:
                 kb = self.keybindings
                 if self.dead:
@@ -446,7 +460,10 @@ class Game:
         # 世界实体（地图/传送门/掉落/NPC/怪物/玩家/箭/特效）
         self.ctx.world.draw(self.canvas, self._npc_marker, player_visible=not self.dead)
         # HUD / 面板 / 对话框 / 死亡
-        self.ctx.ui.draw_hud(self.canvas, self.ctx.world.player, self.ctx.world.combat)
+        mouse = pygame.mouse.get_pos()
+        self.ctx.ui.draw_hud(self.canvas, self.ctx.world.player, self.ctx.world.combat,
+                             mouse=to_view_pos(mouse),
+                             left_down=bool(pygame.mouse.get_pressed(num_buttons=3)[0]))
         self.ctx.world.minimap.draw(self.canvas, self.ctx.world.player.x, self.ctx.world.player.y,
                           self.ctx.world.player.facing_right, self.ctx.world.monsters, self.ctx.world.npcs)
         # 地图名名牌：小地图可见时下移避让，否则右上角 8px

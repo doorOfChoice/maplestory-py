@@ -3,6 +3,7 @@
 对话状态统一为单一 `self._conv: Conversation`（通用步骤图会话）：
 
 · try_talk()        找脚下的 NPC 并路由（talk() 脚本 > 默认会话 > 直开商店 > 寒暄气泡）
+· try_talk_at()     鼠标点中世界坐标处的 NPC → 同一路由（不限玩家距离）
 · consume_click()   鼠标是否被对话层消费（链接/按钮/气泡关闭）
 · consume_keydown() 回车/空格/Esc 是否被对话层消费
 · update()          走远自动收起各对话框
@@ -108,41 +109,57 @@ class NpcDialogueController:
 
     # ── 入口：找 NPC 并路由 ─────────────────────────────────────────
     def try_talk(self) -> None:
-        """与脚下 NPC 对话：talk() 脚本 > 默认会话（任务/传送/商店链接）> 直开商店 > 寒暄。"""
+        """与脚下 NPC 对话：找玩家碰撞框内的第一个 NPC，交 `_talk_to` 路由。"""
         for npc in self.ctx.world.npcs:
             if npc.rect().colliderect(
                     pygame.Rect(int(self.ctx.world.player.x - 20),
                                 int(self.ctx.world.player.y - 40), 40, 80)):
-                if self._open_npc_talk(npc):
-                    return
-                self._talk_npc = npc
-                qlist = collect_npc_quests(
-                    self.quest_defs, self.ctx.world.player.quests,
-                    str(npc.npc_id), self.ctx.world.player)
-                dests = travel.teleports_of(npc.npc_id, self.ctx.assets.map_id)
-                in_progress = self._accepted_at(npc)
-                has_shop = bool(shops_of(npc.npc_id))
-                if qlist or dests or in_progress:
-                    conv = build_menu_conversation(
-                        npc.name, str(self.ctx.assets.map_id), qlist, dests,
-                        in_progress, has_shop,
-                        on_quest=lambda it: self._open_quest_conv(npc, it),
-                        on_teleport=self._request_warp,
-                        on_shop=self._request_shop)
-                    self._set_conv(conv, npc)
-                    return
-                if has_shop:
-                    # 有商店且无任务/传送 → 直接开店，不再经气泡按钮
-                    self.ctx.windows.get("storage").close()
-                    self.ctx.windows.get("shop").open(npc.npc_id)
-                    return
-                buttons: List[str] = []
-                if npc.npc_id == STORAGE_NPC:
-                    buttons.append("storage")
-                self.ctx.ui.show_dialog(npc.name,
-                                    dialogues.get_dialog(npc.npc_id, npc.name),
-                                    anchor=npc, buttons=buttons or None)
+                self._talk_to(npc)
                 return
+
+    def try_talk_at(self, wx: float, wy: float) -> bool:
+        """鼠标点中世界坐标 (wx, wy) 处的 NPC 即对话（不限玩家距离）。
+
+        从最上层（绘制序反向）命中第一个 NPC 并路由；无 NPC 返回 False。
+        """
+        for npc in reversed(self.ctx.world.npcs):
+            if npc.rect().collidepoint(int(wx), int(wy)):
+                self._talk_to(npc)
+                return True
+        return False
+
+    def _talk_to(self, npc) -> None:
+        """对指定 NPC 路由：talk() 脚本 > 默认会话（任务/传送/商店链接）> 直开商店 > 寒暄。"""
+        if self._open_npc_talk(npc):
+            return
+        self._talk_npc = npc
+        qlist = collect_npc_quests(
+            self.quest_defs, self.ctx.world.player.quests,
+            str(npc.npc_id), self.ctx.world.player)
+        dests = travel.teleports_of(npc.npc_id, self.ctx.assets.map_id)
+        in_progress = self._accepted_at(npc)
+        has_shop = bool(shops_of(npc.npc_id))
+        if qlist or dests or in_progress:
+            conv = build_menu_conversation(
+                npc.name, str(self.ctx.assets.map_id), qlist, dests,
+                in_progress, has_shop,
+                on_quest=lambda it: self._open_quest_conv(npc, it),
+                on_teleport=self._request_warp,
+                on_shop=self._request_shop)
+            self._set_conv(conv, npc)
+            return
+        if has_shop:
+            # 有商店且无任务/传送 → 直接开店，不再经气泡按钮
+            self.ctx.windows.get("storage").close()
+            self.ctx.windows.get("shop").open(npc.npc_id)
+            return
+        buttons: List[str] = []
+        if npc.npc_id == STORAGE_NPC:
+            buttons.append("storage")
+        self.ctx.ui.show_dialog(npc.name,
+                            dialogues.get_dialog(npc.npc_id, npc.name),
+                            anchor=npc, buttons=buttons or None)
+        return
 
     # ── 输入路由 ─────────────────────────────────────────────────────
     def consume_click(self, pos: Tuple[int, int]) -> bool:
@@ -361,6 +378,10 @@ class NpcDialogueController:
                     quest_defs=self.quest_defs,
                     teleports=travel.teleports_of(npc.npc_id),
                     has_shop=bool(shops_of(npc.npc_id))))
+        except LookupError:
+            # 合法情形：纯任务内容脚本（只有 entries()）或 talk() 主动返回 nil
+            logging.debug("对话脚本 %s 无 talk()，回落默认路由", script_name)
+            return False
         except Exception:
             logging.warning("对话脚本 %s 加载失败", script_name, exc_info=True)
             return False

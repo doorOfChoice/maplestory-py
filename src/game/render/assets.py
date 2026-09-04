@@ -175,6 +175,12 @@ class Assets:
         ]
         for d in "0123456789/":
             paths.append(("StatusBar.img", f"number/{d}"))
+        from game.render.ui import KEY_BUTTONS
+        for name in KEY_BUTTONS:
+            for state in ("normal", "mouseOver", "pressed"):
+                paths.append(("StatusBar.img", f"{name}/{state}/0"))
+            paths.append(("StatusBar.img", f"{name}/ani/0"))
+            paths.append(("StatusBar.img", f"{name}/ani/1"))
         for i in range(3):
             paths.append(("UIWindow.img", f"Item/Tab/enabled/{i}"))
             paths.append(("UIWindow.img", f"Item/Tab/disabled/{i}"))

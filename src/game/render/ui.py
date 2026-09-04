@@ -3,7 +3,8 @@
 · 底部状态栏：StatusBar/base/backgrnd（浅色长条）+ base/backgrnd2（左侧黑色
   仪表板，自带 "Lv." 凹槽）+ gauge/bar、gauge/gray、gauge/graduation 三段
   （HP / MP / EXP）。HP、MP 数值用 StatusBar/number 像素数字，EXP 用百分比。
-  右侧浅色区补上 BtShop/BtMenu/BtShort/BtNPT 四个官方菜单按钮。
+  右侧浅色区补上 EquipKey/InvenKey/StatKey 等五个官方 Key 按钮
+  （三态 + 按压动画，暂未接功能）。
 · NPC 对话 / 系统提示：ChatBalloon/npc 官方黑半透明九宫格气泡（含底部尖尾），
   即原版冒险岛 NPC 谈话窗体；NPC 名为金色首行，正文白色自动换行。
 · 死亡界面：红色帷幕 + UIWindow/UtilDlgEx 内嵌白纸窗体（原版系统公告窗）。
@@ -54,8 +55,19 @@ SLOT_EXP = (223, 338)
 BAR_INNER_Y = 14
 BAR_INNER_H = 16
 
-# 状态栏右侧一排官方按钮
-BAR_BUTTONS = ("BtShop", "BtMenu", "BtShort", "BtNPT")
+# 状态栏右侧一排官方 Key 按钮（三态 + 按压动画）
+KEY_BUTTONS = ("EquipKey", "InvenKey", "StatKey", "SkillKey", "KeySet")
+KEY_BTN_GAP = 6          # 按钮间距
+KEY_BTN_ANI_MS = 200     # 按压动画两帧总时长
+
+# 点击 Key 按钮 → 切换对应窗口（键为 WindowManager 注册名）
+KEY_BUTTON_WINDOWS = {
+    "EquipKey": "equip",     # 装备栏
+    "InvenKey": "inv",       # 背包
+    "StatKey": "stat",       # 属性栏
+    "SkillKey": "skill",     # 技能
+    "KeySet": "keyconfig",   # 键盘设置
+}
 
 # 对话气泡按钮（商店 / 仓库入口）标签
 DIALOG_BUTTON_LABELS = {"shop": "购买", "storage": "存取"}
@@ -77,6 +89,10 @@ class UI:
         # ── 对话框按钮（商店/仓库入口）────────────────────────────
         self._dialog_button_keys: List[str] = []
         self.dialog_buttons: List[Tuple[pygame.Rect, str]] = []
+        # ── 状态栏 Key 按钮（热区 / 按下态 / 动画起始 tick）──────────
+        self.key_buttons: List[Tuple[pygame.Rect, str]] = []
+        self._key_held: Optional[str] = None
+        self._key_anim: Optional[Tuple[str, int]] = None
         # ── 会话面板（黑正文行 + 蓝字链接行 + 按钮）：独立组件 ──────
         self.conv = ConvPanel(assets)
         self._plate_cache: dict = {}
@@ -121,6 +137,67 @@ class UI:
                 return key
         return None
 
+    # ── 状态栏 Key 按钮 ──────────────────────────────────────────────
+    def key_button_hit(self, pos) -> Optional[str]:
+        """命中 Key 按钮热区 → 返回按钮名，否则 None。"""
+        for rect, name in self.key_buttons:
+            if rect.collidepoint(pos):
+                return name
+        return None
+
+    def handle_mouse_event(self, event, pos,
+                           now: Optional[int] = None) -> Optional[str]:
+        """左键按下命中 Key 按钮 → 启动按压动画并返回按钮名（供 game 层开窗）；
+        UP 清按下态返回 None。"""
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            name = self.key_button_hit(pos)
+            if name is not None:
+                self._key_held = name
+                self._key_anim = (name, now if now is not None
+                                  else pygame.time.get_ticks())
+                return name
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self._key_held = None
+        return None
+
+    def key_button_frame(self, name: str, mouse, left_down: bool,
+                         now: int) -> str:
+        """按钮当前应显示的贴图路径：动画 > 按下 > 悬停 > 常态。"""
+        if self._key_anim is not None and self._key_anim[0] == name:
+            elapsed = now - self._key_anim[1]
+            if elapsed < KEY_BTN_ANI_MS:
+                return f"{name}/ani/{0 if elapsed < KEY_BTN_ANI_MS // 2 else 1}"
+            self._key_anim = None
+        rect = next((r for r, n in self.key_buttons if n == name), None)
+        hovering = rect is not None and rect.collidepoint(mouse)
+        if left_down and self._key_held == name and hovering:
+            return f"{name}/pressed/0"
+        if hovering:
+            return f"{name}/mouseOver/0"
+        return f"{name}/normal/0"
+
+    def _draw_key_buttons(self, surface, mouse, left_down: bool,
+                          bx: int, by: int, bar_w: int, bar_h: int) -> None:
+        """状态栏右下一排官方 Key 按钮：按帧状态选贴图并登记热区。"""
+        self.key_buttons = []
+        now = pygame.time.get_ticks()
+        mouse = mouse if mouse is not None else (-1, -1)
+        normals = [self._img("StatusBar.img", f"{name}/normal/0")
+                   for name in KEY_BUTTONS]
+        widths = [n.get_width() if n is not None else 0 for n in normals]
+        x = bx + bar_w - 4 - sum(widths) - KEY_BTN_GAP * (len(KEY_BUTTONS) - 1)
+        for name, normal in zip(KEY_BUTTONS, normals):
+            if normal is None:
+                continue
+            rect = pygame.Rect(x, by + bar_h - normal.get_height() - 8,
+                               normal.get_width(), normal.get_height())
+            self.key_buttons.append((rect, name))
+            path = self.key_button_frame(name, mouse, left_down, now)
+            surf = normal if path == f"{name}/normal/0" else \
+                (self._img("StatusBar.img", path) or normal)
+            surface.blit(surf, rect.topleft)
+            x += rect.width + KEY_BTN_GAP
+
     def show_death(self) -> None:
         self.death_visible = True
 
@@ -152,7 +229,8 @@ class UI:
         return wrap_text(text, width, font)
 
     # ── HUD 绘制 ───────────────────────────────────────────────────
-    def draw_hud(self, surface, player, combat) -> None:
+    def draw_hud(self, surface, player, combat, mouse=None,
+                 left_down: bool = False) -> None:
         vw, vh = surface.get_width(), surface.get_height()
         bar = self._img("StatusBar.img", "base/backgrnd")
         dark = self._img("StatusBar.img", "base/backgrnd2")
@@ -189,12 +267,9 @@ class UI:
         # 等级数字（跟在烤死的 "Lv." 凹槽后面）
         self.draw_wz_number(surface, str(player.level), bx + 36, by + 50)
 
-        # 菜单按钮（浅色区右侧）
-        for i, name in enumerate(BAR_BUTTONS):
-            btn = self._img("StatusBar.img", f"{name}/normal/0")
-            if btn is not None:
-                surface.blit(btn, (bx + bar.get_width() - 12 - len(BAR_BUTTONS) * 54
-                                   + i * 54, by + bar.get_height() - btn.get_height() - 8))
+        # 状态栏右下：一排官方 Key 按钮（三态 + 按压动画）
+        self._draw_key_buttons(surface, mouse, left_down, bx, by,
+                               bar.get_width(), bar.get_height())
 
         # 击杀 / 金币 / 背包（白色横栏右端，深色文字）
         info = render_text(
