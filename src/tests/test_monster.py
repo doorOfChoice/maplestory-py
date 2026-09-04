@@ -1,6 +1,7 @@
 """怪物巡逻：应能在整条相连的可行走平台上走动，而不是被钳在出生点那一小段。"""
 
 import pygame
+import pytest
 
 from game.entities.monster import Monster
 from game.core.physics import Physics
@@ -76,6 +77,21 @@ def test_patrol_roams_across_chained_platform():
         hi = max(hi, mob.x)
     assert hi > 350   # 走到了右端（跨过多段）
     assert lo < 100   # 走到了左端（跨过多段）
+
+
+def test_patrol_bounds_inset_by_drawn_half_width():
+    """巡逻边界应按贴图半宽内缩：身体边缘贴平台边折返，不半身悬出。"""
+
+    class WideAssets(FakeAssets):
+        def __init__(self):
+            super().__init__()
+            self._surf = pygame.Surface((60, 24))
+
+    ph = make(CHAIN)
+    mob = Monster(WideAssets(), {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                                 "rx0": 0, "rx1": 450}, 0, ph)
+    assert mob.rx0 == pytest.approx(30.0)
+    assert mob.rx1 == pytest.approx(420.0)
 
 
 # ── 重力：从高台边缘走到断口应真的掉下去、落到下层平台 ─────────────

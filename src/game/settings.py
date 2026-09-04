@@ -59,6 +59,9 @@ PLAYER_HIT_W = 26.0
 PLAYER_HIT_H = 48.0
 # 角色身体半宽（用于竖直墙的水平阻挡）
 PLAYER_BODY_HALF_W = 10.0
+# 角色贴图半宽（新手 stand 帧实测 ~39px）：顶到地图可行走边界时按此内缩，
+# 让身体边缘贴平台边即停，不再半身悬出边缝（边缝处没有墙体贴图可遮）
+PLAYER_VISUAL_HALF_W = 20.0
 # 墙顶/底相对脚底的容差：ytop∈[feet-EPS,feet] 视为平台边缘 stub 放行；
 # ybottom 高于 feet-EPS 视为上层平台悬挂边缘放行
 WALL_FEET_EPS = 3.0

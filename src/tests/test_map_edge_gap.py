@@ -1,8 +1,9 @@
 """地图边界缺口：走出最外侧地面边缘前的 vr 钳制区段没有 foothold，
 会掉进「大缺口」坠出世界。回归 buglist#2。
 
-修法：把可行走的 vr 水平边界收紧到最外侧非竖直 foothold 的边缘，
-使玩家到边界即被挡住、无法走进无地面的边缝。
+修法：把可行走的 vr 水平边界收紧到最外侧非竖直 foothold 的边缘、
+再内缩一个贴图半宽（PLAYER_VISUAL_HALF_W），使玩家身体边缘贴平台边
+即停、无法走进无地面的边缝。
 """
 
 from __future__ import annotations
@@ -71,11 +72,12 @@ BOUNDS = {"left": -60, "top": 0, "right": 1060, "bottom": 600}
 
 
 def test_walkable_bounds_clamped_to_foothold_edges():
-    """可行走 vr 边界应收紧到地面边缘 [0, 1000]，不覆盖无地面缝。"""
+    """可行走 vr 边界应收紧到地面边缘再内缩一个贴图半宽：
+    身体边缘贴平台边即停，不再半身悬出边缝。"""
     ph = Physics(MAP, [], bounds=BOUNDS)
-    r = settings.PLAYER_BODY_HALF_W
-    assert ph.vr_left == pytest.approx(0.0)
-    assert ph.vr_right == pytest.approx(1000.0)
+    m = settings.PLAYER_VISUAL_HALF_W
+    assert ph.vr_left == pytest.approx(0.0 + m)
+    assert ph.vr_right == pytest.approx(1000.0 - m)
 
 
 def test_walk_left_to_edge_does_not_fall(monkeypatch):
@@ -87,7 +89,7 @@ def test_walk_left_to_edge_does_not_fall(monkeypatch):
     for _ in range(200):
         p.update(0.016, k, ph)
     assert p.on_ground is True
-    assert p.x == pytest.approx(0.0, abs=1.0)
+    assert p.x == pytest.approx(settings.PLAYER_VISUAL_HALF_W, abs=1.0)
     assert p.feet_y == pytest.approx(455.0, abs=2.0)
 
 
@@ -100,5 +102,5 @@ def test_walk_right_to_edge_does_not_fall(monkeypatch):
     for _ in range(200):
         p.update(0.016, k, ph)
     assert p.on_ground is True
-    assert p.x == pytest.approx(1000.0, abs=1.0)
+    assert p.x == pytest.approx(1000.0 - settings.PLAYER_VISUAL_HALF_W, abs=1.0)
     assert p.feet_y == pytest.approx(455.0, abs=2.0)

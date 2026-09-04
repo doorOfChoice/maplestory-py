@@ -61,17 +61,10 @@ class Monster:
         self.flip = bool(data.get("flip"))
 
         # 脚底 foothold：巡逻/追击范围钳制到"出生段可沿链走到的同层平台"
-        # 两端；怪物走到断口/高落差（超过一级台阶）时应在边界折返，
-        # 而不是走出平台悬空或坠落。链内沿 prev/next 续段行走（跨台阶/坡道）。
+        # 两端，并按贴图半宽内缩（身体边缘贴平台边折返，不半身悬出边缝）。
+        # 具体钳制在动作帧加载后进行。
         self.physics = physics
         self.fh = physics.surface_under(self.x, self.cy) if physics else None
-        if self.fh is not None:
-            roam_min, roam_max = self._reachable_bounds(self.fh)
-            self.rx0 = max(self.rx0, roam_min + 6.0)
-            self.rx1 = min(self.rx1, roam_max - 6.0)
-            if self.rx0 > self.rx1:
-                mid = (self.rx0 + self.rx1) / 2
-                self.rx0 = self.rx1 = mid
 
         info = assets.mob_info(self.mob_id)
         stats = info.get("stats") or {}
@@ -105,6 +98,23 @@ class Monster:
         self._death_sound_played = False
 
         self._load_action("move" if self._has("move") else "stand")
+
+        # 巡逻/追击边界：钳到出生段可步行平台两端，并按贴图半宽内缩
+        # （身体边缘贴平台边折返，不半身悬出边缝；边缝处没有贴图可遮）
+        if self.fh is not None:
+            roam_min, roam_max = self._reachable_bounds(self.fh)
+            inset = self._drawn_half_width()
+            self.rx0 = max(self.rx0, roam_min + inset)
+            self.rx1 = min(self.rx1, roam_max - inset)
+            if self.rx0 > self.rx1:
+                mid = (self.rx0 + self.rx1) / 2
+                self.rx0 = self.rx1 = mid
+
+    def _drawn_half_width(self) -> float:
+        """当前动作帧的最大贴图半宽（无帧时回退 6px 旧余量）。"""
+        if not self.anim.frames:
+            return 6.0
+        return max(f[0].get_width() for f in self.anim.frames) / 2.0
 
     def _has(self, action: str) -> bool:
         try:

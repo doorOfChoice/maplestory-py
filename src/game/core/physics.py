@@ -99,14 +99,16 @@ class Physics:
             self.vr_left = self.vr_right = None
         # 地图边缝缺口：VR bounds 常宽于最外侧可行走 foothold，两者之间的
         # 边缝没有任何地面，走到即坠出世界。把可行走 vr 边界收紧到最外侧
-        # 非竖直 foothold 边缘，令玩家顶到边界即停（原版此处是墙）。
+        # 非竖直 foothold 边缘、再内缩一个贴图半宽，令身体边缘贴平台边即停
+        # （原版此处是墙，且边缝处没有墙体贴图可遮悬出的半身）。
         if self.vr_left is not None:
             horiz = [f for f in self.footholds if f.x1 != f.x2]
             if horiz:
+                m = settings.PLAYER_VISUAL_HALF_W
                 self.vr_left = max(self.vr_left,
-                                   min(f.xmin for f in horiz))
+                                   min(f.xmin for f in horiz) + m)
                 self.vr_right = min(self.vr_right,
-                                    max(f.xmax for f in horiz))
+                                    max(f.xmax for f in horiz) - m)
         # 竖直墙（x1==x2）：不可站立/落点，只用于水平阻挡。
         # 按 (layer, x) 分组合并成墙链，每层各自按 x 排序供二分查询。
         self.chains: List[WallChain] = self._build_chains()

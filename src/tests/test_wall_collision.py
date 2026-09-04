@@ -90,15 +90,17 @@ def test_vr_bounds_clamp():
     """没画墙的地图边界由 VR 钳制兜底（地面铺满 bounds 时仍按 bounds 收）。"""
     p = make([fh(1, 0, 0, 300, 1000, 300)],
              bounds={"left": 0, "top": 0, "right": 1000, "bottom": 500})
-    assert p.wall_block(980.0, 1200.0, 300.0, 300.0) == 1000.0 - R
+    # 地面铺满 bounds 时仍被贴图半宽内缩（身体边缘贴边，不悬出）
+    assert p.wall_block(980.0, 1200.0, 300.0, 300.0) == 1000.0 - 20.0
 
 
 def test_no_walkable_gap_beyond_foothold_edge():
     """bounds 宽于最外侧地面时，可行走边界收到地面边缘，不留可坠边缝。"""
     p = make([fh(1, 0, 0, 100, 200, 100)],
              bounds={"left": 0, "top": 0, "right": 1000, "bottom": 500})
-    # 地面只到 x=200，右溢出 200..1000 无地面 → 边界收到 200，不让人走进去坠亡
-    assert p.wall_block(180.0, 900.0, 100.0, 100.0) == 200.0
+    # 地面只到 x=200，右溢出 200..1000 无地面 → 边界收到 200 再内缩贴图
+    # 半宽，身体边缘贴平台边即停，不让人走进去坠亡
+    assert p.wall_block(180.0, 900.0, 100.0, 100.0) == 200.0 - 20.0
 
 
 def test_wall_chain_merge():

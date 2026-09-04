@@ -32,3 +32,13 @@
    修复：Physics 构造时把可行走 vr 水平边界收紧到最外侧非竖直 foothold
    边缘（等效原版此处隐形墙），玩家顶到边界即停、走不进边缝。
    回归：src/tests/test_map_edge_gap.py（+ test_wall_collision 边界用例）
+
+6. [已解决] 顶到地图边界后仍会探出约一个身位（玩家与怪物皆然）
+   根因：边界收紧用的是最外侧 foothold 的「边缘」，而实体锚点是身体
+   中心 → 中心可正好站到平台边，贴图半身悬出边缝；怪物巡逻边界也
+   只固定留了 6px 余量，与小/大体型怪的实际贴图宽不匹配。
+   修复：玩家 vr 边界在 foothold 边缘基础上再内缩 PLAYER_VISUAL_HALF_W
+   （贴图半宽，新手 stand 实测 ~39px 取 20）；怪物巡逻边界改按各自
+   move/stand 帧的最大贴图半宽内缩（Monster._drawn_half_width）。
+   效果：身体边缘贴平台边即停/折返，边缝处不再悬出半身。
+   回归：test_map_edge_gap / test_monster::test_patrol_bounds_inset_by_drawn_half_width
