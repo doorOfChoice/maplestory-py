@@ -46,7 +46,8 @@ ACTIONS: List[ActionDef] = [
     ActionDef("attack", "普通攻击", GROUP_ACT, pygame.K_a),
     ActionDef("pickup", "拾取", GROUP_ACT, pygame.K_z),
     ActionDef("potion", "快捷药水", GROUP_ACT, pygame.K_f),
-    ActionDef("talk", "对话", GROUP_ACT, pygame.K_RETURN),
+    ActionDef("talk", "对话", GROUP_ACT, pygame.K_e),
+    ActionDef("chat", "聊天", GROUP_ACT, pygame.K_RETURN),
     ActionDef("respawn", "原地复活", GROUP_ACT, pygame.K_r),
     ActionDef("window_inventory", "背包窗口", GROUP_UI, pygame.K_i),
     ActionDef("window_skill", "技能窗口", GROUP_UI, pygame.K_k),
@@ -192,6 +193,13 @@ class KeyBindings:
         kb = cls()
         entries = (data or {}).get("keys")
         if isinstance(entries, dict):
+            entries = dict(entries)
+            # 旧版配置迁移：新版键位表必含 chat，缺失即旧档；旧档对话占着
+            # Enter，让位给聊天（对话回到默认 E）。
+            if "chat" not in entries and entries.get("talk") in (
+                    pygame.K_RETURN, pygame.K_KP_ENTER):
+                entries["chat"] = pygame.K_RETURN
+                entries.pop("talk")
             for action, key in entries.items():
                 if isinstance(key, int):
                     kb.set(str(action), key)
