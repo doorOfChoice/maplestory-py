@@ -14,6 +14,7 @@ import pygame
 
 from game import settings
 from game.core.fonts import load_cjk_font
+from game.core.markup import split_colors
 
 # UtilDlgEx 内嵌窗体几何
 DLG_W = 529            # it/ic/is 原生宽度
@@ -45,6 +46,32 @@ def wrap_text(text: str, width: int, font: pygame.font.Font) -> List[str]:
     if cur:
         lines.append(cur)
     return lines or [""]
+
+
+def wrap_segments(text: str, width: int,
+                  font: pygame.font.Font) -> List[List[Tuple[str, Optional[tuple]]]]:
+    """带 #r/#g/#b/#d/#k 颜色码的文本按像素宽折行 → 每行 (片段, 颜色) 列表。
+
+    颜色 None = 基色；同色相邻片段合并，渲染层逐段 blit。
+    """
+    lines: List[List[Tuple[str, Optional[tuple]]]] = []
+    cur: List[Tuple[str, Optional[tuple]]] = []
+    cur_w = 0
+    for seg_text, color in split_colors(text):
+        for ch in seg_text:
+            w = font.size(ch)[0]
+            if cur and cur_w + w > width:
+                lines.append(cur)
+                cur = []
+                cur_w = 0
+            if cur and cur[-1][1] == color:
+                cur[-1] = (cur[-1][0] + ch, color)
+            else:
+                cur.append((ch, color))
+            cur_w += w
+    if cur or not lines:
+        lines.append(cur)
+    return lines
 
 
 class ConvPanel:
@@ -163,9 +190,10 @@ class ConvPanel:
         if not self.visible:
             return
         vw, vh = surface.get_width(), surface.get_height()
-        wrapped: List[str] = []
+        wrapped: List[List[Tuple[str, Optional[tuple]]]] = []
         for ln in self.lines:
-            wrapped.extend(wrap_text(ln, DLG_TEXT_W, self.font))
+            for part in ln.split("\n"):
+                wrapped.extend(wrap_segments(part, DLG_TEXT_W, self.font))
         has_links = bool(self.links)
         text_h = len(wrapped) * DLG_LINE_H
         link_block = len(self.links) * LIST_ROW_H
@@ -180,12 +208,16 @@ class ConvPanel:
         self._dlg_frame(surface, x, y, w, body_h)
 
         # 标题（任务名/会话名，金色）
-        surface.blit(self.font_big.render(self.title, True, (255, 216, 96)),
-                     (x + DLG_TEXT_X, y + 7))
-        # 黑正文行
+        # surface.blit(self.font_big.render(self.title, True, (255, 216, 96)),
+        #              (x + DLG_TEXT_X, y + 7))
+        # 黑正文行：逐段着色（颜色码/实体名高亮），None = 基色
         ty = y + DLG_TOP_H + LIST_PAD_TOP
-        for ln in wrapped:
-            surface.blit(self.font.render(ln, True, (60, 52, 44)), (x + DLG_TEXT_X, ty))
+        for segs in wrapped:
+            tx = x + DLG_TEXT_X
+            for seg, color in segs:
+                t = self.font.render(seg, True, color or (60, 52, 44))
+                surface.blit(t, (tx, ty))
+                tx += t.get_width()
             ty += DLG_LINE_H
 
         # 蓝字链接行：起点在标题+黑文本之后，悬停高亮与 Lv 灰标注沿用列表画法
@@ -206,9 +238,12 @@ class ConvPanel:
                     pygame.draw.rect(hl, (150, 190, 250, 70), (0, 0, rw, rh),
                                      border_radius=6)
                     surface.blit(hl, (rx, ry))
-                color = QUEST_LIST_BLUE_HOVER if hovered else QUEST_LIST_BLUE
-                t = self.font.render(label, True, color)
-                surface.blit(t, (rx + 6, ry + (rh - t.get_height()) // 2))
+                base = QUEST_LIST_BLUE_HOVER if hovered else QUEST_LIST_BLUE
+                tx = rx + 6
+                for seg, color in split_colors(label):
+                    t = self.font.render(seg, True, color or base)
+                    surface.blit(t, (tx, ry + (rh - t.get_height()) // 2))
+                    tx += t.get_width()
                 if note:
                     lv = self.font_small.render(f"Lv {note}", True, (150, 140, 128))
                     surface.blit(lv, (rx + rw - lv.get_width() - 6,

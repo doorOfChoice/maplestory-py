@@ -154,7 +154,7 @@ return M
 
 
 def test_conversation_text_renders_official_markers(game):
-    """talk() 的黑文本与蓝字渲染前统一过官方标记解析（#t<id># → 物品名）。"""
+    """talk() 的黑文本与蓝字渲染前统一过官方标记解析（#t<id># → 包色物品名）。"""
     pytest.importorskip("lupa")
     from game.systems.conversation import Conversation, make_ctx_view
     _boot(game)
@@ -171,8 +171,8 @@ return M
     ctx = make_ctx_view(host, "1012100", "赫丽娜", game.ctx.assets.map_id)
     conv = Conversation.from_source(src, {}, ctx, title="T")
     game._dialogue._set_conv(conv, _fake_npc())
-    assert game.ctx.ui.conv.lines == ["假物品在这里"]
-    assert game.ctx.ui.conv.links[0][0] == "点 假物品"
+    assert game.ctx.ui.conv.lines == ["#b假物品#k在这里"]
+    assert game.ctx.ui.conv.links[0][0] == "点 #b假物品#k"
 
 
 def test_advance_quest_registered_in_boot(game):

@@ -317,27 +317,38 @@ _CHOICE_RE = re.compile(r"#L\d+#|#l")
 _COLOR_RE = re.compile(r"#[brgdk]")
 
 
+_NAME_COLORS = {"p": "d", "t": "b", "i": "b", "m": "g", "o": "r"}
+
+
 def render_markup(text: str, assets: Optional[Assets] = None,
                   map_name=None, npc_name=None, item_name=None,
-                  mob_name=None) -> str:
-    """把官方 Say 文本解析成纯文本（去标记、替换名称、\\n 转换行）。
+                  mob_name=None, colors: bool = False) -> str:
+    """把官方 Say 文本解析成可读文本（替换名称、\\n 转换行、去选项标记）。
 
     #p<id># → NPC 名 / #t<id># → 物品名 / #m<id># → 地图名 / #o<id># → 怪物名。
+    colors=False（默认）：剥掉 #b/#r/#k 等颜色码，输出纯文本（日志、气泡）。
+    colors=True：保留手写颜色码，且实体名自动包上 _NAME_COLORS 对应色，
+    交由渲染层（core.markup.split_colors）分段着色。
     """
     if not text:
         return ""
 
     def _sub(m: re.Match) -> str:
         kind, nid = m.group(1), int(m.group(2))
+        nm: Optional[str] = None
         if kind == "p" and npc_name is not None:
-            return npc_name(nid)
-        if kind in ("t", "i") and item_name is not None:
-            return item_name(nid) or f"#{nid}"
-        if kind == "m" and map_name is not None:
-            return map_name(nid) or f"#{nid}"
-        if kind == "o" and mob_name is not None:
-            return mob_name(nid) or f"#{nid}"
-        return f"#{nid}"
+            nm = npc_name(nid)
+        elif kind in ("t", "i") and item_name is not None:
+            nm = item_name(nid) or f"#{nid}"
+        elif kind == "m" and map_name is not None:
+            nm = map_name(nid) or f"#{nid}"
+        elif kind == "o" and mob_name is not None:
+            nm = mob_name(nid) or f"#{nid}"
+        if nm is None:
+            return f"#{nid}"
+        if colors and kind in _NAME_COLORS:
+            return f"#{_NAME_COLORS[kind]}{nm}#k"
+        return nm
 
     def _bare(m: re.Match) -> str:
         nid = int(m.group(1))
@@ -347,7 +358,8 @@ def render_markup(text: str, assets: Optional[Assets] = None,
 
     out = text.replace("\\r\\n", "\n").replace("\\n", "\n")
     out = _CHOICE_RE.sub("", out)
-    out = _COLOR_RE.sub("", out)
+    if not colors:
+        out = _COLOR_RE.sub("", out)
     out = _NAME_RE.sub(_sub, out)
     out = _BARE_NUM_RE.sub(_bare, out)
     return out.strip()

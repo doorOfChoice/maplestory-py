@@ -369,8 +369,9 @@ class NpcDialogueController:
 
     # ── 文本标记渲染 ────────────────────────────────────────────────
     def _qmark(self, text: str) -> str:
-        """把官方 Say 文本里的标记替换为可读文本。"""
+        """把官方 Say 文本里的标记替换为可读文本（保留颜色码，供面板分段着色）。"""
         a = self.assets
         return render_markup(text, a,
                              map_name=a.map_name_of, npc_name=a.npc_name,
-                             item_name=a.item_name, mob_name=a.mob_name_of)
+                             item_name=a.item_name, mob_name=a.mob_name_of,
+                             colors=True)

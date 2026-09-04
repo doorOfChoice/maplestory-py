@@ -95,9 +95,21 @@ def test_complete_click_grants_reward_and_completes():
 
 
 def test_completed_quest_hides_quest_links():
-    """任务完成后重开：两条任务链接都不再出现。"""
+    """一环完成后重开：该环链接消失，下一环「接任务」随之前置完成而出现。"""
     world = make_world(potions=10)
     accept(world)
     conv = open_talk(world)
     conv.click_link(0)
-    assert labels(open_talk(world)) == ["商店", "随便聊聊"]
+    assert labels(open_talk(world)) == ["接任务：讨伐蓝宝", "商店", "随便聊聊"]
+
+
+def test_chained_accept_locked_until_prev_completed():
+    """前置未完成：第二环即使等级足够也不显示，完成后才可接。"""
+    world = make_world()
+    conv = open_talk(world)
+    assert "接任务：讨伐蓝宝" not in labels(conv)
+    conv.click_link(0)
+    assert not world.player.quests.is_accepted("c_1012119_2")
+    world.player.quests.status["c_1012119_1"] = "completed"
+    conv = open_talk(world)
+    assert "接任务：讨伐蓝宝" in labels(conv)
