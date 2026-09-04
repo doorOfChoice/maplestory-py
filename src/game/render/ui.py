@@ -276,22 +276,13 @@ class UI:
             self.font_small,
             f"击杀 {combat.total_kills}  金币 {combat.meso}  背包 {player.inventory.total_items()}",
             (90, 96, 110))
-        surface.blit(info, (bx + bar.get_width() - 238 - info.get_width(), by + 4))
+        surface.blit(info, (bx + bar.get_width() - 240 - info.get_width(), by + 10))
 
         # 血条上方：生效中的 buff 技能图标 + 状态异常色块（带剩余秒数）
         self._draw_effect_icons(surface, player, bx, by)
 
         # 地图名：由 game 层按小地图面板位置调用 draw_map_name（右上避让）
 
-        # 操作提示（左上）
-        hint = render_text(
-            self.font_small,
-            "I 道具栏  K 技能栏  B 状态  F 喝药  数字键 技能  A 攻击  Z 拾取", (255, 255, 255))
-        plate = pygame.Surface((hint.get_width() + 16, 20), pygame.SRCALPHA)
-        pygame.draw.rect(plate, (0, 0, 0, 190), (0, 0, plate.get_width(), 20),
-                         border_radius=6)
-        plate.blit(hint, (8, 3))
-        surface.blit(plate, (8, 8))
 
     # ── buff / 状态异常图标条（血条上方）──────────────────────────
     def _draw_effect_icons(self, surface, player, bx: int, by: int) -> None:

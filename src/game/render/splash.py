@@ -50,10 +50,10 @@ class Splash:
         self._draw_spinner(surface, cx, cy - 70, spinner_r)
 
         # 标题 + 副标题
-        title_font = load_cjk_font(64)
+        title_font = load_cjk_font(50)
         sub_font = load_cjk_font(26)
         title = title_font.render("MapleStory 113", True, _TITLE)
-        sub = sub_font.render("弓箭手村东部小山 · pygame", True, _SUBTITLE)
+        sub = sub_font.render("弓箭手村东部小山", True, _SUBTITLE)
         surface.blit(title, title.get_rect(center=(cx, cy + 20)))
         surface.blit(sub, sub.get_rect(center=(cx, cy + 58)))
 
