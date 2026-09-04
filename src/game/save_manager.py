@@ -53,6 +53,19 @@ class SaveRegistry:
 
 # 内置存档组件：背包 / 技能 / 任务 / 世界元数据（金币·击杀）。
 REGISTRY = SaveRegistry()
+
+
+def apply_combat_meta(combat, meta: dict) -> None:
+    """从存档 meta 还原战斗侧状态（金币 / 击杀数）。
+
+    collect 侧由 REGISTRY 的 "meta" 条目负责；load 侧过去只接了玩家组件，
+    combat 的 meta 无人回填，导致重登金币归零。抽出为单一事实来源，供
+    注册表与 World 共用。
+    """
+    combat.meso = int(meta.get("meso", 0))
+    combat.total_kills = int(meta.get("total_kills", 0))
+
+
 REGISTRY.register(
     "inventory",
     lambda p, c: p.inventory.to_dict(),
@@ -66,8 +79,7 @@ REGISTRY.register(
 REGISTRY.register(
     "meta",
     lambda p, c: {"meso": c.meso, "total_kills": c.total_kills},
-    lambda p, c, d: (setattr(c, "meso", d.get("meso", 0)),
-                     setattr(c, "total_kills", d.get("total_kills", 0))))
+    lambda p, c, d: apply_combat_meta(c, d))
 
 
 

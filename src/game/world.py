@@ -29,6 +29,7 @@ from game.entities.monster import Monster
 from game.entities.npc import NPC
 from game.core.physics import Physics
 from game.entities.player import Player
+from game.save_manager import apply_combat_meta
 
 
 def resolve_saved_spawn(physics: Physics, saved: Optional[Tuple[float, float]],
@@ -76,6 +77,8 @@ class World:
                              quest_defs=quest_defs, save_data=save_data)
         if not save_data:
             self.player.facing_right = True
+        else:
+            apply_combat_meta(self.combat, save_data.get("meta", {}))
         # 落地吸附到出生点的 foothold
         self.place_player_at_spawn()
 

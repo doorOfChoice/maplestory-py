@@ -8,7 +8,28 @@ from pathlib import Path
 
 from game.systems.inventory import Inventory, Item
 from game.systems.quests import QuestLog, QuestDef
-from game.save_manager import SaveManager, SaveRegistry, REGISTRY
+from game.save_manager import SaveManager, SaveRegistry, REGISTRY, apply_combat_meta
+
+
+def test_apply_combat_meta_restores_meso_and_kills():
+    """读档时把 meta 的金币/击杀还原进 combat（回归：曾漏接导致重登金币归零）。"""
+    class C:
+        meso = 0
+        total_kills = 0
+
+    c = C()
+    apply_combat_meta(c, {"meso": 75, "total_kills": 4})
+    assert c.meso == 75 and c.total_kills == 4
+
+
+def test_apply_combat_meta_defaults_missing_to_zero():
+    class C:
+        meso = 0
+        total_kills = 0
+
+    c = C()
+    apply_combat_meta(c, {})
+    assert c.meso == 0 and c.total_kills == 0
 
 
 def test_save_registry_custom_component_roundtrip():
