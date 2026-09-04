@@ -126,6 +126,11 @@ class WindowManager:
                 return win
         return None
 
+    def dragging(self) -> bool:
+        """是否有进行中的拖拽（物品/技能/按键或窗口标题移动），供光标手势判定。"""
+        return (self._pick is not None and self._pick.active
+                or self._drag_win is not None)
+
     def _left_down(self, pos: Tuple[int, int]) -> bool:
         for win in reversed(self._stack):
             if (win.visible and win.close_rect is not None

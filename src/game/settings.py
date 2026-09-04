@@ -13,6 +13,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 RESOURCE_DIR = PROJECT_ROOT / "resources"
 WZ_DIR = RESOURCE_DIR / "wz"
 REGION = "EMS"
+# 自绘鼠标光标的 PNG 目录（官方光标不在 WZ 里，来自客户端 cursor.wzl 的提取件）
+CURSOR_DIR = RESOURCE_DIR / "cursor"
+CURSOR_FRAME_MS = 160           # 光标动画每帧毫秒数
 
 SAVE_DIR = PROJECT_ROOT / "saves"
 SAVE_FILE = SAVE_DIR / "save.json"

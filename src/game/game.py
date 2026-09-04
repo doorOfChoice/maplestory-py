@@ -18,6 +18,7 @@ import pygame
 from game import settings
 from game.core.keybindings import KeyBindings, item_id_of_action
 from game.render.assets import Assets
+from game.render.cursor import GameCursor
 from game.render.effects import Effect
 from game.render.ui import KEY_BUTTON_WINDOWS
 from game.systems.quests import load_quest_defs, render_markup
@@ -56,6 +57,12 @@ class Game:
         self.canvas = pygame.Surface((settings.VIEW_W, settings.VIEW_H))
         self.clock = pygame.time.Clock()
         self.running = True
+
+        # 自绘鼠标光标（官方光标不在 WZ 里，用 resources/cursor 的提取件）；
+        # 缺文件时回退系统光标。
+        self.game_cursor = GameCursor.from_dir(settings.CURSOR_DIR)
+        if self.game_cursor is not None:
+            pygame.mouse.set_visible(False)
 
         # 全局键位配置（独立于角色存档，缺失/损坏回退默认）
         self.keybindings = KeyBindings.load(settings.KEYBINDINGS_FILE)
@@ -533,8 +540,22 @@ class Game:
         layer.blit(mod, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
         surface.blit(layer, layer.get_rect(center=center))
 
+    # ── 自绘鼠标光标 ────────────────────────────────────────────────
+    def _draw_cursor(self) -> None:
+        if self.game_cursor is None:
+            return
+        vpos = to_view_pos(pygame.mouse.get_pos())
+        left_down, _mid, right_down = pygame.mouse.get_pressed(num_buttons=3)
+        dragging = (self.ctx.windows.dragging()
+                    if getattr(self, "ctx", None) is not None else False)
+        self.game_cursor.update(GameCursor.pick_state(
+            dragging=dragging, left_down=left_down, right_down=right_down),
+            pygame.time.get_ticks())
+        self.game_cursor.draw(self.canvas, vpos)
+
     def _present(self) -> None:
         """把 canvas 呈现到窗口。scale=1 时直接 blit（省去每帧全画面复制）。"""
+        self._draw_cursor()
         canvas = self.canvas
         if settings.WINDOW_SCALE != 1:
             canvas = pygame.transform.scale(
