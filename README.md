@@ -4,24 +4,39 @@
 
 > 只`读取` `resources/wz/` 下的官方资产，任何时候都`不写入`、不修改。
 
-## 还原
+![全貌](screenshots/overview.png)
 
-- **原生素材**：自制 `wzpy` 函数库解密、解析、解码官方封存，地图 / 怪物 / 角色 / NPC 全部取自原版图片，无重绘、无魔改。
-- **数据驱动世界**：地图连通由 WZ portal 的 `tm/tn` 决定，从弓箭手村可漫游到 200+ 张相连地图；普通门、隐藏门、同图瞬移门全类型还原；切图后台预热缓存不卡顿。
-- **类 MS 物理**：foothold 平台、绳梯攀爬、蹬墙跳、下跳穿板、落地吸附，还原原版手感。
-- **战斗**：近战与弓弩弹道、技能施放、buff / 暴击、怪物 AI、伤害飘字与击退。
-- **完整玩法**：任务与 NPC 对话（非模态）、原版素材的背包 / 技能 / 任务 / 状态面板、商店与仓库、强化卷轴、每 60 秒自动存档。
+## 功能巡礼
 
-## 画面
+### 世界与地图
 
-| 欢迎画面 | 弓箭手村东部小山 |
+地图连通由 WZ portal 数据决定，从弓箭手村出发可漫游 200+ 张相连地图；普通门、隐藏门、同图瞬移门全类型还原，切图后台预热缓存不卡顿。右上角小地图实时标示地形、传送门与周围玩家。
+
+### 战斗
+
+近战挥砍与弓弩弹道、技能施放与 buff、暴击与伤害飘字、怪物 AI 与击退——手感照原版调：foothold 平台行走、绳梯攀爬、蹬墙跳、下跳穿板。
+
+![战斗](screenshots/gameplay.png)
+
+### 任务与对话
+
+NPC 对话由 Lua 脚本驱动，支持分段着色、蓝字链接与任务链流转；接取、进度、交付全程非模态，不打断行动。任务日志分「可接 / 进行中 / 可交付」追踪进度；商店、仓库、出租车传送也都从对话进入。
+
+| NPC 对话 | 任务日志 |
 |:--:|:--:|
-| ![欢迎画面](screenshots/welcome.png) | ![游戏画面](screenshots/gameplay.png) |
+| ![NPC 对话](screenshots/dialogue.png) | ![任务日志](screenshots/quests.png) |
 
-| | |
-|:--:|:--:|
-| ![背包](screenshots/inventory.png) | ![技能栏](screenshots/skills.png) |
-| ![任务日志](screenshots/quests.png) | ![全貌](screenshots/overview.png) |
+### 角色与装备
+
+原版素材的道具栏与纸娃娃：双击穿戴、拖拽扔物、装备强化卷轴；技能栏逐转加点、状态窗自由分配属性。金币拾取、商店买卖、仓库存取、按键全量可改绑、每 60 秒自动存档。
+
+![背包与纸娃娃](screenshots/inventory.png)
+
+### 技能成长
+
+Lv10 转职后开启新技能页签，SP 加点、快捷键绑定、被动加成即时生效。
+
+![技能栏](screenshots/skills.png)
 
 截图可用 `uv run python src/scripts/capture_screenshots.py` 重新生成。
 
@@ -37,6 +52,10 @@ uv sync                      # 安装依赖
 uv run python -m game.main   # 启动游戏
 ```
 
+开局有欢迎指引对话，照做即可上手：
+
+![欢迎画面](screenshots/welcome.png)
+
 ## 操作
 
 | 按键 | 动作 |
@@ -49,21 +68,10 @@ uv run python -m game.main   # 启动游戏
 | `Enter` | 与 NPC 对话（`Enter`/`Esc` 关闭） |
 | `R` | 死亡后回出生点复活 |
 
-## 结构
-
-```
-src/wzpy/    函数库：WZ 解析 / 解密 / 渲染器（可独立复用）
-src/game/    应用层（按职责分四层子包 + 顶层编排，依赖无环）：
-  core/    纯逻辑/工具（physics / stats / jobs / animation / travel …）
-  entities/  玩家 / 怪物 / NPC
-  systems/   战斗 / 技能 / 任务 / 背包 / 商店 / 卷轴 …
-  render/    资源 / UI / 面板 / 小地图 / 音效 / 特效
-  顶层      game.py（主循环）context.py（组合根）world.py（单图场景）settings.py
-src/tests/  pytest 整合测试（合成数据，无需 WZ 文件）
-```
-
-开发遵循 TDD（见 `.agents/skills/tdd/`），测试不依赖环境中的 WZ 文件。
+全部键位可在按键设置窗（`O`）中改绑。
 
 ## 声明
 
 个人学习用途的 MapleStory v113 重制示范，不附带任何 WZ 资产。MapleStory 及素材版权归 Nexon / Wizet 所有。
+
+架构与开发规范见 [AGENTS.md](AGENTS.md)。
