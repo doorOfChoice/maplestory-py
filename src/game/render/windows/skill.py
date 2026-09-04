@@ -13,9 +13,9 @@ from typing import List, Optional, Tuple
 import pygame
 
 from game.core.jobs import job_chain, job_sp_group
-from game.render.windows import widgets
-from game.render.windows.services import WindowServices
-from game.render.windows.window import Window
+from game.render.windows.core import widgets
+from game.render.windows.core.services import WindowServices
+from game.render.windows.core.window import Window
 
 # ── 原版窗口几何（由 wz/UI.wz 底图逐像素实测，随 panels 迁移）───────
 SKL_BG = "Skill/backgrnd"

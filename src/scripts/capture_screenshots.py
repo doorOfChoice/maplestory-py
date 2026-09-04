@@ -132,7 +132,7 @@ def main() -> None:
     # ── 6. 全貌：關閉面板後的完整遊戲畫面 ─────────────────────────
     game.panels.toggle_quest_log()
     game.ui.hide_dialog()
-    game.ui.hide_quest()
+    game.ui.conv.hide()
     game.player.invuln_timer = 0.0
     game.player.hurt_timer = 0.0
     frames(game, 40)

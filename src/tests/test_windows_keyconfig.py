@@ -14,7 +14,7 @@ import pygame
 
 from game.core.keybindings import KeyBindings
 from game.render.windows.keyconfig import KC_ROW_H, KeyConfigWindow
-from game.render.windows.services import WindowServices
+from game.render.windows.core.services import WindowServices
 from tests.windows_harness import (FakeAssets, FakeUI, draw_once, key_press,
                                    make_manager, press, wheel)
 

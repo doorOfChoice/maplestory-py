@@ -10,7 +10,7 @@ from typing import List, Optional, Tuple
 
 import pygame
 
-from game.render.windows.services import WindowServices
+from game.render.windows.core.services import WindowServices
 
 
 # ── 素材与按钮 ─────────────────────────────────────────────────────

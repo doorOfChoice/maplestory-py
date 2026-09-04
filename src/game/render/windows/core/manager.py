@@ -14,9 +14,9 @@ from typing import List, Optional, Tuple
 import pygame
 
 from game import settings
-from game.render.windows import widgets
-from game.render.windows.services import WindowServices
-from game.render.windows.window import DOUBLE_CLICK_TIME, DRAG_THRESHOLD, \
+from game.render.windows.core import widgets
+from game.render.windows.core.services import WindowServices
+from game.render.windows.core.window import DOUBLE_CLICK_TIME, DRAG_THRESHOLD, \
     DragPickup, Window
 
 

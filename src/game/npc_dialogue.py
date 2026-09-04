@@ -151,16 +151,16 @@ class NpcDialogueController:
         优先序：会话（链接 > 按钮 > 点外关闭）> 商店/仓库按钮 > 点击气泡关闭。
         """
         if self._conv is not None:
-            idx = self.ctx.ui.conv_link_hit(pos)
+            idx = self.ctx.ui.conv.link_hit(pos)
             if idx is not None:
                 self._conv.click_link(idx)
                 self._after_turn()
             else:
-                btn = self.ctx.ui.conv_button_hit(pos)
+                btn = self.ctx.ui.conv.button_hit(pos)
                 if btn is not None:
                     self._conv.press(btn)
                     self._after_turn()
-                elif not self.ctx.ui.quest_dialog_hit(pos):
+                elif not self.ctx.ui.conv.panel_hit(pos):
                     self._close_conv()   # 点面板外 → 收起会话
             return True
         dkey = self.ctx.ui.dialog_button_hit(pos)
@@ -212,7 +212,7 @@ class NpcDialogueController:
         self._close_conv()
 
     def portal_blocked(self) -> bool:
-        return self.ctx.ui.quest_visible or self.ctx.ui.dialog_visible
+        return self.ctx.ui.conv.visible or self.ctx.ui.dialog_visible
 
     # ── 会话生命周期 ────────────────────────────────────────────────
     def _accepted_at(self, npc) -> List[NpcQuest]:
@@ -260,14 +260,14 @@ class NpcDialogueController:
         适配器（quest_flow）已 qmark 过的文本不含残留标记，重复解析无损。
         """
         snap = self._conv.current()
-        self.ctx.ui.show_conv(snap.title,
+        self.ctx.ui.conv.show(snap.title,
                               [self._qmark(l) for l in snap.lines],
                               [(self._qmark(label), note)
                                for label, note in snap.links],
                               snap.buttons, snap.terminal)
 
     def _close_conv(self) -> None:
-        self.ctx.ui.hide_quest()
+        self.ctx.ui.conv.hide()
         self._conv = None
         self._conv_npc = None
         self._conv_host = None

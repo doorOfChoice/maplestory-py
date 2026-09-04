@@ -25,7 +25,7 @@ from game.npc_dialogue import NpcDialogueController
 from game.save_manager import SaveManager
 from game.render.splash import Splash
 from game.render.windows.inventory import toggle_inventory_pair
-from game.render.windows.manager import to_view_pos
+from game.render.windows.core.manager import to_view_pos
 from game.context import GameContext
 from game.core.fonts import load_cjk_font, render_text
 
@@ -450,7 +450,7 @@ class Game:
         self.ctx.ui.draw_map_name(self.canvas, self.assets.map_name(), name_y)
         self.ctx.windows.draw(self.canvas)
         self.ctx.ui.draw_dialog(self.canvas, self.ctx.world.camera)
-        self.ctx.ui.draw_quest(self.canvas)
+        self.ctx.ui.conv.draw(self.canvas)
         self.ctx.ui.draw_death(self.canvas)
 
         # 黑场淡入（切图 / 重生后从黑渐变到场景，避免瞬间弹出）

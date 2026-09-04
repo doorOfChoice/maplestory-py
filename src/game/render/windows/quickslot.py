@@ -12,8 +12,8 @@ import pygame
 
 from game import settings
 from game.core.keybindings import display_key
-from game.render.windows.widgets import wz_surface
-from game.render.windows.window import Window
+from game.render.windows.core.widgets import wz_surface
+from game.render.windows.core.window import Window
 
 SHT_BG = "ShortCut/backgrnd"
 SHT_W, SHT_H = 93, 244

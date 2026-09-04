@@ -16,9 +16,9 @@ import pygame  # noqa: E402
 
 pygame.init()
 
-from game.render.windows.manager import WindowManager  # noqa: E402
-from game.render.windows.services import WindowServices  # noqa: E402
-from game.render.windows.window import Window  # noqa: E402
+from game.render.windows.core.manager import WindowManager  # noqa: E402
+from game.render.windows.core.services import WindowServices  # noqa: E402
+from game.render.windows.core.window import Window  # noqa: E402
 
 
 class FakeUI:
@@ -128,7 +128,7 @@ class BoxWindow(Window):
     def pickup(self, pos):
         if self.drag is not None and self.rect.collidepoint(pos):
             src, item = self.drag
-            from game.render.windows.window import DragPickup
+            from game.render.windows.core.window import DragPickup
             return DragPickup(source=src, item=item, home=self.rect)
         return None
 

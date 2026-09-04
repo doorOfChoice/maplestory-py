@@ -12,8 +12,8 @@ from typing import List, Optional, Tuple
 import pygame
 
 from game import settings
-from game.render.windows.widgets import draw_menu_bg, ellipsize
-from game.render.windows.window import Window
+from game.render.windows.core.widgets import draw_menu_bg, ellipsize
+from game.render.windows.core.window import Window
 from game.systems.inventory import Item, item_kind
 
 PANEL_W, PANEL_H = 600, 330

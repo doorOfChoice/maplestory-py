@@ -12,8 +12,8 @@ from typing import List, Optional, Tuple
 
 import pygame
 
-from game.render.windows.widgets import ellipsize, draw_menu_bg
-from game.render.windows.window import Window
+from game.render.windows.core.widgets import ellipsize, draw_menu_bg
+from game.render.windows.core.window import Window
 from game.systems import shop as shop_mod
 from game.systems.inventory import Item, item_kind, make_item
 from game.systems.scrolls import SCROLLS, is_scroll_id

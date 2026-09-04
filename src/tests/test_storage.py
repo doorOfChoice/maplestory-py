@@ -68,7 +68,7 @@ def test_storage_equip_roundtrip_keeps_extra():
 def test_wheel_down_scrolls_bag_list_forward():
     """仓库背包列表超过一屏后，滚轮向下滚动首行索引递增（能看到更后面的物品）。"""
     from types import SimpleNamespace
-    from game.render.windows.services import WindowServices
+    from game.render.windows.core.services import WindowServices
     from game.render.windows.storage import StorageWindow
     from tests.windows_harness import FakeAssets, FakeUI
 

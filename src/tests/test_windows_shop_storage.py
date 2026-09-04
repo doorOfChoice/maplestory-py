@@ -10,7 +10,7 @@ from game import settings
 from game.render.windows.shop import (BG_LCOL_W, BG_LCOL_X, BG_NROWS,
                                       BG_ROW_H, BG_ROW_Y0, ShopWindow)
 from game.render.windows.storage import CELL, STORAGE_COLS, StorageWindow
-from game.render.windows.services import WindowServices
+from game.render.windows.core.services import WindowServices
 from game.systems.inventory import Inventory, Item
 from game.systems.shop import register_lua_shop, register_shop_profile
 from tests.windows_harness import (FakeUI, draw_once, make_manager, motion,

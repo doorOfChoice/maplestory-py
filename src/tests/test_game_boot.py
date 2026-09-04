@@ -171,8 +171,8 @@ return M
     ctx = make_ctx_view(host, "1012100", "赫丽娜", game.ctx.assets.map_id)
     conv = Conversation.from_source(src, {}, ctx, title="T")
     game._dialogue._set_conv(conv, _fake_npc())
-    assert game.ctx.ui.quest_lines == ["假物品在这里"]
-    assert game.ctx.ui.quest_links[0][0] == "点 假物品"
+    assert game.ctx.ui.conv.lines == ["假物品在这里"]
+    assert game.ctx.ui.conv.links[0][0] == "点 假物品"
 
 
 def test_advance_quest_registered_in_boot(game):
@@ -211,13 +211,13 @@ def test_npc_quest_menu_select_opens_quest(game):
         on_quest=lambda it: dlg._open_quest_conv(npc, it),
         on_teleport=dlg._request_warp, on_shop=dlg._request_shop)
     dlg._set_conv(conv, npc)
-    assert game.ctx.ui.quest_visible
-    assert game.ctx.ui.quest_links == [("弓箭手入门", 10), ("打菇菇", 5)]
+    assert game.ctx.ui.conv.visible
+    assert game.ctx.ui.conv.links == [("弓箭手入门", 10), ("打菇菇", 5)]
     game._draw()   # 出菜单帧不崩溃
     dlg._open_quest_conv(npc, items[1])
     assert dlg._conv is not None
     assert dlg._conv.current().title == "任务 · 打菇菇"
     assert dlg._conv.current().buttons == ["yes", "no"]
     dlg._close_conv()
-    assert not game.ctx.ui.quest_visible
+    assert not game.ctx.ui.conv.visible
     game._draw()

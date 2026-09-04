@@ -6,7 +6,7 @@ import pygame
 
 from game import settings
 from game.systems.inventory import Item
-from game.render.windows.manager import to_view_pos
+from game.render.windows.core.manager import to_view_pos
 from tests.windows_harness import (BoxWindow, close_button_pos, draw_once,
                                    key_press, make_manager, make_services,
                                    motion, press, release, wheel)

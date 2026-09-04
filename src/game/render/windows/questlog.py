@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import List, Tuple
 
-from game.render.windows import widgets
-from game.render.windows.window import Window
+from game.render.windows.core import widgets
+from game.render.windows.core.window import Window
 from game.systems.quests import render_markup
 
 # ── 原版窗口几何（由 panels.py 迁移）───────────────────────────────

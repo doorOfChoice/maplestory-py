@@ -22,10 +22,10 @@ import pygame
 
 from game.core.jobs import JOBS
 from game.core.stats import wear_block
-from game.render.windows import widgets
-from game.render.windows.manager import WindowManager
-from game.render.windows.services import WindowServices
-from game.render.windows.window import DragPickup, Window
+from game.render.windows.core import widgets
+from game.render.windows.core.manager import WindowManager
+from game.render.windows.core.services import WindowServices
+from game.render.windows.core.window import DragPickup, Window
 from game.systems.inventory import Inventory, Item, SLOT_ORDER, islot_to_slot
 from game.systems.scrolls import SCROLLS, apply_scroll, is_scroll_id
 

@@ -13,9 +13,9 @@ from typing import List, Optional, Tuple
 import pygame
 
 from game.core.keybindings import ACTION_BY_ID, ACTIONS, display_key
-from game.render.windows import widgets
-from game.render.windows.services import WindowServices
-from game.render.windows.window import Window
+from game.render.windows.core import widgets
+from game.render.windows.core.services import WindowServices
+from game.render.windows.core.window import Window
 
 # 按键设置窗几何（与旧 panels.KC_* 一致）
 KC_W = 240           # 窗宽

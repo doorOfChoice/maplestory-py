@@ -14,9 +14,9 @@ import pygame
 
 from game.core.jobs import JOBS
 from game.core.stats import STAT_LABELS
-from game.render.windows import widgets
-from game.render.windows.services import WindowServices
-from game.render.windows.window import Window
+from game.render.windows.core import widgets
+from game.render.windows.core.services import WindowServices
+from game.render.windows.core.window import Window
 
 # ── 原版窗口几何（由 panels.py 迁移，wz/UI.wz 底图逐像素实测）──────
 STAT_BG = "Stat/backgrnd"

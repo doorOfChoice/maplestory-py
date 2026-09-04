@@ -13,8 +13,8 @@ from typing import Optional, Tuple
 
 import pygame
 
-from game.render.windows import widgets
-from game.render.windows.services import WindowServices
+from game.render.windows.core import widgets
+from game.render.windows.core.services import WindowServices
 
 DRAG_THRESHOLD = 6.0       # 按下后移动超过该像素才判定为「拖出扔东西」
 DOUBLE_CLICK_TIME = 0.35   # 双击使用/穿戴的两次点击最大间隔（秒）
