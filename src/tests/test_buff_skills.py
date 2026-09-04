@@ -1,7 +1,7 @@
 """Buff 技能施放接线：cast 出含 time 字段的技能 → player.buffs 生效、属性变化。"""
 from __future__ import annotations
 
-from game.systems.inventory import Inventory
+from game.systems.inventory import Inventory, Item
 from game.entities.player import Player
 from game.systems.skills import SkillBook, SkillDef
 from game.core.stats import base_stats
@@ -27,6 +27,10 @@ class StubAssets:
 def _buff_init(self, assets, quest_defs=None):
     """最小新档初始化：真实 Inventory/SkillBook（attack_value 需要）。"""
     self.inventory = Inventory()
+    # 固定发一把 PAD=25 的武器：面板算式不随空手基准 BASE_WEAPON_PAD 漂移
+    self.inventory.equipped["weapon"] = Item(
+        id="01302000", name="木剑", kind="equip",
+        info={"islot": "Wp", "incPAD": 25})
     self.skills = SkillBook(None, 0)
     self.quests = {}
     self.stats = base_stats()

@@ -155,10 +155,13 @@ class Player:
         self.skills = book
         if jobdef.starter_weapon is not None:
             item = make_item(jobdef.starter_weapon, assets)
-            if item.slot is not None and self.inventory.equipped.get("weapon") is None:
-                self.inventory.equipped[item.slot] = item
+            if item.slot == "weapon" and self.inventory.equipped.get("weapon") is not None:
+                if self.inventory.unequip("weapon"):   # 旧武器（出生木剑）回背包
+                    self.inventory.equipped["weapon"] = item
+                else:
+                    self.inventory.add(item)
             elif item.slot is not None:
-                self.inventory.add(item)   # 已持其他武器：短弓入背包
+                self.inventory.equipped[item.slot] = item
         self.refresh_equips()
 
     def is_ranged(self) -> bool:
