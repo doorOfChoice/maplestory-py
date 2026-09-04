@@ -130,6 +130,7 @@ class WindowManager:
         for win in reversed(self._stack):
             if (win.visible and win.close_rect is not None
                     and win.close_rect.collidepoint(pos)):
+                self.cancel_interactions()
                 win.close()
                 return True
         if self._drag_win is not None or self._pick is not None:
@@ -182,7 +183,8 @@ class WindowManager:
             return True
         d = self._pick
         if d is None:
-            return False
+            hit = self._topmost_at(pos, interactive_only=True)
+            return hit.handle_mouse_up(pos) if hit is not None else False
         self._pick = None
         if d.active:
             if not d.pk.home.collidepoint(pos):

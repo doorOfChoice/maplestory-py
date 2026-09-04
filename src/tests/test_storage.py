@@ -68,34 +68,21 @@ def test_storage_equip_roundtrip_keeps_extra():
 def test_wheel_down_scrolls_bag_list_forward():
     """仓库背包列表超过一屏后，滚轮向下滚动首行索引递增（能看到更后面的物品）。"""
     from types import SimpleNamespace
-    import pygame
-    pygame.init()
-    from game.render.storage_panel import StoragePanel
-
-    class UI:
-        font = font_small = font_tiny = None
-
-    class Assets:
-        def ui_surface(self, img, path):
-            return None
-
-        def equip_icon(self, iid):
-            return None
-
-        def item_icon(self, iid):
-            return None
+    from game.render.windows.services import WindowServices
+    from game.render.windows.storage import StorageWindow
+    from tests.windows_harness import FakeAssets, FakeUI
 
     inv = Inventory()
     for i in range(40):
         inv.add(Item(id=f"40000{i:03d}", count=1, kind="etc"))
     p = SimpleNamespace(inventory=inv)
 
-    sp = StoragePanel(UI(), Assets())
-    sp.open()
-    sp.rect = pygame.Rect(100, 100, sp.rect.w, sp.rect.h)
-    assert sp.handle_wheel((110, 110), 1, p)
-    assert sp._scroll == 1
-    sp.handle_wheel((110, 110), 1, p)
-    assert sp._scroll == 2
-    sp.handle_wheel((110, 110), -1, p)
-    assert sp._scroll == 1
+    win = StorageWindow(WindowServices(assets=FakeAssets(), ui=FakeUI(),
+                                       player=lambda: p))
+    win.open()
+    assert win.handle_wheel((110, 110), 1)
+    assert win._scroll == 1
+    win.handle_wheel((110, 110), 1)
+    assert win._scroll == 2
+    win.handle_wheel((110, 110), -1)
+    assert win._scroll == 1

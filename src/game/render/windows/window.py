@@ -114,6 +114,10 @@ class Window:
         """无全局拖拽时，manager 把命中本窗口的移动事件转给子类（滚动条拖拽等）。"""
         return False
 
+    def handle_mouse_up(self, pos: Tuple[int, int]) -> bool:
+        """无全局拖拽/拾取时，manager 把命中本窗口的松开事件转给子类。"""
+        return False
+
     def handle_wheel(self, pos: Tuple[int, int], amount: int) -> bool:
         return False
 
