@@ -365,6 +365,24 @@ def render_markup(text: str, assets: Optional[Assets] = None,
     return out.strip()
 
 
+_ICON_CODE_RE = re.compile(r"#c(\d+)#")
+
+
+def split_item_icons(text: str) -> List[Tuple[str, object]]:
+    """把文本按 #c<物品id># 内联图标码切成 ("t", str) / ("i", int) 段序列。"""
+    text = text or ""
+    out: List[Tuple[str, object]] = []
+    pos = 0
+    for m in _ICON_CODE_RE.finditer(text):
+        if m.start() > pos:
+            out.append(("t", text[pos:m.start()]))
+        out.append(("i", int(m.group(1))))
+        pos = m.end()
+    if pos < len(text):
+        out.append(("t", text[pos:]))
+    return out
+
+
 def wrap_lines(text: str, width_px, font, _wrap) -> List[str]:
     """按可用宽度把多段（\\n 分隔）文本折行。"""
     lines: List[str] = []
@@ -506,6 +524,15 @@ class QuestLog:
         return True
 
     # ── 进度钩子 ────────────────────────────────────────────────────
+    def abandon(self, qid: str) -> None:
+        """放弃进行中任务：状态、接取顺序与击杀进度全清（任务日志用）。"""
+        if self.status.get(qid) != Q_ACCEPTED:
+            return
+        del self.status[qid]
+        self.kills.pop(qid, None)
+        if qid in self.accepted_order:
+            self.accepted_order.remove(qid)
+
     def on_kill(self, mob_id: int) -> None:
         """击杀怪物：为所有需要该怪的进行中任务计数。"""
         for qid, d in self.defs.items():

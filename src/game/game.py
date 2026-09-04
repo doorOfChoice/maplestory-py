@@ -334,7 +334,7 @@ class Game:
             lines.append(f"击杀 {self.assets.mob_name_of(mid)}  {cur}/{count}")
         for iid, count in d.end_items:
             cur = q.item_progress(self.ctx.world.player, qid, iid)
-            lines.append(f"收集 {self.assets.item_name(str(iid)) or f'#{iid}'}  {cur}/{count}")
+            lines.append(f"收集 #c{iid}# {self.assets.item_name(str(iid)) or ''}  {cur}/{count}")
         if not lines and d.desc1:
             lines.append(self._qmark(d.desc1))
         if d.reward_exp:
@@ -343,7 +343,7 @@ class Game:
             lines.append(f"奖励：金币 {d.reward_money}")
         for iid, count in d.reward_items:
             if count > 0:
-                lines.append(f"奖励：{self.assets.item_name(str(iid)) or f'#{iid}'} ×{count}")
+                lines.append(f"奖励：#c{iid}# {self.assets.item_name(str(iid)) or ''} ×{count}")
         return lines
 
     # ── 重生 ───────────────────────────────────────────────────────

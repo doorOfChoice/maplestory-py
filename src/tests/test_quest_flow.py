@@ -94,3 +94,16 @@ def test_status_stage_single_terminal_step():
     conv, _ = build("status", d, log)
     snap = conv.current()
     assert snap.terminal and snap.lines == ["还差。"]
+
+
+def test_abandon_clears_state_and_allows_restart():
+    """放弃进行中任务：状态/接取顺序/击杀进度全清，可重新接取。"""
+    d, log = make_log()
+    player = fake_player()
+    assert log.accept("7", player)
+    log.on_kill(100101)
+    log.abandon("7")
+    assert not log.started("7")
+    assert "7" not in log.accepted_order
+    assert log.kill_progress("7", 100101) == 0
+    assert log.can_start("7", player)

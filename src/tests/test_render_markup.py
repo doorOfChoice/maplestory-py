@@ -100,3 +100,17 @@ def test_wrap_segments_wraps_and_carries_color():
 def test_wrap_segments_merges_adjacent_same_color():
     lines = wrap_segments("#r甲#k乙", 35, _FakeFont())
     assert lines == [[("甲", MARKUP_COLORS["r"]), ("乙", None)]]
+
+
+# ── split_item_icons：#c<id># 内联物品码切段 ──
+def test_split_item_icons_basic():
+    """文本按 #c<id># 切成 文字/图标 段序列，码本体不再以原文出现。"""
+    from game.systems.quests import split_item_icons
+    assert split_item_icons("交给#c1002000#希娜") == [
+        ("t", "交给"), ("i", 1002000), ("t", "希娜")]
+
+
+def test_split_item_icons_plain_text_is_single_segment():
+    from game.systems.quests import split_item_icons
+    assert split_item_icons("纯文本") == [("t", "纯文本")]
+    assert split_item_icons("") == []
