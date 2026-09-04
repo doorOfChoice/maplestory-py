@@ -161,7 +161,7 @@ TRAINER_SPAWN = (-520.0, 455.0)  # 导师站立点（出生 portal 旁地面 foo
 # ── 远程弹道（直线快箭 + 穿透计数）──────────────────────────────────
 ARROW_SPEED = 900.0              # 箭矢飞行速度 px/s（瞄准后为合速）
 ARROW_AIM_RADIUS = 360.0         # 原版式瞄准半径：扇形内最近的怪会被瞄
-ARROW_AIM_HALF_ANGLE_DEG = 15.0  # 瞄准扇形半顶角：以朝向水平线为轴 ±30°
+ARROW_AIM_HALF_ANGLE_DEG = 15.0  # 瞄准扇形半顶角：以朝向水平线为轴 ±15°
 ARROW_LIFETIME = 0.4             # 箭矢存活秒数（超程消失）
 NORMAL_ARROW_ITEM_ID = "02060000"  # 普攻箭矢贴图来源：金币箭物品的 bullet 节点
 

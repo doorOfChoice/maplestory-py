@@ -180,8 +180,8 @@ def test_spawn_arrows_aims_at_mob_above():
 def test_spawn_arrows_aim_prefers_nearest():
     """圈内有两只怪：瞄准更近的那只方向。"""
     combat = combat_with_balls()
-    near = FakeTarget(x=150.0, cy=210.0, h=80)   # 中心 (150,170) 在下方
-    far = FakeTarget(x=230.0, cy=60.0, h=80)      # 中心 (230,20) 在上方
+    near = FakeTarget(x=150.0, cy=162.0, h=80)   # 中心 (150,122) 在下方、扇形内
+    far = FakeTarget(x=230.0, cy=92.0, h=80)      # 中心 (230,52) 在上方、扇形内但更远
     combat.spawn_arrows(AimP(), None, [far, near])
     assert combat.arrows[0].vy > 0               # 近怪在下 → 向下射
 
@@ -213,9 +213,9 @@ def test_spawn_arrows_ignores_mob_outside_fan():
 
 
 def test_spawn_arrows_aims_at_mob_in_fan_edge():
-    """扇形边缘内（约 25° 斜上方）的怪仍会被瞄。"""
+    """扇形边缘内（约 10° 斜上方）的怪仍会被瞄。"""
     combat = combat_with_balls()
-    mob = FakeTarget(x=200.0, cy=39.0, h=80)    # 身体中心 (200, -1)，俯角约 25°
+    mob = FakeTarget(x=200.0, cy=97.0, h=80)    # 身体中心 (200, 57)，俯角约 10° < 15°
     combat.spawn_arrows(AimP(), None, [mob])
     assert combat.arrows[0].vy < 0.0
 
