@@ -16,6 +16,7 @@ from typing import Dict, List, Optional
 from game import settings
 from game.core.jobs import (job_chain, job_sp_group, resolve_skill_img,
                             skill_ids_for_chain, sp_group_of_skill)
+from game.core.keybindings import SKILL_SLOT_COUNT
 from game.core.localize import to_simplified
 
 
@@ -337,3 +338,22 @@ class SkillBook:
         self.hotkeys = {int(k): str(v)
                         for k, v in data.get("hotkeys", {}).items()}
         self.cooldowns.clear()
+
+
+def assign_skill_to_key(book: SkillBook, bindings, skill_id: str,
+                        key: int) -> bool:
+    """技能拖到键盘某键上：复用已上槽位或取最小空闲槽，再改绑该槽动作键。
+
+    被占键的让位由 KeyBindings.set 的互换语义完成；未学 / 被动 / 槽满 / Esc
+    一律拒绝且不留脏状态。
+    """
+    if skill_id not in book.levels or skill_id not in book.learnable():
+        return False
+    slot = next((k for k, v in book.hotkeys.items() if v == skill_id), None)
+    if slot is None:
+        slot = next((k for k in range(1, SKILL_SLOT_COUNT + 1)
+                     if k not in book.hotkeys), None)
+    if slot is None or not bindings.set(f"skill_{slot}", key):
+        return False
+    book.hotkeys[slot] = skill_id
+    return True

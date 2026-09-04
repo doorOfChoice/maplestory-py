@@ -276,20 +276,24 @@ class Player:
         order = sorted(self.inventory.consumes.values(),
                        key=lambda i: 0 if i.info.get("spec", {}).get("hp") else 1)
         for item in order:
-            spec = item.info.get("spec") or {}
-            if not spec:
+            if not item.info.get("spec"):
                 continue
-            spec = self.inventory.use_consume(item.id)
-            if not spec:
-                continue
-            hp = int(spec.get("hp") or 0)
-            mp = int(spec.get("mp") or 0)
-            if hp:
-                self.hp = min(self.max_hp, self.hp + hp)
-            if mp:
-                self.mp = min(self.max_mp, self.mp + mp)
-            return True
+            if self.use_item_by_id(item.id):
+                return True
         return False
+
+    def use_item_by_id(self, item_id: str) -> bool:
+        """使用指定消耗品（键位绑定的物品宏走这里）；结算 hp/mp 恢复。"""
+        spec = self.inventory.use_consume(item_id)
+        if not spec:
+            return False
+        hp = int(spec.get("hp") or 0)
+        mp = int(spec.get("mp") or 0)
+        if hp:
+            self.hp = min(self.max_hp, self.hp + hp)
+        if mp:
+            self.mp = min(self.max_mp, self.mp + mp)
+        return True
 
     # ── 控制 ───────────────────────────────────────────────────────
     def stop_move(self) -> None:

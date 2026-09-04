@@ -62,6 +62,20 @@ ACTIONS: List[ActionDef] = [
 ACTION_BY_ID: Dict[str, ActionDef] = {a.id: a for a in ACTIONS}
 SKILL_SLOT_COUNT = len(_SKILL_DEFAULTS)
 
+# 动态动作族：背包消耗品拖上键格时按需注册 item_<物品id>
+ITEM_ACTION_PREFIX = "item_"
+
+
+def item_action(item_id: str) -> str:
+    return f"{ITEM_ACTION_PREFIX}{item_id}"
+
+
+def item_id_of_action(action: str) -> Optional[str]:
+    """动作 id → 物品 id；非物品动作返回 None。"""
+    if action.startswith(ITEM_ACTION_PREFIX):
+        return action[len(ITEM_ACTION_PREFIX):]
+    return None
+
 
 def _normalize(key: int) -> int:
     """小键盘 Enter 与主 Enter 视为同一键位。"""
@@ -129,9 +143,16 @@ class KeyBindings:
 
     # ── 改绑 ───────────────────────────────────────────────────────
     def set(self, action: str, key: int) -> bool:
-        """把 action 绑到 key。Esc 与未知动作拒绝；占用者互换到该动作原键。"""
-        if action not in self.keys or key == pygame.K_ESCAPE:
+        """把 action 绑到 key。Esc 与非 item_ 的未知动作拒绝；占用者互换到该动作原键。
+
+        新注册的 item_ 动作没有原键（-1），被它顶掉的占用者即告解绑。
+        """
+        if key == pygame.K_ESCAPE:
             return False
+        if action not in self.keys:
+            if not action.startswith(ITEM_ACTION_PREFIX):
+                return False
+            self.keys[action] = -1
         key = _normalize(key)
         old = self.keys[action]
         if old == key:
@@ -143,9 +164,14 @@ class KeyBindings:
         return True
 
     def reset(self, action: str, _seen: Optional[set] = None) -> None:
-        """恢复默认键：默认键若被别的动作占用，递归把占用者也送回各自默认。"""
+        """恢复默认键：默认键若被别的动作占用，递归把占用者也送回各自默认。
+
+        动态 item_ 动作没有默认键，reset 即删除绑定（解绑）。
+        """
         d = ACTION_BY_ID.get(action)
         if d is None:
+            if action.startswith(ITEM_ACTION_PREFIX):
+                self.keys.pop(action, None)
             return
         seen = _seen if _seen is not None else set()
         if action in seen:

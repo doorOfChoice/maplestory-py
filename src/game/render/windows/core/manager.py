@@ -187,6 +187,11 @@ class WindowManager:
             return hit.handle_mouse_up(pos) if hit is not None else False
         self._pick = None
         if d.active:
+            hit = self._topmost_at(pos)
+            if hit is not None and hit.handle_drop(d.pk, pos):
+                return True
+            if d.pk.kind != "item":
+                return True
             if not d.pk.home.collidepoint(pos):
                 item = d.win.take_for_drop(d.pk)
                 if item is not None:
@@ -232,6 +237,17 @@ class WindowManager:
                 widgets.draw_toast(surface, self.svc, text)
 
     def _draw_drag_icon(self, surface, d: _Pick) -> None:
+        if d.pk.kind == "skill":
+            icon = self.svc.assets.skill_icon(d.pk.payload)
+            if icon is not None:
+                icon = widgets.fit_icon(icon, 32)
+                px, py = d.pos
+                surface.blit(icon, (px - icon.get_width() // 2,
+                                    py - icon.get_height() // 2))
+                return
+        if d.pk.kind != "item":
+            self._draw_drag_label(surface, d)
+            return
         item = d.pk.item
         icon = (self.svc.assets.equip_icon(item.id) if item.kind == "equip"
                 else self.svc.assets.item_icon(item.id))
@@ -241,3 +257,17 @@ class WindowManager:
         px, py = d.pos
         surface.blit(icon, (px - icon.get_width() // 2,
                             py - icon.get_height() // 2))
+
+    def _draw_drag_label(self, surface, d: _Pick) -> None:
+        """无图标的拖拽载荷：跟随鼠标的胶囊文字（指令名 / 技能名）。"""
+        fs = self.svc.ui.font_small
+        txt = fs.render(d.pk.label or "?", True, (255, 240, 200))
+        w, h = txt.get_width() + 12, txt.get_height() + 6
+        px, py = d.pos
+        plate = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(plate, (30, 26, 16, 220), (0, 0, w, h),
+                         border_radius=7)
+        pygame.draw.rect(plate, (160, 140, 90), (0, 0, w, h), 1,
+                         border_radius=7)
+        plate.blit(txt, (6, 3))
+        surface.blit(plate, (px - w // 2, py - h // 2))

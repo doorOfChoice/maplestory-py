@@ -16,7 +16,7 @@ from typing import List, Optional, Tuple
 import pygame
 
 from game import settings
-from game.core.keybindings import KeyBindings
+from game.core.keybindings import KeyBindings, item_id_of_action
 from game.render.assets import Assets
 from game.render.effects import Effect
 from game.systems.quests import load_quest_defs, render_markup
@@ -191,9 +191,6 @@ class Game:
                     if event.key == kb.key_of("respawn"):
                         self.respawn()
                     continue
-                # 按键设置录入态：吞掉按键完成改绑（Esc 取消）
-                if self.ctx.windows.dispatch_key(event.key):
-                    continue
                 # 任务/寒暄对话框：回车/空格/Esc 交给对话层消费；其余按键照常
                 if self._dialogue.consume_keydown(event.key):
                     continue
@@ -219,6 +216,10 @@ class Game:
                         self.ctx.audio.play("PickUpItem", 0.4)
                 elif action is not None and action.startswith("skill_"):
                     self._cast_skill(int(action[len("skill_"):]))
+                elif action is not None and item_id_of_action(action):
+                    if self.ctx.world.player.use_item_by_id(
+                            item_id_of_action(action)):
+                        self.ctx.audio.play("PickUpItem", 0.4)
                 elif action == "move_up":
                     if not self.keys.down and self.ctx.world.portal_at_feet() is not None:
                         pass  # 站在传送门上按 ↑ → 交给 _check_portal 切图
@@ -251,14 +252,18 @@ class Game:
             return
         pressed = pygame.key.get_pressed()
         kb = self.keybindings
-        # 移动/攻击/跳跃按绑定键轮询（A 攻击同时用于按住兜底触发）
-        self.keys.left = bool(pressed[kb.key_of("move_left")])
-        self.keys.right = bool(pressed[kb.key_of("move_right")])
-        self.keys.up = bool(pressed[kb.key_of("move_up")])
-        self.keys.down = bool(pressed[kb.key_of("move_down")])
-        self.keys.attack = bool(pressed[kb.key_of("attack")])
-        self.keys.jump = bool(pressed[kb.key_of("jump")])
-        self.keys.pickup = bool(pressed[kb.key_of("pickup")])
+        # 移动/攻击/跳跃按绑定键轮询（A 攻击同时用于按住兜底触发）；
+        # 动作可能被物品宏顶成 -1（未绑定），此时视为未按住
+        def _held(action: str) -> bool:
+            k = kb.key_of(action)
+            return bool(k is not None and k >= 0 and pressed[k])
+        self.keys.left = _held("move_left")
+        self.keys.right = _held("move_right")
+        self.keys.up = _held("move_up")
+        self.keys.down = _held("move_down")
+        self.keys.attack = _held("attack")
+        self.keys.jump = _held("jump")
+        self.keys.pickup = _held("pickup")
 
         # 兜底：弹窗瞬间按住的 A 等按键事件会被模态分支吞掉，
         # 用持续按键状态补触发攻击（按下即生效，无需等松开重按）

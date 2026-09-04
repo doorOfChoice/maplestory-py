@@ -22,11 +22,18 @@ DOUBLE_CLICK_TIME = 0.35   # 双击使用/穿戴的两次点击最大间隔（�
 
 @dataclass
 class DragPickup:
-    """一次「在窗口格子上按下物品」的快照：来源 / 物品 / 判定框。"""
+    """一次「在窗口元素上按下并开始拖拽」的快照。
+
+    kind="item" 走原扔地链路；其它 kind（cmd / skill 等）松手时投递给落点
+    窗口的 handle_drop，payload / label 描述被拖内容。
+    """
 
     source: tuple
     item: "object"
     home: pygame.Rect
+    kind: str = "item"
+    payload: "object" = None
+    label: str = ""
 
 
 class Window:
@@ -130,6 +137,10 @@ class Window:
     # ── 物品拖拽三态（背包系窗口实现，manager 驱动状态机）───────────
     def pickup(self, pos: Tuple[int, int]) -> Optional[DragPickup]:
         return None
+
+    def handle_drop(self, pk: DragPickup, pos: Tuple[int, int]) -> bool:
+        """松手时由 manager 投递（含物品）；返回 True = 已消费、不再扔地。"""
+        return False
 
     def activate(self, pk: DragPickup) -> None:
         """双击来源格子：使用 / 穿戴 / 脱下。"""

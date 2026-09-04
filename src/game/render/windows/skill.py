@@ -15,7 +15,7 @@ import pygame
 from game.core.jobs import job_chain, job_sp_group
 from game.render.windows.core import widgets
 from game.render.windows.core.services import WindowServices
-from game.render.windows.core.window import Window
+from game.render.windows.core.window import DragPickup, Window
 
 # ── 原版窗口几何（由 wz/UI.wz 底图逐像素实测，随 panels 迁移）───────
 SKL_BG = "Skill/backgrnd"
@@ -41,6 +41,7 @@ class SkillWindow(Window):
         self._tab: Optional[int] = None       # 当前 SP 职业组（None=最新一转）
         self._tab_rects: List[Tuple[pygame.Rect, int]] = []
         self._row_rects: List[Tuple[pygame.Rect, str]] = []
+        self._drag_rects: List[Tuple[pygame.Rect, str]] = []   # 可上键技能行
         self._visible_rows = SKL_ROWS          # 当前一屏可见行数（绘制时定）
 
     # ── 定位 ───────────────────────────────────────────────────────
@@ -91,6 +92,7 @@ class SkillWindow(Window):
         sp_group = book.sp_for_group(active)
         self._tab_rects = []
         self._row_rects = []
+        self._drag_rects = []
         if widgets.wz_surface(self.svc, SKL_BG) is None:
             self._draw_fallback(surface, book, tabs, active, sids,
                                 learn_set, sp_group)
@@ -155,6 +157,9 @@ class SkillWindow(Window):
                 surface.blit(ft.render(f"Lv{d.char_level or 1} 可学习", True, color),
                              (tx, ry + 20))
             self._skill_tip(book, d, lv, mouse, pygame.Rect(row_x, ry, row_w, row_img_h))
+            if lv > 0 and sid in learn_set:
+                self._drag_rects.append(
+                    (pygame.Rect(row_x, ry, row_w - 34, row_img_h), sid))
             # 升级按钮（原版 BtSpUp）：仅可手学的主动技能、本转有 SP 且未满级
             if sp_group > 0 and lv < d.max_level and sid in learn_set:
                 btn = pygame.Rect(row_x + row_w - 20, ry + 3,
@@ -220,6 +225,9 @@ class SkillWindow(Window):
                 surface.blit(fs.render(f"Lv{d.char_level or 1} 可学习",
                                        True, (150, 156, 170)), (row.x + 52, ry + 28))
             self._skill_tip(book, d, lv, mouse, row)
+            if lv > 0 and sid in learn_set:
+                self._drag_rects.append(
+                    (pygame.Rect(row.x, row.y, row.w - 34, row.h), sid))
             if sp_group > 0 and lv < d.max_level and sid in learn_set:
                 btn = pygame.Rect(row.right - 26, ry + 4, 22, 22)
                 pygame.draw.rect(surface, (70, 130, 90), btn, border_radius=4)
@@ -248,6 +256,16 @@ class SkillWindow(Window):
             self._tab_rects.append((r, grp))
 
     # ── 事件 ───────────────────────────────────────────────────────
+    def pickup(self, pos: Tuple[int, int]):
+        """按住已学主动技能行 → 起拖一个 skill 载荷（供键盘窗接住）。"""
+        for rect, sid in self._drag_rects:
+            if rect.collidepoint(pos):
+                d = self.svc.player().skills.defs.get(sid)
+                return DragPickup(source=("skill", sid), item=None,
+                                  home=rect, kind="skill", payload=sid,
+                                  label=d.name if d else sid)
+        return None
+
     def handle_mouse_down(self, pos: Tuple[int, int]) -> bool:
         for rect, grp in self._tab_rects:
             if rect.collidepoint(pos):
