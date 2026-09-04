@@ -408,6 +408,10 @@ class UI:
         bar = self._img("StatusBar.img", "base/backgrnd")
         return bar.get_height() if bar is not None else 71
 
+    def status_bar_height(self) -> int:
+        """状态栏高度（供聊天框等贴栏而立的 HUD 元件定位）。"""
+        return self._status_bar_h()
+
     # ── 对话框绘制 ─────────────────────────────────────────────────
     def draw_dialog(self, surface, camera=None) -> None:
         if not self.dialog_visible or not self.dialog_lines:

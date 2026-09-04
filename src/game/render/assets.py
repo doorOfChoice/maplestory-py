@@ -381,6 +381,10 @@ class Assets:
         for mid in map_ids:
             self.preload_map(mid)
 
+    def map_exists(self, map_id: str) -> bool:
+        """地图是否存在（GM 传送前的廉价校验，不渲染）。"""
+        return self.map_renderer.has_map(map_id)
+
     def start_load_map(self, map_id: str) -> None:
         """请求真实切图：高优先级入队，主线程轮询 is_load_done。"""
         self._load_result = None

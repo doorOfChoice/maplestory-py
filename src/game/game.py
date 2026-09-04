@@ -16,11 +16,15 @@ from typing import List, Optional, Tuple
 import pygame
 
 from game import settings
+from game.core.chat import Chat
 from game.core.keybindings import KeyBindings, item_id_of_action
 from game.render.assets import Assets
+from game.render.chat import ChatView
 from game.render.cursor import GameCursor
 from game.render.effects import Effect
 from game.render.ui import KEY_BUTTON_WINDOWS
+from game.systems import gm
+from game.systems.gm import GmContext
 from game.core.life_index import collect_life_ids
 from game.systems.quests import (filter_world_quest_defs, load_quest_defs,
                                  render_markup)
@@ -159,6 +163,11 @@ class Game:
         """世界构建完成后，在主线程恢复轻量状态并播 BGM / 欢迎对话框。"""
         self.keys = _Keys()
         self.dead = False
+        # 聊天框（模型 + 视图）与 GM 指令上下文：世界效果回调全部留在 game 层
+        self.chat = Chat()
+        self.chat_view = ChatView()
+        self.gm_ctx = GmContext(warp=self._gm_warp, heal=self._gm_heal,
+                                meso=self._gm_meso)
         self._dialogue = NpcDialogueController(self.ctx, self.quest_defs)
         # 出租车菜单点选目的地 → 走与传送门同一套切图加载（落目标图出生门）
         self._dialogue.warp = lambda map_id: self._enter_map(map_id, None)
@@ -181,7 +190,8 @@ class Game:
                                           "←→ 移动  空格 跳跃  ↓+空格 下跳  ↑ 爬绳/梯",
                                           "A 攻击  Z 拾取  数字键 技能  F 喝药",
                                           "I 道具栏  K 技能栏  B 状态  Q 任务日志  M 小地图",
-                                          "Enter 对话  R 复活  O 按键设置（全部键位可改）",
+                                          "E 对话  R 复活  O 按键设置（全部键位可改）",
+                                          "Enter 聊天  输入 /help 可查看 GM 指令（/warp 传图等）",
                                          "背包满了？双击道具使用/穿戴，把它拖出背包窗口即可扔在地上"
                                          "（已穿装备也能从纸娃娃拖出扔掉）。",
                                           "新手练到 Lv10 后，找出生点旁的赫丽娜转职弓箭手；"
@@ -222,6 +232,9 @@ class Game:
                         cam = self.ctx.world.camera
                         self._dialogue.try_talk_at(vpos[0] + cam.x,
                                                    vpos[1] + cam.y)
+            elif event.type == pygame.TEXTINPUT:
+                if self.chat.focused:
+                    self.chat.type(event.text)
             elif event.type == pygame.KEYDOWN:
                 kb = self.keybindings
                 if self.dead:
@@ -230,6 +243,16 @@ class Game:
                     continue
                 # 任务/寒暄对话框：回车/空格/Esc 交给对话层消费；其余按键照常
                 if self._dialogue.consume_keydown(event.key):
+                    continue
+                # 聊天聚焦：Enter 发送 / Esc 收起 / 退格删字符，字符走 TEXTINPUT，
+                # 其余游戏动作键全部吞掉
+                if self.chat.focused:
+                    if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                        self._chat_send()
+                    elif event.key == pygame.K_ESCAPE:
+                        self.chat.close()
+                    elif event.key == pygame.K_BACKSPACE:
+                        self.chat.backspace()
                     continue
                 # Esc 固定为关闭：按键设置窗 / 商店 / 仓库（自顶向下首个）
                 if event.key == pygame.K_ESCAPE:
@@ -283,9 +306,17 @@ class Game:
                     self.ctx.world.player.drop_through(self.ctx.world.physics)
                 elif action == "talk":
                     self._dialogue.try_talk()
+                elif action == "chat":
+                    self.chat.open()
 
         # 加载期间不采集按键、不兜底攻击
         if self._loading:
+            return
+        # 聊天聚焦：松开所有held键，动作/移动/兜底攻击全部挂起
+        if self.chat.focused:
+            for _attr in ("left", "right", "up", "down", "attack", "jump",
+                          "pickup"):
+                setattr(self.keys, _attr, False)
             return
         pressed = pygame.key.get_pressed()
         kb = self.keybindings
@@ -315,6 +346,36 @@ class Game:
             self.ctx.audio.play("PickUpItem", 0.5)
             return True
         return False
+
+    def _chat_send(self) -> None:
+        """发送当前输入：/指令 → 执行，其余作为发言；发送后收起（同原版）。"""
+        text = self.chat.submit()
+        self.chat.close()
+        if text is None:
+            return
+        if gm.is_command(text):
+            for kind, line in gm.execute(text, self.gm_ctx):
+                self.chat.add(kind, line)
+        else:
+            self.chat.add("player", f"我：{text}")
+
+    # ── GM 指令：世界侧效果（解析/校验在 systems/gm.py）─────────────
+    def _gm_warp(self, map_id: str) -> Tuple[str, str]:
+        if self._loading:
+            return ("error", "地图切换加载中，暂不能传送")
+        if not self.assets.map_exists(map_id):
+            return ("error", f"地图 {map_id} 不存在")
+        self._enter_map(map_id, None)
+        return ("system", f"正在传送到地图 {map_id}")
+
+    def _gm_heal(self) -> Tuple[str, str]:
+        p = self.ctx.world.player
+        p.hp, p.mp = p.max_hp, p.max_mp
+        return ("system", "已恢复满血满蓝")
+
+    def _gm_meso(self, amount: int) -> Tuple[str, str]:
+        self.ctx.world.combat.meso += amount
+        return ("system", f"获得金币 {amount}")
 
     def _cast_skill(self, hotkey: int) -> None:
         """按技能槽施放（键位经 KeyBindings 解析成槽号）。成功则播放施放特效。"""
@@ -494,6 +555,7 @@ class Game:
         self.ctx.windows.draw(self.canvas)
         self.ctx.ui.draw_dialog(self.canvas, self.ctx.world.camera)
         self.ctx.ui.conv.draw(self.canvas)
+        self.chat_view.draw(self.canvas, self.chat, self.ctx.ui.status_bar_height())
         self.ctx.ui.draw_death(self.canvas)
 
         # 黑场淡入（切图 / 重生后从黑渐变到场景，避免瞬间弹出）
