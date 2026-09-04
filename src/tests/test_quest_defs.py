@@ -35,14 +35,31 @@ def test_selective_load_returns_only_requested_qids():
 
 
 @needs_wz
+def test_full_load_reports_progress():
+    """on_progress 回调逐批推进，最后一次 done == total == 任务总数。"""
+    from game.systems.quests import load_quest_defs
+    assets = _assets()
+    try:
+        calls: list[tuple[int, int]] = []
+        defs = load_quest_defs(assets, None,
+                               on_progress=lambda d, t: calls.append((d, t)))
+        assert calls
+        assert all(d <= t for d, t in calls)
+        assert calls[-1] == (len(defs), len(defs))
+    finally:
+        assets.close()
+
+
+@needs_wz
 def test_selective_load_matches_full_parse():
     """按需解析出的 QuestDef 与全量解析逐字段一致。"""
     from game.systems.quests import load_quest_defs
     assets = _assets()
     try:
-        part = load_quest_defs(assets, settings.ENABLED_QUESTS)
+        part = load_quest_defs(assets, {"2088", "10037"})
+        wanted = {"2088", "10037"}
         full = load_quest_defs(assets)
-        assert set(part) == {q for q in settings.ENABLED_QUESTS if q in full}
+        assert set(part) == {q for q in wanted if q in full}
         for qid, d in part.items():
             assert d == full[qid]
     finally:

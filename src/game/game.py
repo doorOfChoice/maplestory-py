@@ -21,7 +21,9 @@ from game.render.assets import Assets
 from game.render.cursor import GameCursor
 from game.render.effects import Effect
 from game.render.ui import KEY_BUTTON_WINDOWS
-from game.systems.quests import load_quest_defs, render_markup
+from game.core.life_index import collect_life_ids
+from game.systems.quests import (filter_world_quest_defs, load_quest_defs,
+                                 render_markup)
 from game.systems.lua_quests import build_advance_quest_defs, load_lua_quest_defs
 from game.npc_dialogue import NpcDialogueController
 from game.save_manager import SaveManager
@@ -101,15 +103,27 @@ class Game:
         try:
             self._boot_progress = 0.05
             self.assets = Assets(start_map, settings.REGION)
-            self._boot_progress = 0.20
-            # 任务解析与地图/实体构建并行：Quest.wz 与其他 WZ 各自独立
-            # reader_lock，线程安全；Player 构造前 join 取回结果。
+            # 任务线（life 扫描 + 全量解析）占 0.10~0.90，World/面板占尾部；
+            # 与主线程各自的 WZ reader_lock 独立，线程安全。
+            self._boot_progress = 0.10
+            self._boot_status = "正在扫描世界居民"
             quest_box: dict = {}
 
             def _load_quests() -> None:
                 try:
-                    quest_box["defs"] = load_quest_defs(
-                        self.assets, settings.ENABLED_QUESTS)
+                    def scan_cb(done: int, total: int) -> None:
+                        self._boot_progress = 0.10 + 0.35 * done / total
+
+                    def parse_cb(done: int, total: int) -> None:
+                        self._boot_progress = 0.45 + 0.45 * done / total
+
+                    npc_ids, mob_ids = collect_life_ids(
+                        self.assets.wz["Map"], on_progress=scan_cb)
+                    self._boot_status = "正在整理任务"
+                    defs = load_quest_defs(self.assets, None,
+                                           on_progress=parse_cb)
+                    quest_box["defs"] = filter_world_quest_defs(
+                        defs, npc_ids, mob_ids)
                 except Exception:
                     traceback.print_exc()
                     quest_box["defs"] = {}
@@ -117,7 +131,7 @@ class Game:
             quest_thread = threading.Thread(target=_load_quests, daemon=True)
             quest_thread.start()
 
-            # 任务数据：等待后台解析完成（只解析 ENABLED_QUESTS 精选任务）
+            # 任务数据：等待后台解析完成（全量解析 + 按世界真实存在性过滤）
             quest_thread.join()
             self.quest_defs = quest_box.get("defs") or {}
             # 合并 Lua 自定义任务（content/npc/*.lua）与转职任务（script=advance）
@@ -126,6 +140,8 @@ class Game:
             if lua_defs or adv_defs:
                 self.quest_defs = {**self.quest_defs, **lua_defs, **adv_defs}
 
+            self._boot_progress = 0.92
+            self._boot_status = "正在进入世界"
             # 组合根：装配音效 / UI / 单图场景（World）/ 全部交互窗口
             self.ctx = GameContext.create(self.assets, self.quest_defs,
                                           self.save_data)

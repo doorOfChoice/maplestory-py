@@ -139,12 +139,13 @@ class QuestDef:
 
 
 def load_quest_defs(assets: Assets,
-                    qids: Optional[Iterable[str]] = None) -> Dict[str, QuestDef]:
+                    qids: Optional[Iterable[str]] = None,
+                    on_progress=None) -> Dict[str, QuestDef]:
     """从 Quest.wz 解析任务 → {qid: QuestDef}。失败静默跳过。
 
     ``qids`` 给定时只解析这些任务的子树（parse_partial 按顶层节点名跳过
-    其余 block，避免全量解析 2000+ 任务与 OpenCC 转换拖慢启动）；
-    为 None 时解析全部。
+    其余 block）；为 None 时解析全部。``on_progress(done, total)`` 每 100 个
+    任务回报一次，末尾补齐 done == total，供开屏进度条细化。
     """
     wz = assets.wz["Quest"]
     root = wz.root
@@ -170,17 +171,40 @@ def load_quest_defs(assets: Assets,
         info = info_img.parse_partial(only=only) if info_img is not None else None
 
     defs: Dict[str, QuestDef] = {}
-    for qid in wanted:
+    total = len(wanted)
+    for i, qid in enumerate(wanted):
         node = check.get(qid)
-        if node is None:
-            continue
-        try:
-            d = _parse_one(qid, node, act, say, info)
-        except Exception:
-            continue
-        if d is not None:
-            defs[qid] = d
+        if node is not None:
+            try:
+                d = _parse_one(qid, node, act, say, info)
+            except Exception:
+                d = None
+            if d is not None:
+                defs[qid] = d
+        if on_progress is not None and (i + 1) % 100 == 0:
+            on_progress(i + 1, total)
+    if on_progress is not None and total:
+        on_progress(total, total)
     return defs
+
+
+def filter_world_quest_defs(defs: Dict[str, QuestDef], npc_ids: set,
+                            mob_ids: set) -> Dict[str, QuestDef]:
+    """按世界真实存在性过滤官方任务：给予/交付 NPC 与击杀怪必须出现在地图 life 中。
+
+    ``npc_ids`` / ``mob_ids`` 为字符串集合（来自 core.life_index 的 Map.wz 扫描）。
+    收集类目标（end_items）不在此判定 —— 物品可获得性无法由 life 数据推出。
+    """
+    out: Dict[str, QuestDef] = {}
+    for qid, d in defs.items():
+        if d.start_npc is None or str(d.start_npc) not in npc_ids:
+            continue
+        if d.end_npc is not None and str(d.end_npc) not in npc_ids:
+            continue
+        if any(str(mid) not in mob_ids for mid, _ in d.kills):
+            continue
+        out[qid] = d
+    return out
 
 
 def _parse_one(qid: str, node, act, say, info) -> Optional[QuestDef]:
