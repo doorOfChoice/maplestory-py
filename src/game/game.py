@@ -24,6 +24,8 @@ from game.systems.lua_quests import build_advance_quest_defs, load_lua_quest_def
 from game.npc_dialogue import NpcDialogueController
 from game.save_manager import SaveManager
 from game.render.splash import Splash
+from game.render.windows.inventory import toggle_inventory_pair
+from game.render.windows.manager import to_view_pos
 from game.context import GameContext
 from game.core.fonts import load_cjk_font, render_text
 
@@ -116,11 +118,11 @@ class Game:
             if lua_defs or adv_defs:
                 self.quest_defs = {**self.quest_defs, **lua_defs, **adv_defs}
 
-            # 组合根：装配音效 / UI / 面板 / 单图场景（World），并完成互相接线
+            # 组合根：装配音效 / UI / 单图场景（World）/ 全部交互窗口
             self.ctx = GameContext.create(self.assets, self.quest_defs,
                                           self.save_data)
-            self.ctx.panels._quest_goal_lines = self._quest_extra_goal_lines
-            self.ctx.panels.attach_bindings(self.keybindings)
+            self.ctx.windows.svc.quest_goal_lines = self._quest_extra_goal_lines
+            self.ctx.windows.svc.bindings = self.keybindings
 
             self._boot_progress = 1.0
             self._boot_status = ""
@@ -169,58 +171,20 @@ class Game:
                 self.running = False
             elif self._loading:
                 continue       # 加载期间只处理关闭事件
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if not self.dead:
-                    cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
-                    cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
-                    # 对话层（列表/按钮/气泡）优先消费；否则交给商店/仓库/背包
-                    if self._dialogue.consume_click((cx, cy)):
-                        continue
-                    if self.ctx.shop_panel.visible:
-                        self.ctx.shop_panel.handle_click((cx, cy), self.ctx.world.player, self.ctx.world.combat)
-                    elif self.ctx.storage_panel.visible:
-                        self.ctx.storage_panel.handle_click((cx, cy), self.ctx.world.player)
-                    else:
-                        self.ctx.panels.handle_mouse_down((cx, cy), self.ctx.world.player)
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button in (4, 5):
-                if not self.dead:
-                    cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
-                    cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
-                    amount = -1 if event.button == 4 else 1
-                    if self.ctx.shop_panel.visible:
-                        self.ctx.shop_panel.handle_wheel((cx, cy), amount, self.ctx.world.player)
-                    elif self.ctx.storage_panel.visible:
-                        self.ctx.storage_panel.handle_wheel((cx, cy), amount, self.ctx.world.player)
-                    elif self.ctx.panels.handle_wheel((cx, cy), amount, self.ctx.world.player):
-                        pass   # 背包 / 技能窗滚轮，已消费
-            elif event.type == pygame.MOUSEMOTION:
-                if self.ctx.shop_panel.visible and self.ctx.shop_panel.is_dragging():
-                    cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
-                    cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
-                    self.ctx.shop_panel.handle_mouse_motion((cx, cy), self.ctx.world.player)
-                elif self.ctx.panels.is_dragging():
-                    cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
-                    cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
-                    self.ctx.panels.handle_mouse_motion((cx, cy))
-            elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-                if self.ctx.shop_panel.visible and self.ctx.shop_panel.is_dragging():
-                    self.ctx.shop_panel.handle_mouse_up()
+            elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP,
+                                pygame.MOUSEMOTION):
+                if self.dead:
                     continue
-                if not self.dead:
-                    cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
-                    cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
-                    dropped = self.ctx.panels.handle_mouse_up((cx, cy), self.ctx.world.player)
+                # 对话层（列表/按钮/气泡）优先消费左键；其余全交窗口管理器
+                if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                        and self._dialogue.consume_click(to_view_pos(event.pos))):
+                    continue
+                if self.ctx.windows.dispatch(event):
+                    dropped = self.ctx.windows.take_dropped()
                     if dropped is not None:
-                        self.ctx.world.combat.drop_player_item(self.ctx.world.player, dropped)
+                        self.ctx.world.combat.drop_player_item(
+                            self.ctx.world.player, dropped)
                         self.ctx.audio.play("PickUpItem", 0.3)
-                else:
-                    self.ctx.panels.handle_mouse_up()
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
-                if not self.dead and self.ctx.panels.keyconfig_visible:
-                    cx = event.pos[0] * settings.VIEW_W // settings.WINDOW_W
-                    cy = event.pos[1] * settings.VIEW_H // settings.WINDOW_H
-                    self.ctx.panels.handle_right_click(
-                        (cx, cy), self.ctx.world.player)
             elif event.type == pygame.KEYDOWN:
                 kb = self.keybindings
                 if self.dead:
@@ -228,31 +192,26 @@ class Game:
                         self.respawn()
                     continue
                 # 按键设置录入态：吞掉按键完成改绑（Esc 取消）
-                if self.ctx.panels.consume_binding_key(event.key):
+                if self.ctx.windows.dispatch_key(event.key):
                     continue
                 # 任务/寒暄对话框：回车/空格/Esc 交给对话层消费；其余按键照常
                 if self._dialogue.consume_keydown(event.key):
                     continue
-                # Esc 固定为关闭：按键设置窗 / 商店 / 仓库
+                # Esc 固定为关闭：按键设置窗 / 商店 / 仓库（自顶向下首个）
                 if event.key == pygame.K_ESCAPE:
-                    if self.ctx.panels.keyconfig_visible:
-                        self.ctx.panels.toggle_keyconfig()
-                        continue
-                    if self.ctx.shop_panel.visible or self.ctx.storage_panel.visible:
-                        self.ctx.shop_panel.close()
-                        self.ctx.storage_panel.close()
+                    if self.ctx.windows.handle_escape():
                         continue
                 action = kb.action_for(event.key)
                 if action == "window_inventory":
-                    self.ctx.panels.toggle_inventory()
+                    toggle_inventory_pair(self.ctx.windows)
                 elif action == "window_skill":
-                    self.ctx.panels.toggle_skill()
+                    self.ctx.windows.get("skill").toggle()
                 elif action == "window_quest":
-                    self.ctx.panels.toggle_quest_log()
+                    self.ctx.windows.get("questlog").toggle()
                 elif action == "window_stat":
-                    self.ctx.panels.toggle_stat()
+                    self.ctx.windows.get("stat").toggle()
                 elif action == "window_keyconfig":
-                    self.ctx.panels.toggle_keyconfig()
+                    self.ctx.windows.get("keyconfig").toggle()
                 elif action == "minimap":
                     self.ctx.world.minimap.toggle()
                 elif action == "potion":
@@ -384,8 +343,8 @@ class Game:
         if self._loading:
             return
         self._dialogue.close_all()
-        self.ctx.shop_panel.close()
-        self.ctx.storage_panel.close()
+        self.ctx.windows.cancel_interactions()
+        self.ctx.windows.close_npc_windows()
         self.ctx.audio.stop_bgm()
 
         self.assets.start_load_map(map_id)
@@ -489,12 +448,7 @@ class Game:
         name_y = (settings.MINIMAP_MARGIN + settings.MINIMAP_H + 8
                   if self.ctx.world.minimap.visible else 8)
         self.ctx.ui.draw_map_name(self.canvas, self.assets.map_name(), name_y)
-        self.ctx.panels.draw_quickslots(self.canvas, self.ctx.world.player)
-        self.ctx.panels.draw(self.canvas, self.ctx.world.player, self.ctx.world.combat.meso)
-        if self.ctx.shop_panel.visible:
-            self.ctx.shop_panel.draw(self.canvas, self.ctx.world.player, self.ctx.world.combat)
-        elif self.ctx.storage_panel.visible:
-            self.ctx.storage_panel.draw(self.canvas, self.ctx.world.player)
+        self.ctx.windows.draw(self.canvas)
         self.ctx.ui.draw_dialog(self.canvas, self.ctx.world.camera)
         self.ctx.ui.draw_quest(self.canvas)
         self.ctx.ui.draw_death(self.canvas)

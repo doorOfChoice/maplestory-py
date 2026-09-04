@@ -133,8 +133,8 @@ class NpcDialogueController:
                     return
                 if has_shop:
                     # 有商店且无任务/传送 → 直接开店，不再经气泡按钮
-                    self.ctx.storage_panel.close()
-                    self.ctx.shop_panel.open(npc.npc_id)
+                    self.ctx.windows.get("storage").close()
+                    self.ctx.windows.get("shop").open(npc.npc_id)
                     return
                 buttons: List[str] = []
                 if npc.npc_id == STORAGE_NPC:
@@ -240,7 +240,7 @@ class NpcDialogueController:
             item.qid, stage, d=d, log=self.ctx.world.player.quests,
             player=self.ctx.world.player, combat=self.ctx.world.combat,
             assets=self.assets, audio=self.ctx.audio,
-            notify=self.ctx.panels.flash, qmark=self._qmark)
+            notify=self.ctx.windows.flash, qmark=self._qmark)
         self._set_conv(conv, npc)
 
     def _set_conv(self, conv: Conversation, npc, host: Optional[Any] = None,
@@ -295,9 +295,9 @@ class NpcDialogueController:
             self._next_shop = False
             npc = self._conv_npc
             self._close_conv()
-            self.ctx.storage_panel.close()
+            self.ctx.windows.get("storage").close()
             if npc is not None:
-                self.ctx.shop_panel.open(npc.npc_id)
+                self.ctx.windows.get("shop").open(npc.npc_id)
             return
         if host is not None and getattr(host, "pending_warp", None):
             w = host.pending_warp
@@ -316,7 +316,7 @@ class NpcDialogueController:
         if (self._conv_qid is not None and self._conv_host is not None
                 and self._conv_host.advanced):
             self.ctx.audio.play("LevelUp", 0.6)
-            self.ctx.panels.flash(
+            self.ctx.windows.flash(
                 f"转职成功：{JOBS[self.ctx.world.player.job].name}")
             # 转职任务完成：置为已完成，不再出现在可接列表
             self.ctx.world.player.quests.force_complete(self._conv_qid)
@@ -330,8 +330,8 @@ class NpcDialogueController:
         if npc is None:
             return
         if key == "storage":
-            self.ctx.shop_panel.close()
-            self.ctx.storage_panel.open()
+            self.ctx.windows.get("shop").close()
+            self.ctx.windows.get("storage").open()
 
     # ── Lua 脚本会话（talk() 契约）───────────────────────────────────
     def _host_ctx(self, npc, jobdef=None) -> Any:

@@ -149,8 +149,8 @@ return M
     dlg._conv.click_link(0)
     dlg._after_turn()
     assert dlg._conv is None
-    assert game.ctx.shop_panel.visible
-    game.ctx.shop_panel.close()
+    assert game.ctx.windows.get("shop").visible
+    game.ctx.windows.get("shop").close()
 
 
 def test_conversation_text_renders_official_markers(game):
