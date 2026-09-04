@@ -232,6 +232,20 @@ def test_spawn_arrows_all_bullets_aim_same_target():
     assert abs(combat.arrows[0].vx - combat.arrows[1].vx) < 10.0  # 近平行同目标
 
 
+def test_skill_arrow_noncrit_hit_uses_red_numbers():
+    """技能箭非暴击命中：飘字用普攻红字（NoRed），只有暴击才染紫。"""
+    combat = combat_with_balls()
+    mob = FakeTarget(x=120.0, cy=110.0)
+    skill = {"id": "3001005", "damage": 0.92, "mob_count": 1,
+             "bullet_count": 1, "mp_con": 10, "hp_con": 0, "range": 0}
+    combat.spawn_arrows(AimP(), skill, [mob])
+    for _ in range(60):
+        combat.update_arrows(1 / 60.0, [mob], player=None)
+    assert len(combat.numbers) == 1
+    n = combat.numbers[0]
+    assert n.kind == "red" and n.big is False
+
+
 def test_aimed_arrow_flies_straight_line():
     """斜射箭沿直线匀速前进（无重力）。"""
     combat = combat_with_balls()

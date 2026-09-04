@@ -248,7 +248,7 @@ class Arrow:
     def __init__(self, x: float, y: float, vx: float, vy: float,
                  frames: list, hit_frames: list, dmg: int,
                  mob_count: int = 1, life: float = 0.6,
-                 kind: str = "red", crit: bool = False):
+                 crit: bool = False):
         self.x = x
         self.y = y
         self.vx = vx
@@ -258,8 +258,7 @@ class Arrow:
         self.dmg = dmg
         self.mob_count = max(1, mob_count)
         self.life = life
-        self.kind = kind                # 伤害飘字配色（普攻红/技能紫）
-        self.crit = crit                # 命中时按暴击大号紫字结算
+        self.crit = crit                # 命中时按暴击结算：大号紫字，否则普攻红字
         self.age = 0.0
         self.hit_ids: set = set()
         self.dead = False
@@ -284,9 +283,9 @@ class Arrow:
             self.hit_ids.add(id(mob))
             luk = player.luk if player is not None else 0
             dmg = max(1, self.dmg - int(mob.pd * (1 - luk / 100.0)))
-            kind = "violet" if (self.crit or self.kind == "violet") else "red"
             combat.numbers.append(DamageNumber(
-                mob.x, mob.cy - mob.sprite_h, dmg, kind, big=self.crit))
+                mob.x, mob.cy - mob.sprite_h, dmg,
+                "violet" if self.crit else "red", big=self.crit))
             if self.hit_frames:
                 combat.effects.append(Effect(
                     self.hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45))
@@ -393,7 +392,7 @@ class Combat:
                 crit_rate, crit_mult)
             self.numbers.append(DamageNumber(
                 mob.x, mob.cy - mob.sprite_h, dmg,
-                "violet" if (skill or crit) else "red", big=crit))
+                "violet" if crit else "red", big=crit))
             if hit_frames:
                 self.effects.append(Effect(
                     hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45))
@@ -434,7 +433,7 @@ class Combat:
 
         原版式瞄准：瞄准圈内面朝一侧有怪时，箭沿出手点→怪身体中心方向斜射
         （多发技能所有箭瞄向同一最近目标）；无目标则水平直射。
-        skill_data=None 为普攻：单箭、攻击力 100%、红色飘字，
+        skill_data=None 为普攻：单箭、攻击力 100%，
         弹道贴图用箭矢物品的 bullet 节点（原版同款）。
         """
         crit_rate = player.crit_rate()
@@ -447,7 +446,6 @@ class Combat:
                 atk_lo, atk_hi, 1.0, 0, player_level, 0, random,
                 crit_rate, crit_mult)
             n, mob_count = 1, 1
-            kind = "red"
             frames = self.assets.normal_arrow_frames() if self.assets else []
             hit_frames: List = []
         else:
@@ -457,7 +455,6 @@ class Combat:
                 random, crit_rate, crit_mult)
             n = max(1, int(skill_data.get("bullet_count", 1)))
             mob_count = max(1, skill_data["mob_count"])
-            kind = "violet"
             frames = self.assets.skill_ball_frames(sid) if self.assets else []
             hit_frames = self.assets.skill_hit_frames(sid) if self.assets else []
             speed = skill_data.get("speed", speed)
@@ -476,7 +473,7 @@ class Combat:
             self.arrows.append(Arrow(
                 x=ax, y=ay, vx=vx, vy=vy,
                 frames=frames, hit_frames=hit_frames,
-                dmg=dmg, mob_count=mob_count, kind=kind, crit=crit,
+                dmg=dmg, mob_count=mob_count, crit=crit,
                 life=life))
 
     def update_arrows(self, dt: float, monsters, player=None) -> None:

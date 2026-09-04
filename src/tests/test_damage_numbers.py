@@ -1,7 +1,9 @@
 """官方伤害数字：数字集选择（小/大号、Miss）、颜色映射与原版动画曲线。"""
 from __future__ import annotations
 
-from game.systems.combat import DamageNumber
+import pygame
+
+from game.systems.combat import Combat, DamageNumber
 
 
 def test_small_digits_below_thousand():
@@ -49,3 +51,53 @@ def test_fully_faded_at_end_of_life():
     n.update(1.0)
     assert n.alpha == 0.0
     assert n.rise == 30.0
+
+
+class _Mob:
+    x, cy, sprite_h, level, pd = 10.0, 100.0, 30, 1, 0
+    dead = False
+    exp = 0
+    mob_id = "9999999"
+
+    def __init__(self):
+        self.hits = 0
+
+    def rect(self) -> pygame.Rect:
+        return pygame.Rect(int(self.x - 15), int(self.cy - 30), 30, 30)
+
+    def take_hit(self, damage: int, from_x=None) -> bool:
+        self.hits += 1
+        return False
+
+
+class _MeleePlayer:
+    x, y = 0.0, 100.0
+    level = 10
+    attack_hit_applied = False
+    pending_skill = {"id": "1001002", "damage": 1.0, "mob_count": 1, "range": 0}
+
+    def attack_rect(self) -> pygame.Rect:
+        return pygame.Rect(-10, 60, 60, 60)
+
+    def attack_range(self):
+        return (50, 50)
+
+    def crit_rate(self) -> float:
+        return 0.0
+
+    def crit_mult(self) -> float:
+        return 1.5
+
+
+def test_noncrit_skill_melee_uses_red_numbers():
+    """近战技能非暴击命中：飘字用普攻红字，只有暴击才染紫。"""
+    class FakeAssets:
+        def skill_hit_frames(self, sid):
+            return []
+
+    combat = Combat(FakeAssets())
+    p = _MeleePlayer()
+    combat.player_attack(p, [_Mob()])
+    assert len(combat.numbers) == 1
+    n = combat.numbers[0]
+    assert n.kind == "red" and n.big is False
