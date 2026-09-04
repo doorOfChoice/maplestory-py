@@ -43,6 +43,28 @@ def _pairs(v) -> List[Tuple[int, int]]:
     return out
 
 
+def _prereq(v) -> List[Tuple[object, int]]:
+    """prereq [[qid, state], ...]：数字 qid（官方任务）保 int，其余保字符串。
+
+    自定义任务 qid 形如 c_1012119_1，转 int 会炸，故与 _pairs 分开处理；
+    QuestLog.can_start 统一按 str(q) 比对，两种形态都认。
+    """
+    out: List[Tuple[object, int]] = []
+    if v is None:
+        return out
+    for i in range(1, len(v) + 1):
+        p = v[i]
+        if p is None:
+            continue
+        q = p[1]
+        try:
+            q = int(q)
+        except (TypeError, ValueError):
+            q = str(q)
+        out.append((q, int(p[2])))
+    return out
+
+
 def _ints(v) -> List[int]:
     """lupa 数组 → [int, ...]"""
     out: List[int] = []
@@ -96,7 +118,7 @@ def _quest_to_def(npc_id: str, idx: int, tbl) -> Optional[QuestDef]:
             lvmax=_num(tbl["lvmax"]),
             jobs=_ints(tbl["jobs"]),
             start_items=_pairs(tbl["start_items"]),
-            prereq=_pairs(tbl["prereq"]),
+            prereq=_prereq(tbl["prereq"]),
             kills=_pairs(tbl["kills"]),
             end_items=_pairs(tbl["end_items"]),
             accept_items=_pairs(tbl["accept_items"]),

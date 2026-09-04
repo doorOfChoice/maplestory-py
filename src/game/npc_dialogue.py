@@ -30,7 +30,7 @@ import pygame
 from game import settings
 from game.systems import dialogues
 from game.systems.conversation import (
-    Conversation, ConversationDef, Link, Step, make_ctx_view)
+    ConvServices, Conversation, ConversationDef, Link, Step, make_ctx_view)
 from game.systems.quest_flow import build_quest_conversation
 from game.systems.quests import NpcQuest, collect_npc_quests, render_markup
 from game.systems.script_api import make_globals
@@ -354,11 +354,17 @@ class NpcDialogueController:
         ctx_view = make_ctx_view(host.player, npc.npc_id, npc.name,
                                  self.assets.map_id, jobdef=host.jobdef)
         try:
-            conv = Conversation.from_source(path.read_text("utf-8"),
-                                            make_globals(host), ctx_view,
-                                            title=npc.name)
+            conv = Conversation.from_source(
+                path.read_text("utf-8"), make_globals(host), ctx_view,
+                title=npc.name,
+                services=ConvServices(
+                    quest_defs=self.quest_defs,
+                    teleports=travel.teleports_of(npc.npc_id),
+                    has_shop=bool(shops_of(npc.npc_id))))
         except Exception:
             logging.warning("对话脚本 %s 加载失败", script_name, exc_info=True)
+            return False
+        if conv.yields_to_route():   # takeover 判定无生意 → 让位默认路由
             return False
         self._set_conv(conv, npc, host=host, qid=qid)
         return True

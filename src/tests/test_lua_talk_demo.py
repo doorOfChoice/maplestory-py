@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from game import settings
-from game.systems.conversation import Conversation, make_ctx_view
+from game.systems.conversation import ConvServices, Conversation, make_ctx_view
 from game.systems.lua_quests import load_lua_quest_defs
 from game.systems.quests import QuestLog
 from game.systems.script_api import make_globals
@@ -40,9 +40,12 @@ def open_talk(world) -> Conversation:
     """按 npc_dialogue._open_script_conv 同款方式搭宿主 ctx 并开会话。"""
     host = SimpleNamespace(player=world.player, world=world, assets=None,
                            npc_name="托德", quest_defs=world.player.quests.defs,
-                           advanced=False, pending_warp=None)
+                           advanced=False, pending_warp=None, pending_shop=None)
     ctx = make_ctx_view(world.player, "1012119", "托德", 100000000)
-    return Conversation.from_source(_SRC, make_globals(host), ctx, title="托德")
+    return Conversation.from_source(
+        _SRC, make_globals(host), ctx, title="托德",
+        services=ConvServices(quest_defs=host.quest_defs, teleports=[],
+                              has_shop=True))
 
 
 def labels(conv: Conversation):
@@ -69,11 +72,13 @@ def test_accept_link_jumps_to_accepted_step():
     assert "太好了" in conv.current().lines[0]
 
 
-def test_accepted_without_items_hides_both_quest_links():
-    """已接取但药水不足：两条任务链接都隐藏。"""
+def test_accepted_without_items_yields_to_route():
+    """已接取但药水不足：无生意 → on_business 让位（宿主路由随后直开商店）。"""
     world = make_world()
     accept(world)
-    assert labels(open_talk(world)) == ["商店", "随便聊聊"]
+    conv = open_talk(world)
+    assert not conv.has_business()
+    assert conv.yields_to_route()
 
 
 def test_accepted_with_items_shows_complete_link():

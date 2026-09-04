@@ -98,7 +98,7 @@ class QuestDef:
     lvmax: int = 0            # 0 = 不限
     jobs: List[int] = field(default_factory=list)   # 空 = 不限
     start_items: List[Tuple[int, int]] = field(default_factory=list)  # 接取需持有
-    prereq: List[Tuple[int, int]] = field(default_factory=list)       # (quest, state)
+    prereq: List[Tuple[object, int]] = field(default_factory=list)    # (quest qid, state)
     # ── 完成条件（Check/1）──────────────────────────────
     end_npc: Optional[int] = None
     kills: List[Tuple[int, int]] = field(default_factory=list)        # (mob, count)

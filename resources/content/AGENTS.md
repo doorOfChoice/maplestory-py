@@ -31,45 +31,37 @@ NPC 对话 = 一张**步骤图**。`npc/<npc_id>.lua`（或转职脚本）可选
 
 ```lua
 function M.talk(ctx)
-  local QID = "c_1012119_1"
   return {
     title = "托德",                      -- 面板标题；缺省用 NPC 名
-    start = "greet",                     -- 起始步名；缺省用 steps 的第一项
+    start = "greet",                     -- 起始步名；缺省 greet，否则名字序第一个
+    takeover = "on_business",            -- 无生意（无可接/可交付任务、无目的地可送）时
+                                         -- 让位默认路由（如直开商店）；缺省恒接管
     steps = {
       greet = {
         text = { "哟，冒险者。要点什么？" },
         links = {
-          { label = "接任务：收集红药水",
-            show  = function(c) return quest_state(QID) == "available" end,
-            click = function(c) if accept_quest(QID) then return "accepted" end
-                                 return "busy" end },
-          { label = "交付：收集红药水",
-            show  = function(c) return quest_state(QID) == "accepted"
-                                      and #quest_completable(c.npc.id) > 0 end,
-            click = function(c) if complete_quest(QID) then return "rewarded" end
-                                 return "not_yet" end },
-          { label = "随便聊聊", click = function(c) return "chat" end },
+          -- 声明式链接：宿主按 QuestDef（name/lvmin/prereq/Say 槽）展开成
+          -- 「接任务：X」+「交付：X」两行，显隐/发奖/终态步全自动，脚本零闭包
+          { type = "quest", qid = "c_1012119_1" },
+          { type = "shop" },             -- 「商店」入口（不算生意）
+          { label = "随便聊聊", click = function(c) return "chat" end },  -- 手写链接
         },
       },
-      accepted = { text = { "太好了！收集 10 个红药水就来找我吧。",
-                           "按 Q 查看任务日志。" } },   -- 无 links/buttons = 终态
-      rewarded = { text = { "这是你的奖励！" } },
-      not_yet  = { text = { "还差一些，继续加油！" } },
-      busy     = { text = { "现在好像接不了，回头再看看你的等级吧。" } },
-      chat     = { text = { "呵呵，看你装备渐佳，是个人物。" } },
+      chat = { text = { "呵呵，看你装备渐佳，是个人物。" } },
     },
   }
 end
 ```
 
-参考实现：`npc/1012119.lua`（任务链接显隐）与 `advance.lua`（buttons 确认流）。
+参考实现：`npc/1012119.lua`（声明式任务链 + 让位）与 `advance.lua`（buttons 确认流）。
 
 ### 会话定义字段
 
 | 字段 | 类型 | 缺省 | 说明 |
 |---|---|---|---|
 | `title` | string | NPC 名 | 面板标题 |
-| `start` | string | `steps` 首项 | 起始步名 |
+| `start` | string | `greet`/名字序首项 | 起始步名 |
+| `takeover` | string 或 function(ctx)→bool | `"always"` | `"on_business"`：quest/travel 链接此刻全部隐藏 → 弃用本会话、回落默认路由；函数式在建模时求值一次，false = 让位 |
 | `steps` | 表/string→step | **必填** | 步骤集合；缺 `steps` 视为脚本错误 |
 
 ### 步骤（step）字段
@@ -83,12 +75,28 @@ end
 
 ### 链接（link）字段
 
+链接按 `type` 判别；**无 `type`（或 `"link"`）= 手写链接**，字段如下：
+
 | 字段 | 类型 | 缺省 | 说明 |
 |---|---|---|---|
 | `label` | string 或 function(ctx)→string | 必填 | 蓝字文本。函数式 label 在**开会话时求值一次**（不随后续刷新重算） |
 | `note` | number | 0 | 行右侧 `Lv n` 灰标注；0 不画 |
 | `show` | function(ctx)→boolean | 恒显示 | 渲染前调用；false 整行隐藏、**不占点击序号** |
 | `click` | function(ctx)→string/nil | 结束 | 先执行副作用（宿主函数），返回步名跳转；返回 `nil` = 结束对话 |
+
+### 声明式链接（`type = "quest" / "travel" / "shop"`）
+
+套路链接交宿主展开（数据源=任务表/传送注册表/货架），「点 NPC 的理由」不再手写闭包：
+
+| type | 必填/可选字段 | 展开为 | 数据来源 |
+|---|---|---|---|
+| `quest` | `qid` | 「接任务：⟨name⟩ Lv⟨lvmin⟩」+「交付：⟨name⟩」两行 + `<qid>_accepted/_rewarded/_notyet` 终态步 | QuestDef：显隐按 can_start/can_complete（**prereq、lvmin 是唯一前置来源**），文案取 Say 槽 `accept_yes`/`complete_yes`/`complete_stop` |
+| `travel` | 可选 `label`（指名单个目的地） | 每个目的地一行，点击 `teleport(map)` 并结束；自动剔除玩家当前图 | entries() 的 teleport 条目注册表 |
+| `shop` | 可选 `label`（缺省「商店」） | 一行，点击登记开店并结束 | 本 NPC 有货架才展开 |
+
+- 展开生成的 `busy` 步（接取被拒的兜底）脚本可在 `steps` 里同名覆盖。
+- quest/travel 算「生意」（business），shop 与手写链接不算——`takeover = "on_business"` 依此判定让位。
+- 展开次序 = 数组书写次序，同一 quest 项的「接任务」在「交付」前；同屏通常只有一条可见。
 
 ### 结束标记（隐式）
 
@@ -182,7 +190,10 @@ end
 
 `npc_dialogue.try_talk` 按优先级：
 
-1. NPC 有 `content/npc/<id>.lua` 且导出 `talk()` → **完全接管对话**（默认菜单不出现）。
+1. NPC 有 `content/npc/<id>.lua` 且导出 `talk()`，且其 `takeover` 策略未让位 →
+   **完全接管对话**（默认菜单不出现）。`takeover = "on_business"` 时，若此刻
+   quest/travel 声明链接全部隐藏（没任务热闹）→ 视作无 `talk()`，落入下面一级
+   ——商店 NPC「有任务才聊，没任务直接办事」即由此实现。
 2. 否则该 NPC 有任务/进行中/传送条目 → 宿主**自动合成默认会话**（一张蓝字列表）：
    可交付在前、可接任务、进行中、传送目的地（剔除玩家当前图）、有商店则末尾加
    「商店」链接。点任务进入由 `entries()` Say 槽文本组成的子会话。
@@ -217,7 +228,7 @@ end
 | `lvmin` / `lvmax` | number | 接取等级下限 / 上限（0 = 不限） |
 | `jobs` | 数组[number] | 职业限制，空 = 不限 |
 | `start_items` | 数组[[id,count]] | 接取时需持有该物品 |
-| `prereq` | 数组[[qid,state]] | 前置任务（state 2=已完成 / 1=已接取） |
+| `prereq` | 数组[[qid,state]] | 前置任务（state 2=已完成 / 1=已接取）；qid 可为数字（官方）或字符串（自定义 `c_*`） |
 | `kills` | 数组[[mob,count]] | 完成需击杀怪物 |
 | `end_items` | 数组[[item,count]] | 完成需收集物品 |
 | `accept_items` | 数组[[item,count]] | 接取时赠送物品 |
@@ -231,9 +242,11 @@ end
 | `complete_stop` | 数组[string] | 条件未满足时的提示 |
 | `desc0` / `desc1` / `desc2` | string | 任务日志描述（可选） |
 
-> `accept_lines` 等六个 Say 槽位是「NPC **未写 `talk()`** 时默认子会话」的对话文本；
-> 写了 `talk()` 则完全不用它们（但任务数值字段仍然生效：接取/交付判定、奖励发放、
-> 头顶灯泡、存档）。缺省槽位有宿主兜底文案。
+> Say 槽位是任务的**台词唯一事实来源**：NPC 未写 `talk()` 时供默认子会话；
+> 写了 `talk()` 且有 `{type="quest"}` 链接时，`accept_yes`/`complete_yes`/
+> `complete_stop` 同时就是接取成功 / 交付发奖 / 条件不足三个终态步的文案
+> （`accept_lines`/`accept_no`/`complete_lines` 询问流仍只在默认子会话使用）。
+> 任务数值字段始终生效：接取/交付判定、奖励发放、头顶灯泡、存档。缺省槽位有兜底文案。
 
 任务对话文本槽位支持官方标记（宿主 `render_markup`）：`#t<id>#` 物品名、
 `#o<id>#` 怪物名、`#m<id>#` 地图名、`#p<id>#` NPC 名、`#r/#g/#b/#d/#k` 颜色、`\n` 换行；
