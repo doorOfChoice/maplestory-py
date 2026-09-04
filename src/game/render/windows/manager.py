@@ -168,7 +168,13 @@ class WindowManager:
                 if dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD:
                     d.active = True
             return True
-        return False
+        hit = self._topmost_at(pos, interactive_only=True)
+        return hit.handle_mouse_motion(pos) if hit is not None else False
+
+    def cancel_interactions(self) -> None:
+        """清空进行中的窗口/物品拖拽（关窗、切图等外部动作后调用）。"""
+        self._drag_win = None
+        self._pick = None
 
     def _left_up(self, pos: Tuple[int, int]) -> bool:
         if self._drag_win is not None:
