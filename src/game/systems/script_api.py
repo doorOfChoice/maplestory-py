@@ -10,8 +10,8 @@
   解释器结束会话后由宿主执行
 - 任务（当 ctx 携带 world/quest_defs 时注册）：quest_available / quest_completable /
   quest_state / accept_quest / complete_quest / quest_info（薄封装，复用 quests.py 逻辑）
-- 商店（当 ctx 携带 world 时注册）：get_shop_items(shop_id) / shop_buy(item_id, count) /
-  shop_sell(item_id, count)
+- 商店（当 ctx 携带 world 时注册）：open_shop()（置 ctx.pending_shop，宿主关会话后开店）/
+  get_shop_items(shop_id) / shop_buy(item_id, count) / shop_sell(item_id, count)
 
 安全：宿主运行时禁用 os/io/package/dofile/loadfile，脚本为仓库内可信文本。
 """
@@ -58,6 +58,13 @@ def make_globals(ctx: Any) -> Dict[str, Callable]:
             return True
 
         globals_["teleport"] = teleport
+
+        def open_shop() -> bool:
+            """登记开店意图：本次交互后关闭会话并由宿主打开本 NPC 商店面板。"""
+            ctx.pending_shop = True
+            return True
+
+        globals_["open_shop"] = open_shop
 
         def give_reward(exp=0, meso=0, items=None) -> bool:
             """按 Lua 指定直接发奖：exp/金币/物品；物品负数量=收回。"""

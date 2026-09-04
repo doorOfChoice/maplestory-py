@@ -57,7 +57,7 @@ def accept(world) -> None:
 
 def test_fresh_player_sees_accept_link_and_no_complete():
     """未接取：显示「接任务」，隐藏「交付」，寒暄恒在。"""
-    assert labels(open_talk(make_world())) == ["接任务：收集红药水", "随便聊聊"]
+    assert labels(open_talk(make_world())) == ["接任务：收集红药水", "商店", "随便聊聊"]
 
 
 def test_accept_link_jumps_to_accepted_step():
@@ -73,14 +73,14 @@ def test_accepted_without_items_hides_both_quest_links():
     """已接取但药水不足：两条任务链接都隐藏。"""
     world = make_world()
     accept(world)
-    assert labels(open_talk(world)) == ["随便聊聊"]
+    assert labels(open_talk(world)) == ["商店", "随便聊聊"]
 
 
 def test_accepted_with_items_shows_complete_link():
     """已接取且药水凑满：「交付」链接出现，「接任务」消失。"""
     world = make_world(potions=10)
     accept(world)
-    assert labels(open_talk(world)) == ["交付：收集红药水", "随便聊聊"]
+    assert labels(open_talk(world)) == ["交付：收集红药水", "商店", "随便聊聊"]
 
 
 def test_complete_click_grants_reward_and_completes():
@@ -100,4 +100,4 @@ def test_completed_quest_hides_quest_links():
     accept(world)
     conv = open_talk(world)
     conv.click_link(0)
-    assert labels(open_talk(world)) == ["随便聊聊"]
+    assert labels(open_talk(world)) == ["商店", "随便聊聊"]

@@ -162,19 +162,18 @@ end
 | `complete_quest(qid)` | number/string | boolean | 完成任务并**按 QuestDef 发奖**（exp/金币/物品、扣 end_items）；条件不足 false |
 | `quest_info(qid)` | number/string | 表{name,reward_exp,reward_money} | 任务信息，未知 qid 返回空表 |
 
-### 商店数据（NPC 会话注册：宿主携带 `world`）
+### 商店（NPC 会话注册：宿主携带 `world`）
 | 函数 | 参数 | 返回 | 说明 |
 |---|---|---|---|
+| `open_shop()` | 无 | boolean | 登记开店意图；本次交互后会话关闭并由宿主打开本 NPC 商店面板（`npc/1012119.lua` 演示） |
 | `get_shop_items(shop_id)` | string | 数组[{item_id,price}] | 货架与买价（可用于 `talk()` 里报价文案） |
 | `shop_buy(item_id, count)` / `shop_sell(item_id, count)` | string/int | boolean | 已注册但**暂不可用**，见「未提供」 |
 
 ### 未提供 / 后续扩展
 
-- `open_shop()`：**不存在**。`talk()` 完全接管对话后，原先默认菜单里的「商店」链接
-  入口也随之消失（如 `npc/1012119.lua` 演示）。商店入口留待后续以宿主函数形式提供。
 - `shop_buy`/`shop_sell` 依赖宿主 `_current_shop` 定位货架，当前宿主从不置位，
-  故在 `talk()` 里调用恒返回 `false`；对话内交易与 `open_shop` 一并留待后续。
-- 句内蓝字标记（`#L…#l` 内嵌渲染）、`talk()` 文本的官方标记替换：本轮不做。
+  故在 `talk()` 里调用恒返回 `false`；对话内交易留待后续。
+- 句内蓝字标记（`#L…#l` 内嵌渲染）：不做，蓝字一律整行（块级）。
 
 ## 对话路由：talk() 与默认会话的关系
 

@@ -14,8 +14,8 @@ NPC 有 `content/npc/<id>.lua` 的 `talk(ctx)` 则完全接管对话；Lua 驱�
 无 talk() 脚本的 NPC 走模块级 `build_menu_conversation` 合成的默认会话：
 任务（可交付/可接/进行中）、出租车传送、商店入口折成一张蓝字列表；
 任务链接点开 `quest_flow.build_quest_conversation` 的子会话。
-链接的传送/商店副作用不直接执行，只登记意图（_next_warp/_next_shop，
-脚本会话则经宿主 ctx.pending_warp 由 teleport() 登记），
+        链接的传送/商店副作用不直接执行，只登记意图（_next_warp/_next_shop，
+        脚本会话则经宿主 ctx.pending_warp/pending_shop 由 teleport()/open_shop() 登记），
 由 `_after_turn` 在会话关闭后统一消费。
 """
 
@@ -243,10 +243,13 @@ class NpcDialogueController:
             notify=self.ctx.panels.flash, qmark=self._qmark)
         self._set_conv(conv, npc)
 
-    def _set_conv(self, conv: Conversation, npc) -> None:
-        """装载新会话（替换当前 `_conv`）并立即渲染；关掉寒暄气泡。"""
+    def _set_conv(self, conv: Conversation, npc, host: Optional[Any] = None,
+                  qid: Optional[str] = None) -> None:
+        """装载新会话（替换当前 `_conv` 及其宿主绑定）并立即渲染；关掉寒暄气泡。"""
         self._conv = conv
         self._conv_npc = npc
+        self._conv_host = host
+        self._conv_qid = qid
         self.ctx.ui.hide_dialog()
         self._talk_npc = None
         self._show_conv()
@@ -278,6 +281,10 @@ class NpcDialogueController:
 
     def _after_turn(self) -> None:
         """一次交互（链接/按钮/按键）后的统一善后：意图 > 结束 > 重绘。"""
+        host = self._conv_host
+        if host is not None and getattr(host, "pending_shop", None):
+            host.pending_shop = None
+            self._next_shop = True
         if self._next_warp:
             w, self._next_warp = self._next_warp, None
             self._close_conv()
@@ -292,7 +299,6 @@ class NpcDialogueController:
             if npc is not None:
                 self.ctx.shop_panel.open(npc.npc_id)
             return
-        host = self._conv_host
         if host is not None and getattr(host, "pending_warp", None):
             w = host.pending_warp
             host.pending_warp = None
@@ -329,12 +335,13 @@ class NpcDialogueController:
 
     # ── Lua 脚本会话（talk() 契约）───────────────────────────────────
     def _host_ctx(self, npc, jobdef=None) -> Any:
-        """脚本会话的宿主 ctx：script_api 闭包读它，teleport 置 pending_warp。"""
+        """脚本会话的宿主 ctx：script_api 闭包读它，teleport/open_shop 登记意图。"""
         return SimpleNamespace(player=self.ctx.world.player,
                                world=self.ctx.world, jobdef=jobdef,
                                assets=self.assets, npc_name=npc.name,
                                quest_defs=self.quest_defs,
-                               advanced=False, pending_warp=None)
+                               advanced=False, pending_warp=None,
+                               pending_shop=None)
 
     def _open_script_conv(self, npc, qid: Optional[str],
                           script_name: str) -> bool:
@@ -353,9 +360,7 @@ class NpcDialogueController:
         except Exception:
             logging.warning("对话脚本 %s 加载失败", script_name, exc_info=True)
             return False
-        self._conv_host = host
-        self._conv_qid = qid
-        self._set_conv(conv, npc)
+        self._set_conv(conv, npc, host=host, qid=qid)
         return True
 
     def _open_npc_talk(self, npc) -> bool:

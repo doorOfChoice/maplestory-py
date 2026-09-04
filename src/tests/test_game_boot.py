@@ -125,6 +125,34 @@ def test_advancement_flow_uses_script(game):
     game._draw()   # 转职后正常出帧
 
 
+def test_open_shop_via_script(game):
+    """talk() 链接调 open_shop()：会话关闭并打开该 NPC 商店面板。"""
+    pytest.importorskip("lupa")
+    from game.systems.conversation import Conversation, make_ctx_view
+    from game.systems.script_api import make_globals
+    _boot(game)
+    npc = _fake_npc("1012119")
+    dlg = game._dialogue
+    host = dlg._host_ctx(npc)
+    ctx = make_ctx_view(game.ctx.world.player, "1012119", "托德",
+                        game.ctx.assets.map_id)
+    src = """
+local M = {}
+function M.talk(c)
+  return { start = "s", steps = { s = { links = {
+    { label = "商店", click = function(x) open_shop() end } } } } }
+end
+return M
+"""
+    dlg._set_conv(Conversation.from_source(src, make_globals(host), ctx,
+                                           title="T"), npc, host=host)
+    dlg._conv.click_link(0)
+    dlg._after_turn()
+    assert dlg._conv is None
+    assert game.ctx.shop_panel.visible
+    game.ctx.shop_panel.close()
+
+
 def test_conversation_text_renders_official_markers(game):
     """talk() 的黑文本与蓝字渲染前统一过官方标记解析（#t<id># → 物品名）。"""
     pytest.importorskip("lupa")

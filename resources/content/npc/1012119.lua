@@ -37,8 +37,8 @@ function M.shops()
   }
 end
 
--- talk() 完全接管对话（默认的任务/商店菜单不再出现）。
--- 当前宿主未提供 open_shop，故本演示暂无商店入口（见 content/AGENTS.md「未提供」）。
+-- talk() 完全接管对话（默认的任务/商店菜单不再出现），
+-- 商店入口由链接自己调 open_shop() 登记（见 content/AGENTS.md 宿主函数表）。
 function M.talk(ctx)
   local QID = "c_1012119_1"
   return {
@@ -57,6 +57,8 @@ function M.talk(ctx)
                                       and #quest_completable(c.npc.id) > 0 end,
             click = function(c) if complete_quest(QID) then return "rewarded" end
                                  return "not_yet" end },
+          { label = "商店",
+            click = function(c) open_shop() end },
           { label = "随便聊聊",
             click = function(c) return "chat" end },
         },
