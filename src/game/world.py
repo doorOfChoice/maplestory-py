@@ -11,7 +11,7 @@ UI 覆盖层（对话 / 横幅 / 淡入淡出 / 死亡界面）、存档、地�
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pygame
 
@@ -30,6 +30,14 @@ from game.entities.npc import NPC
 from game.core.physics import Physics
 from game.entities.player import Player
 from game.save_manager import apply_combat_meta
+
+
+def fell_out_of_map(feet_y: float, bounds: Dict[str, int],
+                    margin: float = 80.0) -> bool:
+    """是否掉出地图底部。必须与世界坐标 bounds.bottom 比较；
+    bounds["height"] 是相对值，top 非零的图（如 102010000）拿它比 y
+    会站立也误判坠落、每帧扣血进图即死。"""
+    return feet_y > float(bounds["bottom"]) + margin
 
 
 def resolve_saved_spawn(physics: Physics, saved: Optional[Tuple[float, float]],
@@ -254,7 +262,7 @@ class World:
                 return portal
 
         # 掉出地图底部：回出生点并扣血（避免永远下坠）
-        if self.player.y > self.assets.map_height + 80:
+        if fell_out_of_map(self.player.y, self.assets.bounds):
             self.player.damage(settings.FALL_OUT_DAMAGE)
             self.combat.numbers.append(DamageNumber(
                 self.player.x, self.player.y - 40,
