@@ -201,7 +201,7 @@ def _load_lua_entries(npc_id: str, mod, defs: Dict[str, QuestDef]) -> None:
     entries_tbl = entries_fn(None)
     if entries_tbl is None:
         return
-    teleports: List[Tuple[str, str]] = []
+    teleports: List[Tuple[str, str, int]] = []
     for i in range(1, len(entries_tbl) + 1):
         item = entries_tbl[i]
         if item is None:
@@ -212,9 +212,9 @@ def _load_lua_entries(npc_id: str, mod, defs: Dict[str, QuestDef]) -> None:
             if d is not None:
                 defs[d.qid] = d
         elif etype == "teleport":
-            label, mid = item["label"], item["map"]
+            label, mid, fare = item["label"], item["map"], item["fare"]
             if label and mid:
-                teleports.append((str(label), str(mid)))
+                teleports.append((str(label), str(mid), int(fare or 0)))
             else:
                 logging.warning("Lua teleport [%s/%d] missing label/map", npc_id, i)
         else:

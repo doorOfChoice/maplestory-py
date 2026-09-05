@@ -51,17 +51,18 @@ _CONTENT_DIR = settings.RESOURCE_DIR / "content"
 
 def build_menu_conversation(npc_name: str, map_id: str,
                             quests: List[NpcQuest],
-                            teleports: List[Tuple[str, str]],
+                            teleports: List[Tuple[str, str, int]],
                             accepted: List[NpcQuest],
                             has_shop: bool, *,
                             on_quest: Callable[[NpcQuest], None],
-                            on_teleport: Callable[[str], None],
+                            on_teleport: Callable[[str, int], Optional[str]],
                             on_shop: Callable[[], None]) -> Conversation:
     """无 talk() 脚本 NPC 的默认会话：任务/进行中/传送/商店合一张蓝字列表。
 
-    链接顺序 = 可交付在前、可接在后（稳定排序）→ 进行中 → 传送（剔除当前图）
-    → 商店。``on_*`` 只登记意图并返回 None → 链接点击即结束本菜单会话，
-    由控制器在 `_after_turn` 里消费意图（打开子会话 / 切图 / 开店）。
+    链接顺序 = 可交付在前、可接在后（稳定排序）→ 进行中 → 传送（剔除当前图，
+    有票价写进文案）→ 商店。``on_*`` 登记意图并返回 None → 链接点击即结束本
+    菜单会话，由控制器在 `_after_turn` 里消费意图（打开子会话 / 切图 / 开店）；
+    ``on_teleport`` 扣费失败回步名 "menu" → 菜单原地留在并提示，不扣钱不切图。
     """
     links: List[Link] = []
     ordered = sorted(quests, key=lambda it: 0 if it.state == "complete" else 1)
@@ -71,10 +72,12 @@ def build_menu_conversation(npc_name: str, map_id: str,
     for item in accepted:
         links.append(Link(f"{item.title}（进行中）", item.level,
                           click=lambda it=item: _intent(on_quest, it)))
-    for label, mid in teleports:
+    for label, mid, fare in teleports:
         if str(mid) == str(map_id):
             continue
-        links.append(Link(label, click=lambda m=mid: _intent(on_teleport, m)))
+        text = f"{label}  {fare}金币" if fare else label
+        links.append(Link(text,
+                          click=lambda m=mid, f=fare: _intent(on_teleport, m, f)))
     if has_shop:
         links.append(Link("商店", click=lambda: _intent(on_shop)))
     title = npc_name if quests or accepted else f"{npc_name} · 要去哪里？"
@@ -82,10 +85,9 @@ def build_menu_conversation(npc_name: str, map_id: str,
     return Conversation(ConversationDef(title, "menu", steps))
 
 
-def _intent(fn: Callable, *args) -> None:
-    """登记意图的链接回调：执行 hook 并返回 None（结束本会话）。"""
-    fn(*args)
-    return None
+def _intent(fn: Callable, *args):
+    """登记意图的链接回调：执行 hook 并透传其返回的步名（None=结束本会话）。"""
+    return fn(*args)
 
 
 class NpcDialogueController:
@@ -298,8 +300,15 @@ class NpcDialogueController:
         self._conv_host = None
         self._conv_qid = None
 
-    def _request_warp(self, map_id: str) -> None:
+    def _request_warp(self, map_id: str, fare: int = 0) -> Optional[str]:
+        """出租车链接点击：先扣票价再登记切图；钱不够则提示并留在当前菜单步。"""
+        after = travel.pay_fare(self.ctx.world.combat.meso, fare)
+        if after is None:
+            self.ctx.windows.flash("金币不足")
+            return "menu"
+        self.ctx.world.combat.meso = after
         self._next_warp = map_id
+        return None
 
     def _request_shop(self) -> None:
         self._next_shop = True

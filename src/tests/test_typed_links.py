@@ -83,8 +83,8 @@ def open_conv(world, takeover: str = "on_business", *, teleports=None,
         _SRC % takeover, make_globals(host), ctx_view, title="T",
         services=ConvServices(quest_defs=defs,
                               teleports=teleports if teleports is not None
-                              else [("射手村", "100000000"),
-                                    ("魔法密林", "101000000")],
+                              else [("射手村", "100000000", 0),
+                                    ("魔法密林", "101000000", 800)],
                               has_shop=has_shop))
     conv._host = host  # 断言 pending_warp/pending_shop 用
     return conv
@@ -97,7 +97,7 @@ def labels(conv: Conversation):
 def test_quest_expansion_respects_prereq_and_travel_filter():
     """q2 被 prereq 挡住；travel 剔当前图；shop/手写链接恒在。"""
     conv = open_conv(make_world(make_defs()))
-    assert labels(conv) == ["接任务：收集蓝药水", "魔法密林", "商店", "chat"]
+    assert labels(conv) == ["接任务：收集蓝药水", "魔法密林  800金币", "商店", "chat"]
 
 
 def test_accept_click_shows_accept_yes():
@@ -125,7 +125,7 @@ def test_complete_link_reward_and_step():
     world = make_world(make_defs(), potions=2)
     open_conv(world).click_link(0)
     conv = open_conv(world)
-    assert labels(conv) == ["交付：收集蓝药水", "魔法密林", "商店", "chat"]
+    assert labels(conv) == ["交付：收集蓝药水", "魔法密林  800金币", "商店", "chat"]
     conv.click_link(0)
     assert world.player.quests.is_completed("q1")
     assert world.combat.meso == 1000
@@ -135,10 +135,31 @@ def test_complete_link_reward_and_step():
 def test_travel_click_registers_warp_and_ends():
     """点目的地：teleport 登记意图且会话结束。"""
     world = make_world(make_defs())
+    world.combat.meso = 800
     conv = open_conv(world)
     conv.click_link(1)                      # 魔法密林
     assert conv._host.pending_warp == "101000000"
     assert conv.done
+
+
+def test_travel_click_charges_fare():
+    """带票价目的地：点击扣票价后登记切图。"""
+    world = make_world(make_defs())
+    world.combat.meso = 1000
+    conv = open_conv(world)
+    conv.click_link(1)                      # 魔法密林（800 金币）
+    assert world.combat.meso == 200
+    assert conv._host.pending_warp == "101000000"
+
+
+def test_travel_click_refused_when_broke():
+    """余额不足：不扣钱、不登记切图。"""
+    world = make_world(make_defs())
+    world.combat.meso = 500
+    conv = open_conv(world)
+    conv.click_link(1)                      # 魔法密林（800 金币）
+    assert world.combat.meso == 500
+    assert conv._host.pending_warp is None
 
 
 def test_travel_subset_by_label():
@@ -160,9 +181,9 @@ return M
     conv = Conversation.from_source(
         src, make_globals(host), make_ctx_view(world.player, NPC, "T", MAP),
         services=ConvServices(quest_defs=host.quest_defs,
-                              teleports=[("射手村", "100000000"),
-                                         ("魔法密林", "101000000")]))
-    assert [l for l, _ in conv.current().links] == ["魔法密林"]
+                              teleports=[("射手村", "100000000", 0),
+                                         ("魔法密林", "101000000", 800)]))
+    assert [l for l, _ in conv.current().links] == ["魔法密林  800金币"]
     assert conv.has_business()
 
 

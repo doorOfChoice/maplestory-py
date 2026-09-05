@@ -27,7 +27,7 @@ Target = Union[str, Callable[[], Optional[str]]]
 class ConvServices:
     """type 链接展开器需要的宿主数据源（开会话时由控制器注入）。"""
     quest_defs: Mapping[str, Any] = field(default_factory=dict)
-    teleports: List[Tuple[str, str]] = field(default_factory=list)  # (label, map_id)
+    teleports: List[Tuple[str, str, int]] = field(default_factory=list)  # (label, map_id, fare)
     has_shop: bool = False
 
 
@@ -389,19 +389,21 @@ def _expand_quest(item: Any, ctx_view: dict, env: Dict[str, Callable],
 
 def _expand_travel(item: Any, ctx_view: dict, env: Dict[str, Callable],
                    services: Optional[ConvServices]) -> List[Link]:
-    """{type="travel"[, label]} → 目的地蓝字（剔当前图），点击登记切图并结束。"""
+    """{type="travel"[, label]} → 目的地蓝字（剔当前图），点击付票价并登记切图。"""
     if services is None or "teleport" not in env:
         logging.warning("travel 链接缺少宿主数据/teleport 函数，跳过")
         return []
     want = item["label"]
-    dests = ([(lab, mid) for lab, mid in services.teleports
+    dests = ([(lab, mid, fare) for lab, mid, fare in services.teleports
               if lab == str(want)] if want is not None
              else list(services.teleports))
     cur = str(ctx_view["player"]["map"])
-    return [Link(lab, show=lambda mid=mid: str(mid) != cur,
-                 click=lambda mid=mid: (env["teleport"](mid), None)[1],
+    return [Link(f"{lab}  {fare}金币" if fare else lab,
+                 show=lambda mid=mid: str(mid) != cur,
+                 click=lambda mid=mid, fare=fare:
+                 (env["teleport"](mid, fare), None)[1],
                  business=True)
-            for lab, mid in dests]
+            for lab, mid, fare in dests]
 
 
 def _expand_shop(item: Any, env: Dict[str, Callable],

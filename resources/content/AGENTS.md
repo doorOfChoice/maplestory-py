@@ -91,7 +91,7 @@ end
 | type | 必填/可选字段 | 展开为 | 数据来源 |
 |---|---|---|---|
 | `quest` | `qid` | 「接任务：⟨name⟩ Lv⟨lvmin⟩」+「交付：⟨name⟩」两行 + `<qid>_accepted/_rewarded/_notyet` 终态步 | QuestDef：显隐按 can_start/can_complete（**prereq、lvmin 是唯一前置来源**），文案取 Say 槽 `accept_yes`/`complete_yes`/`complete_stop` |
-| `travel` | 可选 `label`（指名单个目的地） | 每个目的地一行，点击 `teleport(map)` 并结束；自动剔除玩家当前图 | entries() 的 teleport 条目注册表 |
+| `travel` | 可选 `label`（指名单个目的地） | 每个目的地一行（有票价时文案追加「N金币」），点击 `teleport(map, fare)` 并结束；自动剔除玩家当前图 | entries() 的 teleport 条目注册表 |
 | `shop` | 可选 `label`（缺省「商店」） | 一行，点击登记开店并结束 | 本 NPC 有货架才展开 |
 
 - 展开生成的 `busy` 步（接取被拒的兜底）脚本可在 `steps` 里同名覆盖。
@@ -161,7 +161,7 @@ end
 | 函数 | 参数 | 返回 | 说明 |
 |---|---|---|---|
 | `give_reward(exp, meso, items)` | number/table | boolean | 直接发奖：经验、金币、物品；参数可省略。`items` 为 `[[item_id, count], ...]`，`count` 负数 = 收回 |
-| `teleport(map_id)` | string/number | boolean | 登记切图请求；本次交互后会话关闭并由宿主执行切图 |
+| `teleport(map_id[, fare])` | string/number | boolean | 先付 `fare` 金币（缺省 0；余额不足返回 false 且不切图），再登记切图请求；本次交互后会话关闭并由宿主执行切图 |
 
 ### 任务（NPC 会话注册：宿主携带 `world` + `quest_defs`）
 | 函数 | 参数 | 返回 | 说明 |
@@ -257,14 +257,14 @@ end
 ```lua
 function M.entries(ctx)
   return {
-    { type = "teleport", label = "射手村",   map = "100000000" },
+    { type = "teleport", label = "射手村",   map = "100000000", fare = 1000 },
     { type = "teleport", label = "魔法密林", map = "101000000" },
   }
 end
 ```
 
 - Lua 是传送目的地的**唯一事实来源**：Python 不再持有出租车名单或目的地表。
-- `label` 为菜单显示名，`map` 为目标地图 id（字符串）。
+- `label` 为菜单显示名，`map` 为目标地图 id（字符串），`fare` 为票价金币（可选，缺省 0=免费）。
 - 不写 `talk()` 时目的地进默认会话蓝字列表（自动剔除玩家当前图）；
   写了 `talk()` 则在链接里自己调 `teleport(map)`。
 - 玩家点选后经 `Game._enter_map` 切图，落在目标图的 `sp` 出生门。

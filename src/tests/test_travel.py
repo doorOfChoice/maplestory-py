@@ -1,7 +1,7 @@
 """地图通行纯函数：传送门目标解析、触发方式分类、可用性过滤（合成数据，不依赖 WZ）。"""
 from __future__ import annotations
 
-from game.core.travel import (NO_TARGET, portal_hidden, portal_target,
+from game.core.travel import (NO_TARGET, pay_fare, portal_hidden, portal_target,
                               portal_trigger, scroll_target, usable_portals)
 
 
@@ -84,3 +84,21 @@ def test_scroll_target_resolves_sentinel_to_return_map():
 def test_scroll_target_without_return_map_is_none():
     assert scroll_target(NO_TARGET, 0) is None
     assert scroll_target(NO_TARGET, None) is None
+
+
+# ── 出租车票价 ──────────────────────────────────────────────────────
+
+def test_pay_fare_deducts_when_affordable():
+    """余额足够：回传扣费后的余额。"""
+    assert pay_fare(1500, 1000) == 500
+
+
+def test_pay_fare_zero_is_free():
+    """票价 0 恒放行，余额不变。"""
+    assert pay_fare(0, 0) == 0
+
+
+def test_pay_fare_rejects_when_short():
+    """余额不足（哪怕差 1）回 None，表示拒绝且不应扣费。"""
+    assert pay_fare(999, 1000) is None
+    assert pay_fare(0, 1) is None

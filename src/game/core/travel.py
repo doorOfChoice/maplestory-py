@@ -83,20 +83,29 @@ def scroll_target(move_to: int, return_map) -> Optional[str]:
 
 # ── NPC 传送目的地（由 content/npc/*.lua 的 entries() 注册）──────────
 
-# npc_id → [(目的地名, 地图 id), ...]；出租车等传送 NPC 的唯一事实来源在 Lua
-_NPC_TELEPORTS: Dict[str, List[Tuple[str, str]]] = {}
+# npc_id → [(目的地名, 地图 id, 票价), ...]；出租车等传送 NPC 的唯一事实来源在 Lua
+_NPC_TELEPORTS: Dict[str, List[Tuple[str, str, int]]] = {}
 
 
-def register_teleports(npc_id: str, dests: List[Tuple[str, str]]) -> None:
+def register_teleports(npc_id: str,
+                       dests: List[Tuple[str, str, int]]) -> None:
     """登记某 NPC 的传送目的地（启动期由 lua_quests 调用）。"""
     _NPC_TELEPORTS[str(npc_id)] = list(dests)
 
 
 def teleports_of(npc_id: str,
-                 current_map: Optional[str] = None) -> List[Tuple[str, str]]:
-    """该 NPC 的目的地 (名字, 地图 id)；玩家已在某图时剔除该图。"""
-    return [(name, mid) for name, mid in _NPC_TELEPORTS.get(str(npc_id), [])
-            if mid != current_map]
+                 current_map: Optional[str] = None,
+                 ) -> List[Tuple[str, str, int]]:
+    """该 NPC 的目的地 (名字, 地图 id, 票价)；玩家已在某图时剔除该图。"""
+    return [(name, mid, fare) for name, mid, fare
+            in _NPC_TELEPORTS.get(str(npc_id), []) if mid != current_map]
+
+
+def pay_fare(meso: int, fare: int) -> Optional[int]:
+    """支付票价：余额足够回传扣费后的余额，不足回 None（调用方据此拒绝传送）。"""
+    if fare <= 0:
+        return meso
+    return meso - fare if meso >= fare else None
 
 
 def clear_teleports() -> None:

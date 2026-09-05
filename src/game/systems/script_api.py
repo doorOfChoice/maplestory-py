@@ -52,8 +52,13 @@ def make_globals(ctx: Any) -> Dict[str, Callable]:
     if world is not None:
         from game.systems.quests import QuestLog
 
-        def teleport(map_id) -> bool:
-            """登记切图请求：解释器结束会话后由宿主执行。"""
+        def teleport(map_id, fare=0) -> bool:
+            """登记切图请求：先付票价（余额不足回 False 不切图），解释器结束后由宿主执行。"""
+            from game.core.travel import pay_fare
+            after = pay_fare(world.combat.meso, int(fare or 0))
+            if after is None:
+                return False
+            world.combat.meso = after
             ctx.pending_warp = str(map_id)
             return True
 

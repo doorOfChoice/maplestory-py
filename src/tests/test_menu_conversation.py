@@ -10,7 +10,7 @@ def build(quests=(), dests=(), accepted=(), has_shop=False):
     conv = build_menu_conversation(
         "托德", "100000000", list(quests), list(dests), list(accepted), has_shop,
         on_quest=lambda q: hit["quest"].append(q.qid),
-        on_teleport=lambda m: hit["teleport"].append(m),
+        on_teleport=lambda m, fare: hit["teleport"].append((m, fare)),
         on_shop=lambda: hit["shop"].append(1),
     )
     return conv, hit
@@ -28,8 +28,10 @@ def test_menu_link_order_completes_first_then_offers_then_accepted():
 
 
 def test_menu_excludes_current_map_teleport():
-    conv, _ = build(dests=[("射手村", "100000000"), ("魔法密林", "101000000")])
-    assert [l for l, _ in conv.current().links] == ["魔法密林"]
+    """当前图目的地剔除；有票价的把价格写进链接文案。"""
+    conv, _ = build(dests=[("射手村", "100000000", 1000),
+                           ("魔法密林", "101000000", 800)])
+    assert [l for l, _ in conv.current().links] == ["魔法密林  800金币"]
 
 
 def test_menu_shop_link_appended_last():
@@ -48,7 +50,7 @@ def test_click_quest_link_fires_hook_and_ends_menu():
     assert conv.done
 
 
-def test_click_teleport_fires_hook_with_map():
-    conv, hit = build(dests=[("魔法密林", "101000000")])
+def test_click_teleport_fires_hook_with_map_and_fare():
+    conv, hit = build(dests=[("魔法密林", "101000000", 800)])
     conv.click_link(0)
-    assert hit["teleport"] == ["101000000"]
+    assert hit["teleport"] == [("101000000", 800)]
