@@ -148,6 +148,26 @@ def defense(stats: Mapping[str, int], equip_pdd: int) -> int:
     return equip_pdd + stats["dex"] // 10
 
 
+def magic_attack(stats: Mapping[str, int], mad: int) -> int:
+    """魔法力（面板）：武器 MAD × (2×INT + LUK) / 100（经典法伤折算）。"""
+    return int((2 * stats["int"] + stats["luk"]) * mad / 100.0)
+
+
+def magic_defense(stats: Mapping[str, int], equip_mdd: int) -> int:
+    """魔法防御：装备 MDD 总和 + INT//10（与物防的 DEX//10 对称）。"""
+    return equip_mdd + stats["int"] // 10
+
+
+def accuracy(stats: Mapping[str, int], equip_acc: int, skill_acc: int = 0) -> int:
+    """命中率：DEX//2 + 装备 ACC 总和 + 被动/buff 加值。"""
+    return stats["dex"] // 2 + equip_acc + skill_acc
+
+
+def evasion(stats: Mapping[str, int], equip_eva: int) -> int:
+    """回避率：LUK//2 + 装备 EVA 总和。"""
+    return stats["luk"] // 2 + equip_eva
+
+
 def exp_to_next(level: int) -> int:
     """升到下一级所需经验（官方逐级表；越界用表尾 × 增长率近似）。"""
     if level < 1:

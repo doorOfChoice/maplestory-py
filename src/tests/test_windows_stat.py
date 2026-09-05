@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import List
 
 from game.core.jobs import JOBS
-from game.render.windows.stat import StatWindow
+from game.render.windows.stat import DETAIL_ROWS, StatWindow
 from tests.windows_harness import (close_button_pos, draw_once, make_manager,
                                    make_services, press, release)
 
@@ -28,6 +28,10 @@ def make_player(ap: int = 0, alloc_ok: bool = True, auto_ok: bool = True):
         ap=ap, level=12, hp=77.5, max_hp=120, mp=31.25, max_mp=60,
         exp=1234, exp_to_next=lambda: 4321,
         attack_value=lambda: 120, defense_value=lambda: 45,
+        magic_attack_value=lambda: 88, magic_defense_value=lambda: 30,
+        accuracy_value=lambda: 95, evasion_value=lambda: 12,
+        attack_speed_value=lambda: 4, move_speed_display=lambda: 100,
+        jump_power_display=lambda: 100,
         total_stats=lambda: {"str": 25, "dex": 20, "int": 4, "luk": 6},
         inventory=SimpleNamespace(bonus=lambda st: 3 if st == "str" else 0),
         job=next(iter(JOBS)),
@@ -119,26 +123,17 @@ def test_detail_button_toggles_popup_open_close():
     assert not win._detail
 
 
-def test_detail_popup_reads_attack_and_defense():
-    """详情弹窗打开时，绘制读取攻击力与物理防御力合计。"""
+def test_detail_popup_reads_all_nine_rows():
+    """详情弹窗打开时，逐行读取全部九项战斗数值；关闭时一概不读。"""
     seen: List[str] = []
-
-    def atk() -> int:
-        seen.append("atk")
-        return 120
-
-    def dfe() -> int:
-        seen.append("def")
-        return 45
-
     player = make_player(ap=8)
-    player.attack_value = atk
-    player.defense_value = dfe
+    for _key, _label, getter in DETAIL_ROWS:
+        setattr(player, getter, lambda g=getter: (seen.append(g), 1)[1])
     win, mgr = open_stat(player)
     assert seen == []                       # 关闭时不读战斗数值
     press(mgr, win._detail_rect.center)     # 打开详情
     draw_once(mgr)                          # 重建热区并绘制弹窗
-    assert seen == ["atk", "def"]
+    assert seen == [g for _k, _l, g in DETAIL_ROWS]
 
 
 def test_detail_popup_click_consumed_without_action():

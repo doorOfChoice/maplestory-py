@@ -248,6 +248,41 @@ class Player:
             + self.skills.passive_mods().get("def", 0) \
             + self.buffs.mod_sum("def")
 
+    def magic_attack_value(self) -> int:
+        """魔法力（面板）：武器 MAD × (2×INT + LUK) / 100。"""
+        return stats_mod.magic_attack(self.total_stats(),
+                                      self.inventory.stat_sum("incMAD"))
+
+    def magic_defense_value(self) -> int:
+        """魔法防御：装备 MDD 总和 + INT//10。"""
+        return stats_mod.magic_defense(self.total_stats(),
+                                       self.inventory.stat_sum("incMDD"))
+
+    def accuracy_value(self) -> int:
+        """命中率：DEX//2 + 装备 ACC + 被动/buff 加值。"""
+        extra = self.skills.passive_mods().get("acc", 0) \
+            + self.buffs.mod_sum("acc")
+        return stats_mod.accuracy(self.total_stats(),
+                                  self.inventory.stat_sum("incACC"), extra)
+
+    def evasion_value(self) -> int:
+        """回避率：LUK//2 + 装备 EVA。"""
+        return stats_mod.evasion(self.total_stats(),
+                                 self.inventory.stat_sum("incEVA"))
+
+    def attack_speed_value(self) -> int:
+        """攻击速度：武器 WZ speed 值（0 最快、越大越慢）；空手为 0。"""
+        weapon = self.inventory.equipped.get("weapon")
+        return weapon.stat("speed") if weapon is not None else 0
+
+    def move_speed_display(self) -> int:
+        """移动速度（面板 %）：100 + 装备 incSpeed 加成折算。"""
+        return int(100 * (1.0 + self._equip_speed_bonus("incSpeed")))
+
+    def jump_power_display(self) -> int:
+        """跳跃力（面板 %）：100 + 装备 incJump 加成折算。"""
+        return int(100 * (1.0 + self._equip_speed_bonus("incJump")))
+
     # ── 四维属性 ───────────────────────────────────────────────────
     def total_stats(self) -> dict:
         """四维合计 = 加点属性 + 装备词条 + 被动技能 + buff（str/dex/int/luk）。"""

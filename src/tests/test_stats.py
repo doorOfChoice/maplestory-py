@@ -4,7 +4,10 @@ from __future__ import annotations
 import random
 
 from game import settings
-from game.core.stats import allocate, attack, attack_range, auto_allocate, base_stats, defense, exp_to_next, max_hp, max_mp, roll_damage, wear_block
+from game.core.stats import (accuracy, allocate, attack, attack_range,
+                             auto_allocate, base_stats, defense, evasion,
+                             exp_to_next, magic_attack, magic_defense,
+                             max_hp, max_mp, roll_damage, wear_block)
 
 
 def test_allocate_adds_stat_and_consumes_ap():
@@ -102,6 +105,27 @@ def test_roll_damage_never_below_one():
 def test_defense_includes_dex_and_equipment():
     """防御 = 装备 PDD + DEX//10。"""
     assert defense({"str": 4, "dex": 50, "int": 4, "luk": 4}, 20) == 25
+
+
+def test_magic_attack_formula():
+    """魔法力 = (2×INT + LUK) × 武器 MAD / 100（经典法伤折算）。"""
+    assert magic_attack({"str": 4, "dex": 4, "int": 100, "luk": 10}, 30) == 63
+    assert magic_attack({"str": 4, "dex": 4, "int": 4, "luk": 4}, 0) == 0
+
+
+def test_magic_defense_includes_int_and_equipment():
+    """魔法防御 = 装备 MDD + INT//10。"""
+    assert magic_defense({"str": 4, "dex": 4, "int": 50, "luk": 4}, 20) == 25
+
+
+def test_accuracy_includes_dex_equipment_skill():
+    """命中 = DEX//2 + 装备 ACC 总和 + 被动/buff 加值。"""
+    assert accuracy({"str": 4, "dex": 40, "int": 4, "luk": 4}, 20, 5) == 45
+
+
+def test_evasion_includes_luk_and_equipment():
+    """回避 = LUK//2 + 装备 EVA 总和。"""
+    assert evasion({"str": 4, "dex": 4, "int": 4, "luk": 30}, 4) == 19
 
 
 def test_exp_to_next_official_table():

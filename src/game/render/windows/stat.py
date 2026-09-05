@@ -5,7 +5,7 @@ BtDetail「詳細說明」详情弹窗。
 manager 下一帧命中回放。像素数字走 widgets.PixelNumbers（StatusBar/number），
 素材缺失整体回退旧自绘面板（210×250，锚点同旧 panels._draw_stat_fallback）。
 「詳細說明」弹窗用官方 Stat/backgrnd2（184×203）烘焙的九行战斗数值标签，
-现只填 攻擊力/物理防禦力 两行（其余留白待补）。
+九行全部读取 Player 面板 getter（魔法/命中/回避为折算公式，详见 stats.py）。
 坐标约定：事件 pos 为内部视口（VIEW）坐标。
 """
 
@@ -39,6 +39,18 @@ DETAIL_W, DETAIL_H = 184, 203
 DETAIL_ROW_Y = {"atk": 15, "pdd": 33, "mad": 51, "mdd": 69,
                 "acc": 87, "eva": 105, "spd": 123, "move": 141, "jump": 160}
 DETAIL_VALUE_X = 176                 # 数值右缘（右对齐）
+# 九行 → (自绘兜底中文标签, Player 面板 getter)
+DETAIL_ROWS: Tuple[Tuple[str, str, str], ...] = (
+    ("atk", "攻击力", "attack_value"),
+    ("pdd", "物理防御", "defense_value"),
+    ("mad", "魔法力", "magic_attack_value"),
+    ("mdd", "魔法防御", "magic_defense_value"),
+    ("acc", "命中率", "accuracy_value"),
+    ("eva", "回避率", "evasion_value"),
+    ("spd", "攻击速度", "attack_speed_value"),
+    ("move", "移动速度", "move_speed_display"),
+    ("jump", "跳跃力", "jump_power_display"),
+)
 
 FB_W, FB_H = 210, 250                # 素材缺失时的自绘窗尺寸
 NO_AP_TEXT = "没有可分配的属性点"
@@ -168,7 +180,7 @@ class StatWindow(Window):
         self._swallow_detail(surface)
 
     def _draw_detail(self, surface, player, fs) -> None:
-        """「詳細說明」弹窗：官方 Stat/backgrnd2 底图，填 攻擊力/物理防禦力。"""
+        """「詳細說明」弹窗：官方 Stat/backgrnd2 底图，填九行战斗数值。"""
         self._detail_popup_rect = None
         if not self._detail:
             return
@@ -181,9 +193,9 @@ class StatWindow(Window):
             self._draw_detail_fallback(surface, player, fs, dx, dy)
             return
         surface.blit(bg, (dx, dy))
-        for key, val in (("atk", player.attack_value()),
-                         ("pdd", player.defense_value())):
-            self._draw_detail_value(surface, fs, dx, dy, DETAIL_ROW_Y[key], val)
+        for key, _label, getter in DETAIL_ROWS:
+            self._draw_detail_value(surface, fs, dx, dy,
+                                    DETAIL_ROW_Y[key], getattr(player, getter)())
 
     def _draw_detail_value(self, surface, fs, dx: int, dy: int,
                            ry: int, val: int) -> None:
@@ -203,13 +215,13 @@ class StatWindow(Window):
             self.rect = self.rect.union(self._detail_popup_rect)
 
     def _draw_detail_fallback(self, surface, player, fs, dx: int, dy: int) -> None:
-        """素材缺失时的自绘详情弹窗（只列已实现的攻击/防御两行）。"""
+        """素材缺失时的自绘详情弹窗（同九行，逐行「标签 数值」）。"""
         widgets.panel_frame(surface, pygame.Rect(dx, dy, DETAIL_W, DETAIL_H))
-        ty = dy + 18
-        for ln in (f"攻击力  {player.attack_value()}",
-                   f"物理防御力  {player.defense_value()}"):
-            surface.blit(fs.render(ln, True, (230, 225, 210)), (dx + 12, ty))
-            ty += 24
+        ty = dy + 10
+        for _key, label, getter in DETAIL_ROWS:
+            surface.blit(fs.render(f"{label}  {getattr(player, getter)()}",
+                                   True, (230, 225, 210)), (dx + 12, ty))
+            ty += 20
 
     def _draw_fallback(self, surface, player, fs) -> None:
         """素材缺失时的自绘状态窗（含加点按钮热区）。"""
