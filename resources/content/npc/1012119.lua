@@ -7,14 +7,40 @@ function M.shops()
       shop_id = "potions",
       name = "药水",
       items = {
+        {item_id = "02000002", price = 20},
+        {item_id = "02000001", price = 30},
         {item_id = "02000000", price = 50},
         {item_id = "02000003", price = 300},
-        {item_id = "02000001", price = 30},
-        {item_id = "02000002", price = 20},
-        {item_id = "02000002", price = 20},
-        {item_id = "02000002", price = 20},
-        {item_id = "02000002", price = 20},
-        {item_id = "02000002", price = 20},
+        {item_id = "02000004", price = 500},
+        {item_id = "02000005", price = 1000},
+        {item_id = "02000006", price = 1500},
+        {item_id = "02000015", price = 600},
+        {item_id = "02000016", price = 400},
+        {item_id = "02000017", price = 800},
+        {item_id = "02000018", price = 1800},
+      }
+    },
+    {
+      shop_id = "cures",
+      name = "状态药",
+      items = {
+        {item_id = "02050000", price = 100},
+        {item_id = "02050001", price = 100},
+        {item_id = "02050002", price = 100},
+        {item_id = "02050003", price = 150},
+        {item_id = "02050004", price = 300},
+      }
+    },
+    {
+      shop_id = "foods",
+      name = "点心",
+      items = {
+        {item_id = "02022000", price = 100},
+        {item_id = "02022002", price = 150},
+        {item_id = "02022003", price = 300},
+        {item_id = "02022016", price = 1000},
+        {item_id = "02022024", price = 200},
+        {item_id = "02022131", price = 500},
       }
     },
     {

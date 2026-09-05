@@ -13,8 +13,8 @@ from game.render.windows.storage import CELL, STORAGE_COLS, StorageWindow
 from game.render.windows.core.services import WindowServices
 from game.systems.inventory import Inventory, Item
 from game.systems.shop import register_lua_shop, register_shop_profile
-from tests.windows_harness import (FakeUI, draw_once, make_manager, motion,
-                                   press, release, wheel)
+from tests.windows_harness import (FakeUI, draw_once, key_press, make_manager,
+                                   motion, press, release, wheel)
 
 pygame.init()
 
@@ -117,6 +117,8 @@ def test_shop_select_row_then_buy_adds_item_and_charges():
     draw_once(mgr)
     assert win.sel_shelf == 0
     _click(mgr, win.buy_rect.center)
+    _type_digits(mgr, "1")
+    assert key_press(mgr, pygame.K_RETURN)
     assert combat.meso < 10000
     assert any(it.name for it in player.inventory.consumes.values())
     assert mgr._toast is not None and mgr._toast[0].startswith("购入")
@@ -135,9 +137,195 @@ def test_shop_sell_selected_bag_stack_credits_meso():
     _click(mgr, rect.center)
     assert win.sel_bag == 0
     _click(mgr, win.sell_rect.center)
+    _type_digits(mgr, "1")
+    assert key_press(mgr, pygame.K_RETURN)
     assert combat.meso > 10000
     assert sold_id not in player.inventory.consumes
     assert mgr._toast[0].startswith("卖出")
+
+
+# ── 商店：数量输入框（原版弹框买卖）────────────────────────────────
+def _type_digits(mgr, digits: str) -> None:
+    for ch in digits:
+        assert key_press(mgr, getattr(pygame, f"K_{ch}"))
+
+
+def test_shop_buy_consumable_opens_dialog_then_confirms():
+    """买消耗品：点「购买」弹数量框 → 输 3 确认 → 扣 3 倍单价、入包堆 3。"""
+    win, mgr, player, combat = _shop_window()
+    _click(mgr, (_shelf_x(win), _first_row_y(win)))     # 02900000 · 100 金币
+    draw_once(mgr)
+    _click(mgr, win.buy_rect.center)
+    assert win.qty_mode == "buy"
+    draw_once(mgr)                                      # 弹框登记热区
+    _type_digits(mgr, "3")
+    assert win.qty_text == "3"
+    _click(mgr, win.qty_ok_rect.center)
+    assert combat.meso == 10000 - 300
+    assert player.inventory.consumes["02900000"].count == 3
+    assert win.qty_mode is None
+
+
+def test_shop_buy_dialog_cancel_keeps_everything():
+    """数量框点「取消」：关闭弹框、不成交、金币背包不动。"""
+    win, mgr, player, combat = _shop_window()
+    _click(mgr, (_shelf_x(win), _first_row_y(win)))
+    draw_once(mgr)
+    _click(mgr, win.buy_rect.center)
+    draw_once(mgr)
+    _type_digits(mgr, "5")
+    _click(mgr, win.qty_cancel_rect.center)
+    assert win.qty_mode is None
+    assert combat.meso == 10000
+    assert "02900000" not in player.inventory.consumes
+
+
+def test_shop_buy_dialog_esc_and_backspace():
+    """数量框吃 Esc 收起（不关商店窗）；退格删一位数字。"""
+    win, mgr, _player, combat = _shop_window()
+    _click(mgr, (_shelf_x(win), _first_row_y(win)))
+    draw_once(mgr)
+    _click(mgr, win.buy_rect.center)
+    assert win.visible
+    _type_digits(mgr, "12")
+    assert key_press(mgr, pygame.K_BACKSPACE)
+    assert win.qty_text == "1"
+    assert key_press(mgr, pygame.K_ESCAPE)
+    assert win.qty_mode is None
+    assert win.visible
+    assert combat.meso == 10000
+
+
+def test_shop_buy_dialog_enter_confirms():
+    """弹框内按回车等同点「确认」。"""
+    win, mgr, player, combat = _shop_window()
+    _click(mgr, (_shelf_x(win), _first_row_y(win)))
+    draw_once(mgr)
+    _click(mgr, win.buy_rect.center)
+    _type_digits(mgr, "2")
+    assert key_press(mgr, pygame.K_RETURN)
+    assert player.inventory.consumes["02900000"].count == 2
+    assert combat.meso == 10000 - 200
+
+
+def test_shop_buy_dialog_empty_or_zero_rejected():
+    """空 / 0 确认：提示输入数量、弹框不关、不成交。"""
+    win, mgr, _player, combat = _shop_window()
+    _click(mgr, (_shelf_x(win), _first_row_y(win)))
+    draw_once(mgr)
+    _click(mgr, win.buy_rect.center)
+    draw_once(mgr)
+    _click(mgr, win.qty_ok_rect.center)
+    assert win.qty_mode == "buy"
+    assert combat.meso == 10000
+
+
+def test_shop_buy_unaffordable_quantity_fails_with_flash():
+    """输入数量超出承受：确认失败提示、弹框收起、分文不动。"""
+    win, mgr, _player, combat = _shop_window(meso=250)
+    _click(mgr, (_shelf_x(win), _first_row_y(win)))     # 单价 100
+    draw_once(mgr)
+    _click(mgr, win.buy_rect.center)
+    _type_digits(mgr, "99")
+    assert key_press(mgr, pygame.K_RETURN)
+    assert combat.meso == 250
+    assert win.qty_mode is None
+    assert mgr._toast is not None
+
+
+def test_shop_sell_stack_opens_dialog_partial_sell():
+    """卖消耗品堆：点「出售」弹数量框 → 输 2 → 卖半堆留 3、金币按 2 件计。"""
+    from game.systems import shop as shop_mod
+    win, mgr, player, combat = _shop_window()
+    it = player.inventory.consumes["02800000"]
+    it.count = 5
+    draw_once(mgr)
+    _click(mgr, win.bag_rects[0][0].center)
+    draw_once(mgr)
+    _click(mgr, win.sell_rect.center)
+    assert win.qty_mode == "sell"
+    _type_digits(mgr, "2")
+    assert key_press(mgr, pygame.K_RETURN)
+    unit = shop_mod.sell_price(400)
+    assert it.count == 3
+    assert combat.meso == 10000 + 2 * unit
+
+
+def test_shop_sell_dialog_clamps_to_stack_count():
+    """卖出数量大于堆存量：按整堆封顶全卖光。"""
+    from game.systems import shop as shop_mod
+    win, mgr, player, combat = _shop_window()
+    player.inventory.consumes["02800000"].count = 5
+    draw_once(mgr)
+    _click(mgr, win.bag_rects[0][0].center)
+    draw_once(mgr)
+    _click(mgr, win.sell_rect.center)
+    _type_digits(mgr, "99")
+    assert key_press(mgr, pygame.K_RETURN)
+    assert "02800000" not in player.inventory.consumes
+    assert combat.meso == 10000 + 5 * shop_mod.sell_price(400)
+
+
+def test_shop_double_click_shelf_stack_opens_buy_dialog():
+    """双击货架消耗品行：直接弹购买数量框（免点「购买」）。"""
+    win, mgr, _player, _combat = _shop_window()
+    pos = (_shelf_x(win), _first_row_y(win))
+    _click(mgr, pos)
+    assert win.qty_mode is None                # 单击只选中
+    _click(mgr, pos)
+    assert win.qty_mode == "buy"
+
+
+def test_shop_double_click_bag_stack_opens_sell_dialog():
+    """双击背包消耗品行：直接弹出售数量框。"""
+    win, mgr, player, _combat = _shop_window()
+    rect = win.bag_rects[0][0]
+    _click(mgr, rect.center)
+    assert win.qty_mode is None
+    _click(mgr, rect.center)
+    assert win.qty_mode == "sell"
+
+
+def test_shop_double_click_equip_row_no_dialog():
+    """双击装备行不弹数量框（装备走单击 +「购买」直接成交）。"""
+    from game.systems.shop import register_shop_profile
+    win, mgr, _player, _combat = _shop_window()
+    register_shop_profile("wheelshop", "杂货",
+                          [("01452000", 5000)] + [(i, 100) for i in win._shelf_items()[1:]])
+    win.sel_shelf = None
+    draw_once(mgr)
+    pos = win.shelf_rects[0][0].center
+    _click(mgr, pos)
+    _click(mgr, pos)
+    assert win.qty_mode is None
+    assert win.sel_shelf == 0
+
+
+def test_shop_slow_reclick_is_not_double_click():
+    """超过双击间隔的再点只重新选中，不弹框。"""
+    import time
+    win, mgr, _player, _combat = _shop_window()
+    pos = (_shelf_x(win), _first_row_y(win))
+    _click(mgr, pos)
+    time.sleep(0.4)
+    _click(mgr, pos)
+    assert win.qty_mode is None
+
+
+def test_shop_buy_equip_skips_dialog():
+    """装备不可堆叠：点购买直接按 1 件成交，不弹数量框。"""
+    from game.systems.shop import register_shop_profile
+    win, mgr, player, combat = _shop_window()
+    register_shop_profile("wheelshop", "杂货",
+                          [("01452000", 5000)] + [(i, 100) for i in win._shelf_items()[1:]])
+    win.sel_shelf = None
+    draw_once(mgr)
+    _click(mgr, win.shelf_rects[0][0].center)
+    draw_once(mgr)
+    _click(mgr, win.buy_rect.center)
+    assert win.qty_mode is None
+    assert combat.meso == 10000 - 5000
+    assert len(player.inventory.equips) == 1
 
 
 # ── 商店：关闭路径 ─────────────────────────────────────────────────

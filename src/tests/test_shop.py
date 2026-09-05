@@ -78,6 +78,7 @@ def test_sell_single_equip():
 
 def test_shops_of_merchant_npc():
     """注册了商店的行商可开三家店；未注册 NPC 无商店。"""
+    _setup_merchant()  # 其它测试可能加载真实脚本覆盖注册表，这里显式重建
     assert shops_of("1012119") == ["potions", "weapons", "scrolls"]
     assert shops_of("1012110") == []
 

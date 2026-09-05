@@ -219,6 +219,22 @@ class Inventory:
                 return cur
         return None
 
+    def take_units(self, item_id: str, count: int) -> Optional[Item]:
+        """取出堆中 count 个（不足则整堆）；不存在或数量非法返回 None。"""
+        if count <= 0:
+            return None
+        for table in (self.consumes, self.etcs):
+            cur = table.get(item_id)
+            if cur is None:
+                continue
+            n = min(count, cur.count)
+            cur.count -= n
+            if cur.count <= 0:
+                del table[item_id]
+            return Item(id=cur.id, name=cur.name, count=n, kind=cur.kind,
+                        info=dict(cur.info))
+        return None
+
     def pop_equip(self, index: int) -> Optional[Item]:
         """取出背包中第 index 件散件装备。"""
         if 0 <= index < len(self.equips):

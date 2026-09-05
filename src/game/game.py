@@ -254,6 +254,9 @@ class Game:
                     elif event.key == pygame.K_BACKSPACE:
                         self.chat.backspace()
                     continue
+                # 窗口内录入态（商店数量框等）优先吃键，模态期间屏蔽动作
+                if self.ctx.windows.dispatch_key(event.key):
+                    continue
                 # Esc 固定为关闭：按键设置窗 / 商店 / 仓库（自顶向下首个）
                 if event.key == pygame.K_ESCAPE:
                     if self.ctx.windows.handle_escape():
