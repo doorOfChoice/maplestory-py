@@ -90,10 +90,10 @@ def test_inventory_to_from_dict_roundtrip():
     d = inv.to_dict()
     assert d["consumes"] == {"2000000": 12}
     assert d["etcs"] == {"4000003": 5}
-    assert d["equips"] == [{"id": "01040000", "extra": {}, "tuc": 0}]
+    assert d["equips"] == [{"id": "01040000", "info": {}, "extra": {}, "tuc": 0}]
     assert d["equipped"] == {
-        "weapon": {"id": "01302000", "extra": {}, "tuc": 0},
-        "top": {"id": "01060000", "extra": {}, "tuc": 0},
+        "weapon": {"id": "01302000", "info": {}, "extra": {}, "tuc": 0},
+        "top": {"id": "01060000", "info": {}, "extra": {}, "tuc": 0},
     }
 
     inv2 = Inventory.from_dict(d, assets=None)

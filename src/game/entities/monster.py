@@ -16,6 +16,7 @@ from game import settings
 from game.core.animation import Animation
 from game.render.assets import Assets
 from game.systems.combat import roll_damage
+from game.systems.drops import scaled_equip_rate
 
 
 def parse_mob_status_skills(skill_node) -> List[Tuple[str, int, int]]:
@@ -370,6 +371,8 @@ class Monster:
             item_id = str(drop.get("id") or "")
             rate = settings.DROP_ITEM_RATE.get(
                 item_id[:1], settings.DROP_ITEM_DEFAULT_RATE)
+            if item_id.startswith("1"):
+                rate = scaled_equip_rate(rate)
             if random.random() < rate:
                 return drop
         return None

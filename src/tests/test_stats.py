@@ -137,3 +137,25 @@ def test_wear_block_level_and_stats():
 def test_wear_block_no_requirements():
     """无需求装备永远可穿。"""
     assert wear_block({}, 1, base_stats()) is None
+
+
+def test_wear_block_req_job_bitmask():
+    """reqJob 位掩码：1战/2法/4弓/8盗/16海盗，仅对应职业组可穿。"""
+    info = {"reqJob": 1}
+    assert wear_block(info, 10, base_stats(), job=1100) is None   # 战士系可穿
+    block = wear_block(info, 10, base_stats(), job=2210)           # 法师系被拦
+    assert block is not None and "战士" in block
+
+
+def test_wear_block_req_job_beginner_excluded():
+    """新手（job 0 系）不能穿任何限定职业装备。"""
+    assert wear_block({"reqJob": 2}, 10, base_stats(), job=0) is not None
+    assert wear_block({"reqJob": 0}, 10, base_stats(), job=0) is None
+
+
+def test_wear_block_req_job_multi_group():
+    """多职业共用装备（如 1|2）对其中任一职业组放行。"""
+    info = {"reqJob": 1 | 4}
+    assert wear_block(info, 10, base_stats(), job=1300) is None
+    assert wear_block(info, 10, base_stats(), job=3300) is None
+    assert wear_block(info, 10, base_stats(), job=4200) is not None

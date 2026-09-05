@@ -26,6 +26,7 @@ from game.render.cursor import GameCursor
 from game.render.effects import Effect
 from game.render.ui import KEY_BUTTON_WINDOWS
 from game.systems import gm
+from game.systems.drops import set_equip_drop_mult
 from game.systems.gm import GmContext
 from game.core.life_index import collect_life_ids
 from game.systems.quests import (filter_world_quest_defs, load_quest_defs,
@@ -174,7 +175,7 @@ class Game:
         self.chat_view = ChatView()
         self.combat_log_view = CombatLogView()
         self.gm_ctx = GmContext(warp=self._gm_warp, heal=self._gm_heal,
-                                meso=self._gm_meso)
+                                meso=self._gm_meso, drop_rate=self._gm_drop_rate)
         self._dialogue = NpcDialogueController(self.ctx, self.quest_defs)
         # 出租车菜单点选目的地 → 走与传送门同一套切图加载（落目标图出生门）
         self._dialogue.warp = lambda map_id: self._enter_map(map_id, None)
@@ -396,6 +397,10 @@ class Game:
     def _gm_meso(self, amount: int) -> Tuple[str, str]:
         self.ctx.world.combat.meso += amount
         return ("system", f"获得金币 {amount}")
+
+    def _gm_drop_rate(self, mult: int) -> Tuple[str, str]:
+        set_equip_drop_mult(mult)
+        return ("system", f"装备掉落率已调整为 {mult} 倍")
 
     def _cast_skill(self, hotkey: int) -> None:
         """按技能槽施放（键位经 KeyBindings 解析成槽号）。

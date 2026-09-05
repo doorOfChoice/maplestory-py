@@ -21,6 +21,25 @@ from typing import Any, Dict, List, Optional, Set
 
 from game import settings
 
+# 装备掉落倍率（/droprate 指令设置，>=1）；只作用于装备（item 首位 1）行。
+_EQUIP_DROP_MULT = 1.0
+
+
+def set_equip_drop_mult(value: float) -> None:
+    """设置装备掉落倍率（>=1，来自 /droprate 指令）；持久到进程内存。"""
+    global _EQUIP_DROP_MULT
+    _EQUIP_DROP_MULT = max(1.0, float(value))
+
+
+def equip_drop_mult() -> float:
+    """读取当前装备掉落倍率（默认 1.0 = 无加成）。"""
+    return _EQUIP_DROP_MULT
+
+
+def scaled_equip_rate(base_rate: float) -> float:
+    """装备掉率 × 当前倍率，封顶 1.0（必掉）。"""
+    return min(1.0, base_rate * _EQUIP_DROP_MULT)
+
 
 @dataclass
 class DropRoll:
@@ -67,7 +86,10 @@ class OfficialDropTable:
             quest = int(row.get("quest", 0) or 0)
             if quest > 0 and str(quest) not in (active_quests or ()):
                 continue
-            if rng.randrange(1_000_000) >= int(row["chance"]):
+            chance = int(row["chance"])
+            if str(row["item"]).startswith("1"):
+                chance = min(1_000_000, chance * _EQUIP_DROP_MULT)
+            if rng.randrange(1_000_000) >= chance:
                 continue
             qty = rng.randint(int(row["min"]), int(row["max"]))
             if str(row["item"]) == "0":

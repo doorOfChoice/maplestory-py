@@ -19,6 +19,7 @@ from game import settings
 from game.core import stats as stats_mod
 from game.core.animation import Animation
 from game.core.combat_log import CombatLog
+from game.core.equip_roll import roll_drop_bonus
 from game.render.assets import Assets
 from game.render.effects import Effect
 from game.systems.drops import OfficialDropTable, load_official_table
@@ -147,7 +148,8 @@ class DropItem:
     def __init__(self, x: float, y: float, item: Optional[dict] = None,
                   meso: int = 0, ground_y: Optional[float] = None,
                   assets: Optional[Assets] = None,
-                  lifetime: Optional[float] = None, pickup_lock: float = 0.0):
+                  lifetime: Optional[float] = None, pickup_lock: float = 0.0,
+                  from_mob: bool = True):
         self.x = x
         self.y = y
         self.item = item
@@ -155,6 +157,7 @@ class DropItem:
         self.assets = assets
         self.life = settings.DROP_LIFETIME if lifetime is None else lifetime
         self.pickup_lock = pickup_lock   # 生成后短暂不可拾取（玩家扔出防瞬间捡回）
+        self.from_mob = from_mob         # 怪物掉落才随机基础属性；玩家扔出的不随机
         self.vx = random.uniform(-30, 30)
         self.vy = -120.0
         self.taken = False
@@ -337,10 +340,12 @@ class Arrow:
 
 class Combat:
     def __init__(self, assets: Assets,
-                 drop_table: Optional[OfficialDropTable] = None):
+                 drop_table: Optional[OfficialDropTable] = None,
+                 rng: Optional[random.Random] = None):
         self.assets = assets
         self.drop_table = drop_table if drop_table is not None \
             else load_official_table()
+        self.rng = rng if rng is not None else random
         self.numbers: List[DamageNumber] = []
         self.drops: List[DropItem] = []
         self.effects: List[object] = []      # 命中火花 / 升级特效等
@@ -585,6 +590,8 @@ class Combat:
             item = make_item(drop.item.get("id"), self.assets,
                              count=int(drop.item.get("count") or 1),
                              name=drop.item.get("name"))
+            if drop.from_mob and item.kind == "equip":
+                item.info.update(roll_drop_bonus(self.rng))
             if player.inventory.add(item):
                 drop.taken = True
                 self.combat_log.add_item(item.id, item.name or "", item.count)
@@ -629,7 +636,8 @@ class Combat:
         d = DropItem(player.x, player.y,
                      item={"id": item.id, "name": item.name, "count": item.count},
                      ground_y=ground, assets=self.assets,
-                     lifetime=settings.DROP_PLAYER_LIFETIME, pickup_lock=0.6)
+                     lifetime=settings.DROP_PLAYER_LIFETIME, pickup_lock=0.6,
+                     from_mob=False)
         d.vx = 0.0
         d.vy = settings.DROP_THROW_SPEED
         self.drops.append(d)

@@ -158,9 +158,18 @@ def exp_to_next(level: int) -> int:
     return int(EXP_TO_NEXT[top] * (EXP_TAIL_GROWTH ** (level - top)))
 
 
+# reqJob 位掩码（WZ 职业组）→ 职业名
+REQ_JOB_NAMES = {1: "战士", 2: "魔法师", 4: "弓箭手", 8: "飞侠", 16: "海盗"}
+
+
 def wear_block(info: Mapping[str, object], level: int,
-               stats: Mapping[str, int]) -> Optional[str]:
-    """穿戴门控：返回缺失原因提示；可穿返回 None。"""
+               stats: Mapping[str, int],
+               job: Optional[int] = None) -> Optional[str]:
+    """穿戴门控：返回缺失原因提示；可穿返回 None。
+
+    job 传玩家职业码（如 1200）；None 表示跳过职业检查。
+    reqJob 为位掩码（1战/2法/4弓/8盗/16海盗），新手不能穿任何限定装备。
+    """
     def req(key: str) -> int:
         try:
             return int(info.get(key) or 0)
@@ -168,6 +177,13 @@ def wear_block(info: Mapping[str, object], level: int,
             return 0
     if level < req("reqLevel"):
         return f"等级不足（需 {req('reqLevel')} 级）"
+    if job is not None:
+        req_job = req("reqJob")
+        group_bit = 0 if job // 1000 <= 0 else (1 << (job // 1000 - 1))
+        if req_job and not (req_job & group_bit):
+            allowed = "/".join(REQ_JOB_NAMES[b] for b in sorted(REQ_JOB_NAMES)
+                               if req_job & b)
+            return f"该职业无法装备（需 {allowed}）"
     for stat, key in (("str", "reqSTR"), ("dex", "reqDEX"),
                       ("int", "reqINT"), ("luk", "reqLUK")):
         need = req(key)

@@ -21,6 +21,8 @@ class GmContext:
     warp: Callable[[str], Tuple[str, str]]      # 地图 id → 反馈
     heal: Callable[[], Tuple[str, str]]
     meso: Callable[[int], Tuple[str, str]]      # 数量（正整数）→ 反馈
+    drop_rate: Callable[[int], Tuple[str, str]] = \
+        lambda _n: ("system", "装备掉落率已调整")      # 装备掉落倍率（正整数）→ 反馈
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,12 @@ def _cmd_meso(args: Sequence[str], ctx: GmContext) -> Lines:
     return [ctx.meso(int(args[0]))]
 
 
+def _cmd_drop_rate(args: Sequence[str], ctx: GmContext) -> Lines:
+    if len(args) != 1 or not args[0].isdigit() or int(args[0]) <= 0:
+        return _bad_usage(COMMANDS["droprate"])
+    return [ctx.drop_rate(int(args[0]))]
+
+
 def _cmd_help(args: Sequence[str], ctx: GmContext) -> Lines:
     return [("system", f"/{c.name}" + (f" {c.usage}" if c.usage else "")
              + f" —— {c.desc}") for c in COMMANDS.values()]
@@ -62,6 +70,7 @@ COMMANDS: Dict[str, CommandDef] = {
         CommandDef("warp", "<地图id>", "传送到目标地图出生点", _cmd_warp),
         CommandDef("heal", "", "恢复满血满蓝", _cmd_heal),
         CommandDef("meso", "<数量>", "增加金币", _cmd_meso),
+        CommandDef("droprate", "<倍率>", "临时提高装备掉落率（1 恢复）", _cmd_drop_rate),
         CommandDef("help", "", "列出全部指令", _cmd_help),
     )
 }

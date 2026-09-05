@@ -44,24 +44,27 @@ def islot_to_slot(islot: str) -> Optional[str]:
 SLOT_ORDER = ("cap", "face", "earr", "top", "overall", "pants",
               "shoes", "glove", "cape", "ring", "shield", "weapon")
 
-STAT_KEYS = ("incPAD", "incMAD", "incPDD", "incSTR", "incDEX",
-             "incINT", "incLUK", "incHP", "incMP")
+STAT_KEYS = ("incPAD", "incMAD", "incPDD", "incMDD", "incSTR", "incDEX",
+             "incINT", "incLUK", "incMHP", "incMMP", "incACC", "incEVA",
+             "incSpeed", "incJump")
 
-# 玩家侧属性短键 → WZ 词条键（装备 info 以 inc 前缀命名）
+# 玩家侧属性短键 → WZ 词条键（装备 info 以 inc 前缀命名；HP/MP 上限是 incMHP/incMMP）
 STAT_KEY_MAP = {"str": "incSTR", "dex": "incDEX", "int": "incINT",
-                "luk": "incLUK", "hp": "incHP", "mp": "incMP"}
+                "luk": "incLUK", "hp": "incMHP", "mp": "incMMP"}
 
 
 def _equip_entry(item: Item) -> dict:
-    """装备序列化为 {id, extra, tuc}（含强化词条与剩余次数）。"""
-    return {"id": item.id, "extra": dict(item.extra), "tuc": item.tuc}
+    """装备序列化为 {id, info, extra, tuc}（info 含掉落随机的基础值）。"""
+    return {"id": item.id, "info": dict(item.info), "extra": dict(item.extra),
+            "tuc": item.tuc}
 
 
 def _storage_entry(item: Item) -> dict:
-    """仓库条目：消耗/其他记数量；装备记强化词条与剩余次数。"""
+    """仓库条目：消耗/其他记数量；装备记基础属性、强化词条与剩余次数。"""
     if item.kind == "equip":
         return {"id": item.id, "kind": "equip", "count": 1,
-                "extra": dict(item.extra), "tuc": item.tuc}
+                "info": dict(item.info), "extra": dict(item.extra),
+                "tuc": item.tuc}
     return {"id": item.id, "kind": item.kind, "count": item.count}
 
 
@@ -87,10 +90,10 @@ def make_item(item_id: str, assets, count: int = 1,
     """
     kind = item_kind(item_id)
     if kind == "equip":
-        info = assets.equip_info(item_id) or {}
+        info = dict(assets.equip_info(item_id) or {})
     elif kind == "consume":
         ci = assets.consume_info(item_id) or {}
-        info = {"spec": ci.get("spec") or {}}
+        info = {"spec": dict(ci.get("spec") or {})}
     else:
         info = {}
     if name is None:
@@ -342,6 +345,15 @@ class Inventory:
         if isinstance(entry, dict):
             eid = str(entry.get("id", ""))
             item = make_item(eid, assets) if assets else Item(id=eid, kind="equip")
+            info = entry.get("info")
+            if isinstance(info, dict):
+                merged = {}
+                for k, v in info.items():
+                    try:
+                        merged[str(k)] = int(v)
+                    except (TypeError, ValueError):
+                        continue
+                item.info.update(merged)
             try:
                 item.extra = {str(k): int(v) for k, v in (entry.get("extra") or {}).items()}
             except (TypeError, ValueError):

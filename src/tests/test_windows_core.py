@@ -206,6 +206,30 @@ def test_tooltip_long_desc_wraps_within_max_width():
     assert area.height > 3 * 16                  # 正文换成了多行
 
 
+def test_equip_tooltip_draws_panel_within_width():
+    """装备 tooltip 用原版双栏面板绘制（图标无素材时退回空底盘）。"""
+    from game.core.item_tip import build_item_tip
+    item = Item(id="01112020", name="飞侠戒指", kind="equip", tuc=0,
+                info={"islot": "Ri", "reqLevel": 30, "reqJob": 8,
+                      "incSTR": 30, "incPAD": 30, "reqSTR": 100})
+    tip = build_item_tip(item, 30,
+                         {"str": 100, "dex": 100, "int": 100, "luk": 100},
+                         1000, desc="使用白金剪刀后，可交易给其他玩家。")
+    svc = make_services()
+
+    class TipWindow(Window):
+        def draw(self, surface):
+            self.svc.tooltip(tip)
+
+    win = TipWindow(svc)
+    win.visible = True
+    mgr = make_manager(win)
+    surface = draw_once(mgr)
+    area = surface.get_bounding_rect()
+    assert 0 < area.width <= 240      # 面板固定宽度内
+    assert area.height > 60           # 多段内容撑出高度
+
+
 def test_flash_is_rendered_frame_and_decays():
     mgr = make_manager()
     mgr.flash("背包已满")

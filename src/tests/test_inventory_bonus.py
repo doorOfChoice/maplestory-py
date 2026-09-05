@@ -1,4 +1,4 @@
-"""装备词条键名映射：player 侧 bonus() 吃到 WZ 的 incSTR/incHP 等词条键。"""
+"""装备词条键名映射：player 侧 bonus() 吃到 WZ 的 incSTR/incMHP 等词条键。"""
 from __future__ import annotations
 
 from game.systems.inventory import Inventory, Item
@@ -18,10 +18,10 @@ def test_bonus_maps_inc_prefix_keys():
 
 
 def test_bonus_covers_four_stats_and_vitals():
-    """str/dex/int/luk/hp/mp 全部映射到对应 inc 词条。"""
+    """str/dex/int/luk/hp/mp 全部映射到对应 inc 词条（WZ 真实键名）。"""
     inv = Inventory()
     inv.equipped["weapon"] = _equip(incSTR=2, incDEX=3, incINT=4, incLUK=1,
-                                    incHP=20, incMP=10)
+                                    incMHP=20, incMMP=10)
     assert inv.bonus("str") == 2
     assert inv.bonus("dex") == 3
     assert inv.bonus("int") == 4

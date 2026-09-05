@@ -47,7 +47,7 @@ class WindowManager:
         self._last_click: Optional[Tuple[tuple, float]] = None   # ((key, source), 时刻)
         self._dropped: Optional[object] = None
         self._toast: Optional[Tuple[str, float]] = None
-        self._tip: Optional[str] = None
+        self._tip: Optional[object] = None   # str 或 core.item_tip.TipLine 列表
         self._view: Tuple[int, int] = (settings.VIEW_W, settings.VIEW_H)
         self._mouse: Tuple[int, int] = (-1, -1)   # 最近事件位置（VIEW 坐标）
         svc.flash = self.flash
@@ -73,8 +73,9 @@ class WindowManager:
     def flash(self, text: str, duration: float = 1.6) -> None:
         self._toast = (text, duration)
 
-    def set_tooltip(self, text: str) -> None:
-        self._tip = text
+    def set_tooltip(self, tip) -> None:
+        """悬停提示：纯文本或 core.item_tip.TipLine 结构化行列表。"""
+        self._tip = tip
 
     def take_dropped(self):
         """game.py 每帧取走「拖出扔地」的物品（取一次即清空）。"""

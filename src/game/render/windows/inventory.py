@@ -21,21 +21,16 @@ from typing import Dict, List, Optional, Tuple
 import pygame
 
 from game.core import consumables
+from game.core import item_tip
+from game.core.item_tip import SLOT_NAMES, build_item_tip, tip_with_note
 from game.core.jobs import JOBS
 from game.core.stats import wear_block
 from game.render.windows.core import widgets
 from game.render.windows.core.manager import WindowManager
 from game.render.windows.core.services import WindowServices
 from game.render.windows.core.window import DragPickup, Window
-from game.systems.inventory import Inventory, Item, SLOT_ORDER, islot_to_slot
+from game.systems.inventory import Inventory, Item, SLOT_ORDER
 from game.systems.scrolls import SCROLLS, apply_scroll, is_scroll_id
-
-SLOT_NAMES = {
-    "cap": "帽子", "face": "脸饰", "earr": "耳环", "top": "上衣",
-    "overall": "连身衣", "pants": "裤子", "shoes": "鞋子",
-    "glove": "手套", "cape": "披风", "ring": "戒指",
-    "shield": "盾牌", "weapon": "武器",
-}
 
 CELL = 38          # 旧自绘面板用（fallback）
 PAD = 10
@@ -112,24 +107,9 @@ def _asset_desc(svc: WindowServices, item_id: str) -> str:
 
 
 def _item_tip(item: Item, desc: str = "") -> str:
-    """物品悬停提示文本（同 panels._item_tip）；desc 为 String.wz 介绍。"""
+    """消耗品 / 其他物品悬停提示文本；desc 为 String.wz 介绍。"""
     lines = [item.name]
-    if item.kind == "equip":
-        parts = []
-        for key, label in (("incPAD", "攻"), ("incPDD", "防"),
-                           ("incSTR", "力"), ("incDEX", "敏"),
-                           ("incHP", "HP"), ("incMP", "MP")):
-            v = item.stat(key)
-            if v:
-                parts.append(f"{label}+{v}")
-        if parts:
-            lines.append(" ".join(parts))
-        slot = islot_to_slot(item.info.get("islot") or "")
-        if slot:
-            lines.append(SLOT_NAMES.get(slot, slot) + " · 点击穿上")
-        else:
-            lines.append("（此 WZ 资源缺少外观，无法穿戴）")
-    elif item.kind == "consume":
+    if item.kind == "consume":
         spec = item.info.get("spec") or {}
         if spec.get("hp"):
             lines.append(f"恢复 HP {spec['hp']}")
@@ -151,6 +131,18 @@ def _item_tip(item: Item, desc: str = "") -> str:
     if desc:
         lines.append(desc)
     return "\n".join(lines)
+
+
+def _tip_payload(svc: WindowServices, item: Item):
+    """悬停内容：装备走原版结构化行，其余保持纯文本 tip。"""
+    desc = _asset_desc(svc, item.id)
+    if item.kind == "equip":
+        player = svc.player()
+        tip = build_item_tip(item, player.level, player.total_stats(),
+                             player.job, desc=desc)
+        hint = "点击穿上" if item.slot else "（此 WZ 资源缺少外观，无法穿戴）"
+        return tip_with_note(tip, hint)
+    return _item_tip(item, desc)
 
 
 def _meso_of(svc: WindowServices) -> int:
@@ -250,7 +242,7 @@ class InventoryWindow(Window):
                 self.svc.flash(f"无法穿戴 {items[idx].name}")
             elif idx < len(items):
                 block = wear_block(items[idx].info, player.level,
-                                   player.total_stats())
+                                   player.total_stats(), job=player.job)
                 if block is not None:
                     self.svc.flash(f"无法穿戴：{block}")
                 elif inv.equip(idx):
@@ -356,7 +348,7 @@ class InventoryWindow(Window):
                     surface.blit(cnt, (cell.right - cnt.get_width() - 2,
                                        cell.bottom - cnt.get_height()))
                 if cell.collidepoint(mouse):
-                    self.svc.tooltip(_item_tip(item, _asset_desc(self.svc, item.id)))
+                    self.svc.tooltip(_tip_payload(self.svc, item))
             self._cell_rects.append((cell, self.tab, idx))
 
         # 底部页脚：金币图标 + 持有数（白底板 → 深棕字）
@@ -407,7 +399,7 @@ class InventoryWindow(Window):
                     surface.blit(cnt, (cell.right - cnt.get_width() - 2,
                                        cell.bottom - cnt.get_height() + 1))
                 if cell.collidepoint(mouse):
-                    self.svc.tooltip(_item_tip(item, _asset_desc(self.svc, item.id)))
+                    self.svc.tooltip(_tip_payload(self.svc, item))
             self._cell_rects.append((cell, self.tab, idx))
 
 
@@ -492,7 +484,7 @@ class EquipWindow(Window):
                 if icon is not None:
                     _blit_icon(surface, icon, cell, 32)
                 if cell.collidepoint(mouse):
-                    self.svc.tooltip(_item_tip(item, _asset_desc(self.svc, item.id)))
+                    self.svc.tooltip(_tip_payload(self.svc, item))
             self._slot_rects.append((cell, slot))
 
         # 标题条右侧：职业 + 攻/防摘要（浅色条 → 深字）
@@ -534,7 +526,7 @@ class EquipWindow(Window):
                     surface.blit(icon, (cx + cell.w - icon.get_width() - 3,
                                         cy + cell.h - icon.get_height() - 3))
                 if cell.collidepoint(mouse):
-                    self.svc.tooltip(_item_tip(item, _asset_desc(self.svc, item.id)))
+                    self.svc.tooltip(_tip_payload(self.svc, item))
             self._slot_rects.append((cell, slot))
 
 

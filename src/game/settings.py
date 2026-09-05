@@ -43,6 +43,7 @@ MOVE_SPEED = 300.0               # 地面水平速度 px/s
 MOVE_ACCEL = 2600.0              # 地面水平加速度 px/s^2（速度缓动，避免瞬起瞬停）
 AIR_ACCEL = 0.55                 # 空中水平加速度倍率（对 MOVE_ACCEL 打折扣）
 JUMP_VELOCITY = -900.0           # 起跳初速度（向上为负）
+EQUIP_SPEED_BONUS_CAP = 0.5      # 装备 incSpeed/incJump 加成封顶（+50%）
 COYOTE_TIME = 0.08               # 离开地面后仍可起跳的窗口（秒）
 JUMP_BUFFER_TIME = 0.12          # 落地前一瞬按跳仍生效的缓冲（秒）
 MAX_FALL_SPEED = 1600.0
@@ -131,6 +132,14 @@ DROP_ITEM_RATE = {
     "8": 0.01,     # 装饰/称号
 }
 DROP_ITEM_DEFAULT_RATE = 0.05    # 未登记类别的兜底掉率
+# 掉落装备随机基础属性：拾取时 30% 概率为「稀有」，随机浮动 2~4 条主属性
+# 各 +1~+5，直接写入 Item.info（非 extra），故基础值随掉落变化。
+DROP_RARE_CHANCE = 0.30
+DROP_RARE_LINES = (2, 4)
+DROP_RARE_BONUS = (1, 5)
+# 可被随机的主属性池（力量/敏捷/智力/运气/最大HP/最大MP/攻击力/魔法力）
+DROP_RARE_STATS = ("incSTR", "incDEX", "incINT", "incLUK",
+                   "incMHP", "incMMP", "incPAD", "incMAD")
 PICKUP_RANGE = 30.0             # Z 键拾取水平半径（一次只捡其中最近的一件）
 PICKUP_ATTRACT_TIME = 0.22       # 拾取吸附动画时长（秒）
 PICKUP_HOLD_INTERVAL = 0.1       # 按住 Z 连捡时两次拾取的最小间隔（秒）

@@ -114,7 +114,8 @@ def test_equip_extra_tuc_save_roundtrip():
     inv.equips = [Item(id="01040000", name="帽", kind="equip")]
 
     d = inv.to_dict()
-    assert d["equipped"]["weapon"] == {"id": "01452002", "extra": {"incPAD": 5}, "tuc": 3}
+    assert d["equipped"]["weapon"] == {"id": "01452002", "info": {"islot": "WpSi", "tuc": 7},
+                                       "extra": {"incPAD": 5}, "tuc": 3}
 
     inv2 = Inventory.from_dict(d, assets=None)
     w2 = inv2.equipped["weapon"]

@@ -281,6 +281,19 @@ class Player:
         self.recalc_vitals()
         return True
 
+    def _equip_speed_bonus(self, key: str) -> float:
+        """装备 incSpeed/incJump 加成比例：WZ 以 0.1 点为单位存储（30=+3%），封顶见 settings。"""
+        units = self.inventory.stat_sum(key)
+        return min(units / 1000.0, settings.EQUIP_SPEED_BONUS_CAP)
+
+    def move_speed(self) -> float:
+        """地面水平速度：基础 × (1 + ΣincSpeed 加成)。"""
+        return settings.MOVE_SPEED * (1.0 + self._equip_speed_bonus("incSpeed"))
+
+    def jump_velocity(self) -> float:
+        """起跳初速度（负值）：基础 × (1 + ΣincJump 加成)。"""
+        return settings.JUMP_VELOCITY * (1.0 + self._equip_speed_bonus("incJump"))
+
     def recalc_vitals(self) -> None:
         """按 等级/职业/装备词条 重算 HP/MP 上限，并把当前值钳进上限。"""
         jobdef = JOBS.get(self.job) or JOBS[0]
@@ -315,20 +328,20 @@ class Player:
             # 从绳/梯上跳下：向上小跳（JUMP_VELOCITY 本身为负）
             self.climbing = False
             self.detach_cooldown = 0.20
-            self.vy = settings.JUMP_VELOCITY * 0.4
+            self.vy = self.jump_velocity() * 0.4
             self.feather.consume()
             return
         if self.attacking:
             return   # 攻击硬直中不起跳（原地挥击）
         if self.on_ground or self.feather.coyote > 0.0:
-            self.vy = settings.JUMP_VELOCITY
+            self.vy = self.jump_velocity()
             self.on_ground = False
             self.feather.consume()
             return
         if self.wall_dir and not self.attacking and self.hurt_timer <= 0:
             # 蹬墙跳：反向弹开 + 向上，短暂失控期内屏蔽朝原墙方向的输入
             d = self.wall_dir
-            self.vy = settings.JUMP_VELOCITY
+            self.vy = self.jump_velocity()
             self.vx = -d * settings.WALL_JUMP_VX
             self.facing_right = d < 0
             self.wall_dir = 0
@@ -499,10 +512,10 @@ class Player:
             # 水平缓动：地面快、空中按 AIR_ACCEL 打折扣 → 柔化起停（丝滑的关键）。
             target_vx = 0.0
             if keys.left and not keys.right:
-                target_vx = -settings.MOVE_SPEED
+                target_vx = -self.move_speed()
                 self.facing_right = False
             elif keys.right and not keys.left:
-                target_vx = settings.MOVE_SPEED
+                target_vx = self.move_speed()
                 self.facing_right = True
             target_vx *= self.statuses.speed_mult()
             accel = settings.MOVE_ACCEL
