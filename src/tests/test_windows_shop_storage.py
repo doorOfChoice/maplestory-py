@@ -454,6 +454,56 @@ def test_shop_tooltip_clears_when_leaving_rows():
     assert mgr._tip is None
 
 
+def test_shop_hover_equip_shelf_uses_equip_tip():
+    """悬停货架装备行：返回结构化 EquipTip（含词条），而非纯文本。"""
+    from game.core.item_tip import EquipTip
+    register_lua_shop(_NPC, ["basicshop"])
+    register_shop_profile("basicshop", "武器铺",
+                          [("01010000", 5000), ("02800000", 400)])
+    player = _shop_player()
+    scene = _FakeAssets()
+    scene.equip_info = lambda iid: {"islot": "WpSi", "incPAD": 33,
+                                    "reqLevel": 5, "tuc": 7}
+    svc = WindowServices(assets=scene, ui=FakeUI(),
+                         player=lambda: player,
+                         combat=types.SimpleNamespace(meso=10000))
+    win = ShopWindow(svc)
+    win.open(_NPC)
+    mgr = make_manager(win)
+    draw_once(mgr)
+    motion(mgr, win.shelf_rects[0][0].center)
+    draw_once(mgr)
+    assert isinstance(mgr._tip, EquipTip)
+    assert any(h.value == 33 for h in mgr._tip.heroes)   # 攻击力大数字
+    assert mgr._tip.tuc == 7
+
+
+def test_shop_hover_equip_bag_uses_rolled_info():
+    """悬停背包装备行：EquipTip 保留掉落随机的基础属性（incPAD 33 而非 WZ 30）。"""
+    from game.core.item_tip import EquipTip
+    from game.systems.inventory import Item, make_item
+    register_lua_shop(_NPC, ["wheelshop"])
+    register_shop_profile("wheelshop", "杂货",
+                          [("02800000", 400), ("02800001", 400)])
+    player = types.SimpleNamespace(inventory=Inventory())
+    base = make_item("01010000", _FakeAssets())
+    base.info = {"islot": "WpSi", "incPAD": 33}
+    player.inventory.equips.append(base)
+    scene = _FakeAssets()
+    svc = WindowServices(assets=scene, ui=FakeUI(), player=lambda: player,
+                         combat=types.SimpleNamespace(meso=10000))
+    win = ShopWindow(svc)
+    win.open(_NPC)
+    mgr = make_manager(win)
+    draw_once(mgr)
+    bag_idx = next(i for i, (src, it) in enumerate(win._bag_entries(player))
+                   if src[0] == "equip")
+    motion(mgr, win.bag_rects[bag_idx][0].center)
+    draw_once(mgr)
+    assert isinstance(mgr._tip, EquipTip)
+    assert any(h.value == 33 for h in mgr._tip.heroes)
+
+
 # ── 仓库 ───────────────────────────────────────────────────────────
 def _storage_window(n_bag: int = 3):
     inv = Inventory()

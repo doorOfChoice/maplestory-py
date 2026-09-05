@@ -16,6 +16,7 @@ from typing import List, Optional, Tuple
 
 import pygame
 
+from game.core.item_tip import build_item_tip, tip_with_note
 from game.render.conv import ui_image
 from game.render.windows.inventory import _asset_desc
 from game.render.windows.core.widgets import ellipsize, draw_menu_bg, scroll_icon
@@ -452,8 +453,11 @@ class ShopWindow(Window):
 
     # ── 悬停 tooltip ───────────────────────────────────────────────
     def _hover_tip(self, item_id: str, count: int = 1, sell: bool = False,
-                   name: Optional[str] = None) -> str:
-        """单行悬停文本：名称 + 介绍（String.wz desc）+ 单价 / 卖价。"""
+                   name: Optional[str] = None,
+                   item: Optional[Item] = None):
+        """悬停内容：装备走原版结构化 EquipTip，其余保持单行文本（介绍 + 价）。"""
+        if item_kind(item_id) == "equip":
+            return self._equip_tip(item, item_id, sell, count)
         price = self._shop_price(item_id)
         title = name or self._item_name(item_id)
         lines = [title + (f" ×{count}" if count > 1 else "")]
@@ -471,6 +475,26 @@ class ShopWindow(Window):
             lines.append(f"单价 {price} 金币")
         return "\n".join(lines)
 
+    def _equip_tip(self, item: Optional[Item], item_id: str,
+                   sell: bool, count: int):
+        """装备 tooltip：给现成 Item 用它（保留随机 info），否则按 WZ 构建。"""
+        if item is None:
+            item = make_item(item_id, self.svc.assets)
+        player = self._player
+        level = getattr(player, "level", 0)
+        stats = getattr(player, "total_stats", lambda: {})()
+        job = getattr(player, "job", None)
+        tip = build_item_tip(item, level, stats, job,
+                             desc=_asset_desc(self.svc, item_id))
+        note = []
+        if not sell:
+            note.append(f"单价 {self._shop_price(item_id)} 金币")
+        else:
+            unit = shop_mod.sell_price(self._shop_price(item_id))
+            note.append(f"单件卖价 {unit} · 合计 {unit * max(1, count)}")
+        note.append("点击购买" if not sell else "点击出售")
+        return tip_with_note(tip, "\n".join(note))
+
     def _apply_hover(self) -> None:
         """光标悬停货架 / 背包行时给出深色 Tooltip（含商品介绍）。"""
         mouse = self.svc.mouse()
@@ -487,7 +511,8 @@ class ShopWindow(Window):
                     _src, item = entries[i]
                     self.svc.tooltip(self._hover_tip(item.id, item.count,
                                                      sell=True,
-                                                     name=item.name))
+                                                     name=item.name,
+                                                     item=item))
                 return
 
     def _row_rect(self, col_x: int, col_w: int, y0: int, pitch: int,

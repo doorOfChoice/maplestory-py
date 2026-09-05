@@ -590,7 +590,21 @@ class Combat:
             item = make_item(drop.item.get("id"), self.assets,
                              count=int(drop.item.get("count") or 1),
                              name=drop.item.get("name"))
-            if drop.from_mob and item.kind == "equip":
+            info = drop.item.get("info")
+            if isinstance(info, dict):
+                # 玩家扔出的装备：恢复其完整属性（已随机的基础 + 强化 + 剩余次数）
+                item.info.update({k: int(v) for k, v in info.items()
+                                  if isinstance(v, (int, str)) and
+                                  str(v).lstrip("-").isdigit()})
+                extra = drop.item.get("extra")
+                if isinstance(extra, dict):
+                    item.extra = {k: int(v) for k, v in extra.items()
+                                  if isinstance(v, (int, str)) and
+                                  str(v).lstrip("-").isdigit()}
+                tuc = drop.item.get("tuc")
+                if isinstance(tuc, (int, str)) and str(tuc).lstrip("-").isdigit():
+                    item.tuc = int(tuc)
+            elif drop.from_mob and item.kind == "equip":
                 item.info.update(roll_drop_bonus(self.rng))
             if player.inventory.add(item):
                 drop.taken = True
@@ -634,7 +648,9 @@ class Combat:
         feet = player.y + settings.FEET_OFFSET
         ground = self._surface_y(player.x, feet)
         d = DropItem(player.x, player.y,
-                     item={"id": item.id, "name": item.name, "count": item.count},
+                     item={"id": item.id, "name": item.name, "count": item.count,
+                           "info": dict(item.info), "extra": dict(item.extra),
+                           "tuc": item.tuc},
                      ground_y=ground, assets=self.assets,
                      lifetime=settings.DROP_PLAYER_LIFETIME, pickup_lock=0.6,
                      from_mob=False)

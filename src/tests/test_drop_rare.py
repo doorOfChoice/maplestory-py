@@ -99,6 +99,28 @@ def test_take_player_drop_equip_not_randomized():
     assert p.inventory.equips[0].info == {"islot": "Ri", "incPDD": 50}
 
 
+def test_player_drop_roundtrip_preserves_rolled_info():
+    """玩家扔出带随机属性的装备再捡回：info/extra/tuc 必须原样保留，不得重置回 WZ 基值。"""
+    assets = FakeAssets()
+    c = Combat(assets, rng=random.Random(_seed_under_chance()))
+    original = make_item("01112020", assets)
+    original.info.update({"incPAD": 33, "incSTR": 4})   # 模拟已随机
+    original.extra = {"incPAD": 2, "incXP": 5}
+    original.tuc = 3
+    thrown = c.drop_player_item(_player(), original)
+    assert thrown.item.get("info")  # 扔出时必须携带完整属性（info/extra/tuc）
+    assert thrown.item.get("extra")
+    assert "tuc" in thrown.item
+
+    picker = _player()
+    c._take(thrown, picker)
+    got = picker.inventory.equips[0]
+    assert got.info.get("incPAD") == 33 and got.info.get("incSTR") == 4
+    assert got.info.get("incPDD") == 50      # WZ 基值仍在
+    assert got.extra == {"incPAD": 2, "incXP": 5}
+    assert got.tuc == 3
+
+
 def test_equip_info_roundtrip_preserves_roll():
     """装备存档携带 info，读档后随机值不变。"""
     inv = Inventory()
