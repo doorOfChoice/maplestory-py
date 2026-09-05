@@ -3,6 +3,7 @@
 import pygame
 import pytest
 
+from game import settings
 from game.entities.monster import Monster
 from game.core.physics import Physics
 
@@ -114,6 +115,136 @@ def test_does_not_fall_off_ledge_turns_back():
         hi_x = max(hi_x, mob.x)
         assert mob.cy == 100  # 始终站在高台高度，不下落
     assert hi_x <= 100  # 巡逻在高台右缘折返，不越过断口
+
+
+def test_mob_chases_only_after_beating():
+    """被打一记后反击追击：哪怕巡逻方向背对玩家，也折回逼近到贴脸为止。"""
+    ph = make(CHAIN)
+    # flip=True → 初始朝左巡逻；玩家在右侧 300，只有追击才会向右接近
+    mob = Monster(FakeAssets(), {"id": "0100101", "x": 200, "y": 0, "cy": 0,
+                                 "rx0": 0, "rx1": 450, "flip": True}, 0, ph)
+    mob.take_hit(5, from_x=300)
+    for _ in range(60):
+        mob.update(0.05, player_x=300, player_y=0, mobs=[])
+    assert mob.x > 200                        # 掉头朝玩家方向推进
+    assert abs(300 - mob.x) <= settings.MOB_ATTACK_RANGE + 1
+
+
+def test_boss_stands_ground():
+    """boss 怪守位：不漫游、挨打也不追，位置纹丝不动，只有接触伤害。"""
+
+    class BossAssets(FakeAssets):
+        def mob_info(self, mob_id):
+            info = FakeAssets.mob_info(self, mob_id)
+            info["stats"]["boss"] = True
+            return info
+
+    ph = make(CHAIN)
+    mob = Monster(BossAssets(), {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                                 "rx0": 0, "rx1": 450}, 0, ph)
+    for _ in range(200):
+        mob.update(0.05, player_x=100000, player_y=0, mobs=[])
+    mob.take_hit(5, from_x=250)
+    x_after_hit = mob.x                      # 允许原版受击小击退
+    for _ in range(200):
+        mob.update(0.05, player_x=250, player_y=0, mobs=[])
+    assert mob.x == x_after_hit              # 但绝不反击追击
+    assert mob.action == "stand"
+
+
+def test_chase_speed_follows_wz_speed_stat():
+    """追击/移动速度取自 WZ stats.speed（有符号偏移）：+60 明显快于 -50。"""
+
+    class SpeedAssets(FakeAssets):
+        def __init__(self, spd):
+            super().__init__()
+            self._spd = spd
+
+        def mob_info(self, mob_id):
+            info = FakeAssets.mob_info(self, mob_id)
+            info["stats"]["speed"] = self._spd
+            return info
+
+    def aggroed_mob(spd):
+        ph = make(CHAIN)
+        mob = Monster(SpeedAssets(spd), {"id": "0100101", "x": 200, "y": 0,
+                                         "cy": 0, "rx0": 0, "rx1": 450}, 0, ph)
+        mob.take_hit(5, from_x=100)          # 玩家在左 → 反击追击
+        mob.update(0.3, player_x=100, player_y=0, mobs=[])   # 吃掉受击硬直
+        return mob
+
+    slow, fast = aggroed_mob(-50), aggroed_mob(60)
+    for _ in range(12):
+        slow.update(0.05, player_x=100, player_y=0, mobs=[])
+        fast.update(0.05, player_x=100, player_y=0, mobs=[])
+    slow_dist, fast_dist = 200 - slow.x, 200 - fast.x
+    assert fast_dist > slow_dist             # 高 speed 属性位移更大
+    assert fast_dist > 1.5 * slow_dist
+
+
+def test_negative_wz_speed_still_roams_visibly():
+    """回归：真实 WZ 慢怪（speed=-50）漫游 10 秒仍有可见位移，不原地卡死。"""
+    class SlowAssets(FakeAssets):
+        def mob_info(self, mob_id):
+            info = FakeAssets.mob_info(self, mob_id)
+            info["stats"]["speed"] = -50
+            return info
+
+    ph = make(CHAIN)
+    mob = Monster(SlowAssets(), {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                                 "rx0": 0, "rx1": 450}, 0, ph)
+    assert mob.move_speed >= settings.MOB_SPEED_MIN
+    lo = hi = mob.x
+    for _ in range(200):                     # 10 秒
+        mob.update(0.05, player_x=100000, player_y=0, mobs=[])
+        lo, hi = min(lo, mob.x), max(hi, mob.x)
+    assert hi - lo > 50                      # 10 秒内至少逛出 50px
+
+
+def test_wander_walks_and_pauses():
+    """漫游是走走停停：stand 与 move 两种动画都出现，站桩期间位置纹丝不动。"""
+    ph = make(CHAIN)
+    mob = Monster(FakeAssets(), {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                                 "rx0": 0, "rx1": 450}, 0, ph)
+    actions = set()
+    stood_still = paused = False
+    prev_x, prev_action = mob.x, mob.action
+    for _ in range(600):
+        mob.update(0.05, player_x=100000, player_y=0, mobs=[])
+        actions.add(mob.action)
+        if mob.action == "stand" and prev_action == "stand":
+            paused = True
+            if mob.x != prev_x:
+                stood_still = False
+            else:
+                stood_still = True
+        prev_x, prev_action = mob.x, mob.action
+    assert {"stand", "move"} <= actions     # 走走停停，不是永动钟摆
+    assert paused and stood_still           # 确实存在站桩静止的时段
+
+
+def test_mob_gives_up_chase_when_player_escapes():
+    """追击中玩家跑出仇恨范围：怪立即放弃，回到漫游状态。"""
+    ph = make(CHAIN)
+    mob = Monster(FakeAssets(), {"id": "0100101", "x": 200, "y": 0, "cy": 0,
+                                 "rx0": 0, "rx1": 450, "flip": True}, 0, ph)
+    mob.take_hit(5, from_x=300)
+    mob.update(0.3, player_x=300, player_y=0, mobs=[])   # 熬过受击硬直
+    mob.update(0.05, player_x=300, player_y=0, mobs=[])  # 硬直结束后才见追击
+    assert mob.state == "chase"
+    mob.update(0.05, player_x=100000, player_y=0, mobs=[])  # 玩家已不在范围
+    assert mob.state != "chase"
+    assert mob.aggro is False
+
+
+def test_mob_never_chases_unprovoked():
+    """玩家站在仇恨范围内不动：未挨打的怪永不进入追击，只按自己的节奏漫游。"""
+    ph = make(CHAIN)
+    mob = Monster(FakeAssets(), {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                                 "rx0": 0, "rx1": 450}, 0, ph)
+    for _ in range(600):
+        mob.update(0.05, player_x=300, player_y=0, mobs=[])
+        assert mob.state != "chase"
 
 
 def test_death_sound_played_once_on_mob_die():

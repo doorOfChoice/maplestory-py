@@ -95,8 +95,14 @@ HURT_HOP_VY = -170.0             # 受击小跳初速度
 # ── 怪物 ─────────────────────────────────────────────────────────────
 MOB_AGGRO_RANGE = 160.0          # 仇恨范围（水平）
 MOB_AGGRO_Y_RANGE = 60.0         # 仇恨范围（垂直，脚底 y 差）
-MOB_CHASE_SPEED = 70.0
-MOB_PATROL_SPEED = 30.0
+# 怪物 WZ speed 是有符号偏移值（实测全体约 -80..140，多数 0 或负），
+# 非"100=步行"百分比。仿射映射到 px/s：move = BASE + speed × FACTOR，
+# 使 -50 慢逛、0 常速、+100 快冲，两端再钳制，避免静止或飞太快。
+MOB_SPEED_BASE = 50.0            # speed=0 时的移动 px/s（约等于旧巡逻手感）
+MOB_SPEED_FACTOR = 0.4           # 每点 speed 偏移增减的 px/s
+MOB_SPEED_MIN = 14.0             # 漫游速度下限（保证"会动"）
+MOB_SPEED_MAX = 100.0            # 追击/漫游速度上限
+MOB_WANDER_PAUSE = (1.0, 4.0)    # 漫游两段行走之间随机站桩时长（秒）
 MOB_ATTACK_RANGE = 40.0          # 接触伤害距离（水平）
 MOB_CONTACT_Y_RANGE = 40.0       # 接触伤害距离（垂直，脚底 y 差）
 MOB_KNOCKBACK = 60.0             # 受击击退

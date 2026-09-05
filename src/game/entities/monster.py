@@ -1,4 +1,6 @@
-"""怪物实体：从地图 life 数据生成，AI 状态机 巡逻 → 追击 → 接触攻击 → 受击 → 死亡。
+"""怪物实体：从地图 life 数据生成。AI 同原版：平时在巡逻平台内走走停停地漫游，
+不主动追人（玩家撞上去才吃接触伤害）；挨打才反击追击，钳在平台内、玩家脱范围即放弃；
+boss 守位站桩。移动速度取自 WZ stats.speed。
 
 坐标：(x, y) 为怪物脚底锚点（WZ life.cy 为地面 y），sprite 用 origin 偏移定位。
 """
@@ -75,7 +77,12 @@ class Monster:
         self.level = int(stats.get("level") or 0)
         self.attack_power = int(stats.get("weaponAttack") or 10)
         self.pd = int(stats.get("weaponDefense") or 0)
+        # WZ speed 是有符号偏移值（-80..140，0≈常速），仿射映射并钳到可见区间
         self.speed = float(stats.get("speed") or 0)
+        raw = settings.MOB_SPEED_BASE + self.speed * settings.MOB_SPEED_FACTOR
+        self.move_speed = min(max(raw, settings.MOB_SPEED_MIN),
+                              settings.MOB_SPEED_MAX)
+        self.boss = bool(stats.get("boss"))
         self.drops = info.get("drops") or []
 
         # 接触攻击附带的异常（毒/晕/减速）：skill 节点 + MobSkill.img 强度
@@ -90,6 +97,11 @@ class Monster:
 
         # AI 状态
         self.state = "patrol"     # patrol / chase / hit / die
+        self.aggro = False        # 反击追击标记：挨打才置位，玩家脱范围即清除
+        # 漫游节奏：走到目的地 → 站桩随机时长 → 再选目的地（原版瞎逛感）
+        self.wander_target = self.x
+        self._wander_walking = False
+        self._wander_timer = random.uniform(*settings.MOB_WANDER_PAUSE)
         self.state_timer = 0.0
         self.hit_flash = 0.0
         self.attack_cooldown = 0.0
@@ -143,11 +155,15 @@ class Monster:
         self.state = "hit"
         self.state_timer = 0.25
         self.hit_flash = 0.15
-        if from_x is not None and self.state_timer > 0:
-            # 原版受击小击退（钳在巡逻平台内）
-            away = 1 if self.x < from_x else -1
-            self.x = min(max(self.x + away * 10.0, self.rx0), self.rx1)
-            self._resnap_ground()
+        if from_x is not None:
+            # 原版只在被打了之后才反击追击（boss 站桩除外）
+            if not self.boss:
+                self.aggro = True
+            if self.state_timer > 0:
+                # 受击小击退（钳在巡逻平台内）
+                away = 1 if self.x < from_x else -1
+                self.x = min(max(self.x + away * 10.0, self.rx0), self.rx1)
+                self._resnap_ground()
         if self.hp <= 0:
             self.die()
             return True
@@ -195,14 +211,17 @@ class Monster:
                 self.state = "patrol"
             return
 
-        # 追击逻辑（出生保护期内不追击；且只在同一层追击）
-        chasing = ((not no_aggro) and dist <= settings.MOB_AGGRO_RANGE
-                   and dy <= settings.MOB_AGGRO_Y_RANGE)
-        speed = settings.MOB_CHASE_SPEED if chasing else settings.MOB_PATROL_SPEED
+        # 追击逻辑（同原版：不主动追人，挨打才反击追击；出生保护期内不追；
+        # 只在同一层追，玩家脱离仇恨范围即放弃；boss 站桩不追）
+        in_range = ((not no_aggro) and dist <= settings.MOB_AGGRO_RANGE
+                    and dy <= settings.MOB_AGGRO_Y_RANGE)
+        if self.aggro and not in_range:
+            self.aggro = False
+        chasing = self.aggro and in_range and not self.boss
 
         if chasing and dist > settings.MOB_ATTACK_RANGE:
             self.state = "chase"
-            step = speed * dt
+            step = self.move_speed * dt
             if dx > 0:
                 self.x = min(self.x + step, player_x - 1)
                 self.dir = 1
@@ -219,16 +238,10 @@ class Monster:
             self._step_move()
         else:
             self.state = "patrol"
-            # 在 rx0..rx1 之间巡逻
-            self.x += self.dir * speed * dt
-            if self.x <= self.rx0:
-                self.x = self.rx0
-                self.dir = 1
-            elif self.x >= self.rx1:
-                self.x = self.rx1
-                self.dir = -1
-            self._step_move()
-            self._load_action("move" if self._has("move") else "stand")
+            if self.boss:
+                self._load_action("stand")   # boss 守位站桩，原版排面
+            else:
+                self._update_wander(dt)
 
         self.anim.advance(dt)
 
@@ -246,6 +259,28 @@ class Monster:
                 "status_attacks": self.status_attacks,
             })
             self.attack_cooldown = 0.8
+
+    def _update_wander(self, dt: float) -> None:
+        """漫游：走一段 → 站桩几秒 → 再走。目的地偏向平台两端、偶尔中段。"""
+        if self._wander_walking:
+            if self.wander_target > self.x:
+                self.dir = 1
+                self.x = min(self.x + self.move_speed * dt, self.wander_target)
+            else:
+                self.dir = -1
+                self.x = max(self.x - self.move_speed * dt, self.wander_target)
+            if abs(self.x - self.wander_target) < 0.5:
+                self._wander_walking = False
+                self._wander_timer = random.uniform(*settings.MOB_WANDER_PAUSE)
+            self._load_action("move" if self._has("move") else "stand")
+        else:
+            self._wander_timer -= dt
+            if self._wander_timer <= 0:
+                self.wander_target = random.choice(
+                    (self.rx0, self.rx1, random.uniform(self.rx0, self.rx1)))
+                self._wander_walking = True
+            self._load_action("stand")
+        self._step_move()
 
     def _step_move(self) -> None:
         """沿脚下相连平台走：越过当前段端点时续接下一段，并跟随坡面高度。
