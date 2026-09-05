@@ -10,15 +10,15 @@ from typing import List, Optional, Tuple
 
 import pygame
 
+from game.render.conv import ui_image
 from game.render.windows.core.services import WindowServices
 
 
 # ── 素材与按钮 ─────────────────────────────────────────────────────
 def wz_surface(svc: WindowServices, path: str,
                img: str = "UIWindow.img") -> Optional[pygame.Surface]:
-    """UIWindow.img 取图（tuple 首帧 → Surface），缺失 None。"""
-    hit = svc.assets.ui_surface(img, path)
-    return hit[0] if hit else None
+    """UIWindow.img 取图：转发 render.conv.ui_image 单源，缺失 None。"""
+    return ui_image(svc.assets, img, path)
 
 
 def ui_button_surface(svc: WindowServices, prefix: str, rect: pygame.Rect,

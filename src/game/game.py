@@ -400,7 +400,7 @@ class Game:
                              item_name=a.item_name, mob_name=a.mob_name_of)
 
     def _quest_extra_goal_lines(self, qid: str) -> List[str]:
-        """任务日志：生成当前进行中任务的目标行（击杀 / 收集 / 描述）。"""
+        """任务日志：进行中标的目标行（击杀 / 收集）；奖励走「任务资讯」视图。"""
         d = self.quest_defs.get(qid)
         if d is None:
             return []
@@ -412,13 +412,6 @@ class Game:
         for iid, count in d.end_items:
             cur = q.item_progress(self.ctx.world.player, qid, iid)
             lines.append(f"收集 #c{iid}# {self.assets.item_name(str(iid)) or ''}  {cur}/{count}")
-        if d.reward_exp:
-            lines.append(f"奖励：经验 {d.reward_exp}")
-        if d.reward_money:
-            lines.append(f"奖励：金币 {d.reward_money}")
-        for iid, count in d.reward_items:
-            if count > 0:
-                lines.append(f"奖励：#c{iid}# {self.assets.item_name(str(iid)) or ''} ×{count}")
         return lines
 
     # ── 重生 ───────────────────────────────────────────────────────

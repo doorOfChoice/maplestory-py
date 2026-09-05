@@ -5,7 +5,7 @@ split_colors / wrap_segments 负责把带码文本折成 (片段, 颜色) 供渲
 """
 from __future__ import annotations
 
-from game.core.markup import MARKUP_COLORS, split_colors
+from game.core.markup import IconSeg, MARKUP_COLORS, TextSeg, split_colors
 from game.render.conv import wrap_segments
 from game.systems.quests import render_markup, wrap_lines
 
@@ -107,12 +107,60 @@ def test_split_colors_without_tokens_is_single_base_segment():
 def test_wrap_segments_wraps_and_carries_color():
     lines = wrap_segments("#rabcdefghij", 35, _FakeFont())
     red = MARKUP_COLORS["r"]
-    assert lines == [[("abcde", red)], [("fghij", red)]]
+    assert lines == [[TextSeg("abcde", red)], [TextSeg("fghij", red)]]
 
 
 def test_wrap_segments_merges_adjacent_same_color():
     lines = wrap_segments("#r甲#k乙", 35, _FakeFont())
-    assert lines == [[("甲", MARKUP_COLORS["r"]), ("乙", None)]]
+    assert lines == [[TextSeg("甲", MARKUP_COLORS["r"]), TextSeg("乙")]]
+
+
+def test_wrap_segments_emits_icon_segment():
+    """传入 icon_width 时，#c<id># 产出独立的图标片段，位置与原文一致。"""
+    lines = wrap_segments("交给#c1002000#希娜", 200, _FakeFont(),
+                          icon_width=lambda item_id: 24)
+    assert lines == [[TextSeg("交给"), IconSeg(1002000), TextSeg("希娜")]]
+
+
+def test_wrap_segments_icon_keeps_surrounding_colors():
+    """图标段本身不带颜色；色码作用域跨过图标继续生效，#k 后回基色。"""
+    lines = wrap_segments("#r红字#c100#仍红#b蓝字#k黑字", 200, _FakeFont(),
+                          icon_width=lambda item_id: 24)
+    red, blue = MARKUP_COLORS["r"], MARKUP_COLORS["b"]
+    assert lines == [[TextSeg("红字", red), IconSeg(100), TextSeg("仍红", red),
+                      TextSeg("蓝字", blue), TextSeg("黑字")]]
+
+
+def test_wrap_segments_counts_icon_width_in_wrapping():
+    """折行按图标实际宽度计量：装不下的图标独占一行，文字顺延。"""
+    # _FakeFont 每字符 7px；图标 20px；行宽 20 → a(7)+icon(20) 放不下
+    lines = wrap_segments("a#c1#b", 20, _FakeFont(), icon_width=lambda i: 20)
+    assert lines == [[TextSeg("a")], [IconSeg(1)], [TextSeg("b")]]
+
+
+def test_wrap_segments_splits_on_newline():
+    """文本内 \\n 强制分行（与按宽折行共存，空行保留）。"""
+    lines = wrap_segments("甲\n\n乙丙", 200, _FakeFont())
+    assert lines == [[TextSeg("甲")], [], [TextSeg("乙丙")]]
+
+
+# ── resolve_item_icons：图标码可用性预解析（会话面板/任务窗共用）──────
+def test_resolve_item_icons_falls_back_to_name():
+    """能出图的 #c 码原样保留；素材缺失的码回退为物品名（名也缺则留 #id）。"""
+    from game.render.conv import resolve_item_icons
+    out = resolve_item_icons("交#c100#与#c200#",
+                             item_icon=lambda iid: object() if iid == "100" else None,
+                             item_name=lambda iid: {200: "木偶心"}.get(int(iid)))
+    assert out == "交#c100#与木偶心"
+
+
+# ── 富文本基色：会话面板与任务窗共享单源 ─────────────────────────────
+def test_rich_text_base_color_single_source():
+    """任务窗详情正文与会话面板正文的无色文本共用同一基色。"""
+    from game.render import conv
+    from game.render.windows import questlog
+    assert conv.DLG_TEXT_BASE == (60, 52, 44)
+    assert questlog.DLG_TEXT_BASE == conv.DLG_TEXT_BASE
 
 
 # ── split_item_icons：#c<id># 内联物品码切段 ──

@@ -20,8 +20,9 @@ from typing import List, Optional, Tuple
 import pygame
 
 from game.core.fonts import load_cjk_font, render_text
-from game.render.conv import (DLG_BOTTOM_H, DLG_LINE_H, DLG_TEXT_W, DLG_TEXT_X,
-                              DLG_TOP_H, DLG_W, ConvPanel, wrap_text)
+from game.render.conv import (DLG_BOTTOM_H, DLG_LINE_H, DLG_TEXT_BASE, DLG_TEXT_W,
+                              DLG_TEXT_X, DLG_TOP_H, DLG_W, ConvPanel,
+                              draw_dlg_frame, status_bar_height, ui_image, wrap_text)
 
 
 def _load_font(size: int) -> pygame.font.Font:
@@ -100,8 +101,7 @@ class UI:
 
     # ── UI.wz 取图 ──────────────────────────────────────────────────
     def _img(self, img: str, path: str) -> Optional[pygame.Surface]:
-        hit = self.assets.ui_surface(img, path)
-        return hit[0] if hit else None
+        return ui_image(self.assets, img, path)
 
     # ── 对话框 ─────────────────────────────────────────────────────
     def show_dialog(self, npc_name: str, lines: List[str],
@@ -328,27 +328,9 @@ class UI:
             self._plate_cache[name] = hit
         surface.blit(hit, (surface.get_width() - hit.get_width() - 8, y))
 
-    # ── UtilDlgEx 内嵌窗体（it/ic/is）──────────────────────────────
+    # ── UtilDlgEx 内嵌窗体：转发 render.conv 单源 ──────────────────
     def _dlg_frame(self, surface, x: int, y: int, w: int, content_h: int) -> None:
-        """画 UtilDlgEx 窗体：顶 it + 平铺 ic + 底 is。"""
-        t = self._img("UIWindow.img", "UtilDlgEx/it")
-        c = self._img("UIWindow.img", "UtilDlgEx/ic")
-        s = self._img("UIWindow.img", "UtilDlgEx/is")
-        if t is None or c is None or s is None:
-            return
-        if w != t.get_width():
-            t = pygame.transform.smoothscale(t, (w, t.get_height()))
-            c = pygame.transform.smoothscale(c, (w, c.get_height()))
-            s = pygame.transform.smoothscale(s, (w, s.get_height()))
-        surface.blit(t, (x, y))
-        ny = y + t.get_height()
-        remaining = max(0, content_h)
-        while remaining > 0:
-            hh = min(c.get_height(), remaining)
-            surface.blit(c, (x, ny), pygame.Rect(0, 0, w, hh))
-            ny += hh
-            remaining -= hh
-        surface.blit(s, (x, y + t.get_height() + content_h))
+        draw_dlg_frame(surface, self.assets, x, y, w, content_h)
 
     def _dlg_layout(self, n_lines: int) -> Tuple[int, int]:
         """返回 (窗体总高, 正文区高)。"""
@@ -405,8 +387,7 @@ class UI:
         return tail
 
     def _status_bar_h(self) -> int:
-        bar = self._img("StatusBar.img", "base/backgrnd")
-        return bar.get_height() if bar is not None else 71
+        return status_bar_height(self.assets)
 
     def status_bar_height(self) -> int:
         """状态栏高度（供聊天框等贴栏而立的 HUD 元件定位）。"""
@@ -497,14 +478,14 @@ class UI:
     def _draw_dialog_fallback(self, surface, title, wrapped) -> None:
         h, content_h = self._dlg_layout(len(wrapped))
         x = (surface.get_width() - DLG_W) // 2
-        y = surface.get_height() - 71 - 8 - h
+        y = surface.get_height() - self._status_bar_h() - 8 - h
         self.dialog_rect = pygame.Rect(x, y, DLG_W, h)
         self._dlg_frame(surface, x, y, DLG_W, content_h)
         head = self.font_big.render(title, True, (110, 68, 18))
         surface.blit(head, (x + DLG_TEXT_X, y + 7))
         ty = y + DLG_TOP_H + 8
         for ln in wrapped:
-            surface.blit(self.font.render(ln, True, (60, 52, 44)), (x + DLG_TEXT_X, ty))
+            surface.blit(self.font.render(ln, True, DLG_TEXT_BASE), (x + DLG_TEXT_X, ty))
             ty += DLG_LINE_H
         btn = self._img("UIWindow.img", "UtilDlgEx/BtOK/normal/0")
         if btn is not None:
@@ -527,5 +508,5 @@ class UI:
 
         txt = self.font_big.render("你 已 死 亡", True, (185, 45, 45))
         surface.blit(txt, (x + (374 - txt.get_width()) / 2, y + DLG_TOP_H + 14))
-        sub = self.font.render("按 R 返回村口重生", True, (60, 52, 44))
+        sub = self.font.render("按 R 返回村口重生", True, DLG_TEXT_BASE)
         surface.blit(sub, (x + (374 - sub.get_width()) / 2, y + DLG_TOP_H + 44))

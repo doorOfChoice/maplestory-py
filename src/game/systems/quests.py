@@ -403,22 +403,8 @@ def render_markup(text: str, assets: Optional[Assets] = None,
     return out.strip()
 
 
-_ICON_CODE_RE = re.compile(r"#c(\d+)#")
-
-
-def split_item_icons(text: str) -> List[Tuple[str, object]]:
-    """把文本按 #c<物品id># 内联图标码切成 ("t", str) / ("i", int) 段序列。"""
-    text = text or ""
-    out: List[Tuple[str, object]] = []
-    pos = 0
-    for m in _ICON_CODE_RE.finditer(text):
-        if m.start() > pos:
-            out.append(("t", text[pos:m.start()]))
-        out.append(("i", int(m.group(1))))
-        pos = m.end()
-    if pos < len(text):
-        out.append(("t", text[pos:]))
-    return out
+# split_item_icons 单源在 game.core.markup，此处保留历史导入入口
+from game.core.markup import split_item_icons  # noqa: F401
 
 
 def wrap_lines(text: str, width_px, font, _wrap) -> List[str]:

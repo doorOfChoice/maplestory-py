@@ -16,6 +16,7 @@ from typing import List, Optional, Tuple
 
 import pygame
 
+from game.render.conv import ui_image
 from game.render.windows.core.widgets import ellipsize, draw_menu_bg
 from game.render.windows.core.window import DOUBLE_CLICK_TIME, Window
 from game.systems import shop as shop_mod
@@ -91,18 +92,11 @@ class ShopWindow(Window):
         self._drag_bar: Optional[str] = None
         self._scroll_icon: Optional[pygame.Surface] = None
         self._exit_rect = pygame.Rect(0, 0, 0, 0)   # fallback 底部关闭钮
-        self._wz_cache: dict = {}
 
     # ── 素材取值 ───────────────────────────────────────────────────
     def _wz(self, path: str) -> Optional[pygame.Surface]:
-        """Shop/<path> → Surface（缓存）；无素材返回 None。"""
-        hit = self._wz_cache.get(path)
-        if hit is not None:
-            return hit
-        res = self.svc.assets.ui_surface("UIWindow.img", "Shop/" + path)
-        hit = res[0] if res else None
-        self._wz_cache[path] = hit
-        return hit
+        """Shop/<path> → Surface：转发 render.conv.ui_image 单源（assets 层已缓存）。"""
+        return ui_image(self.svc.assets, "UIWindow.img", "Shop/" + path)
 
     # ── 开关 ───────────────────────────────────────────────────────
     def open(self, npc_id: str) -> None:      # type: ignore[override]

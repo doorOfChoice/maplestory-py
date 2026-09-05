@@ -126,6 +126,20 @@ def test_detail_button_toggles_reward_view():
     assert win.show_reward is True
 
 
+def test_normal_detail_body_excludes_rewards():
+    """点行看详情：正文只有说明与目标行；奖励仅在「任务资讯」视图展示。"""
+    d = make_def("任务一", desc1="去打怪")
+    d.reward_exp, d.reward_money = 100, 500
+    win, mgr = open_log(make_player(["q1"], {"q1": d}),
+                        goal_lines=lambda qid: ["击杀 蓝宝 0/5"])
+    press(mgr, next(r for r, qid in win.row_rects if qid == "q1").center)
+    body = "\n".join(win.detail_chunks("q1"))
+    assert "去打怪" in body and "击杀 蓝宝" in body and "奖励" not in body
+    win.show_reward = True
+    reward = "\n".join(win.detail_chunks("q1"))
+    assert "经验：100" in reward and "金币：500" in reward
+
+
 # ── 放弃 ───────────────────────────────────────────────────────────
 def test_abandon_button_removes_quest():
     """进行中任务点放弃：调 QuestLog.abandon、清选中、列表移除。"""

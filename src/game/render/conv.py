@@ -8,13 +8,14 @@ WindowManager，会话打开时由 npc_dialogue 先于一切窗口消费点击�
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import pygame
 
 from game import settings
 from game.core.fonts import load_cjk_font
-from game.core.markup import split_colors
+from game.core.markup import (IconSeg, Segment, TextSeg, final_color, split_colors,
+                              split_item_icons)
 
 # UtilDlgEx 内嵌窗体几何
 DLG_W = 529            # it/ic/is 原生宽度
@@ -23,6 +24,7 @@ DLG_BOTTOM_H = 58      # is 高（底部蓝色页脚放按钮）
 DLG_TEXT_X = 32        # 白纸左缘内缩
 DLG_TEXT_W = 348       # 白纸内文字换行宽度
 DLG_LINE_H = 20
+DLG_TEXT_BASE = (60, 52, 44)   # 富文本无色段基色（会话面板/任务窗详情共用）
 
 # 会话面板：黑正文行与蓝字链接行共存于同一 UtilDlgEx 白纸面板
 LIST_ROW_H = 26
@@ -48,30 +50,107 @@ def wrap_text(text: str, width: int, font: pygame.font.Font) -> List[str]:
     return lines or [""]
 
 
-def wrap_segments(text: str, width: int,
-                  font: pygame.font.Font) -> List[List[Tuple[str, Optional[tuple]]]]:
-    """带 #r/#g/#b/#d/#k 颜色码的文本按像素宽折行 → 每行 (片段, 颜色) 列表。
+def wrap_segments(text: str, width: int, font: pygame.font.Font,
+                  icon_width: Optional[Callable[[int], int]] = None,
+                  ) -> List[List[Segment]]:
+    """带 #r/#g/#b/#d/#k 颜色码的文本按像素宽折行 → 每行 Segment 列表。
 
-    颜色 None = 基色；同色相邻片段合并，渲染层逐段 blit。
+    TextSeg.color None = 基色；同色相邻文本片段合并，渲染层逐段 blit。
+    传入 icon_width 时 #c<id># 切成 IconSeg（按该回调计宽参与折行）；
+    不传则图标码保留原文，维持会话面板旧画法。文本内 \n 强制分行。
     """
-    lines: List[List[Tuple[str, Optional[tuple]]]] = []
-    cur: List[Tuple[str, Optional[tuple]]] = []
+    lines: List[List[Segment]] = []
+    cur: List[Segment] = []
     cur_w = 0
-    for seg_text, color in split_colors(text):
-        for ch in seg_text:
-            w = font.size(ch)[0]
+
+    def flush() -> None:
+        nonlocal cur, cur_w
+        lines.append(cur)
+        cur = []
+        cur_w = 0
+
+    state: Optional[Tuple[int, int, int]] = None
+    for kind, val in split_item_icons(text) if icon_width else [("t", text)]:
+        if kind == "i":
+            assert icon_width is not None
+            w = icon_width(int(val))
             if cur and cur_w + w > width:
-                lines.append(cur)
-                cur = []
-                cur_w = 0
-            if cur and cur[-1][1] == color:
-                cur[-1] = (cur[-1][0] + ch, color)
-            else:
-                cur.append((ch, color))
+                flush()
+            cur.append(IconSeg(int(val)))
             cur_w += w
+            continue
+        segs = split_colors(val, state)
+        state = final_color(val, state)
+        for seg_text, color in segs:
+            for ch in seg_text:
+                if ch == "\n":
+                    flush()
+                    continue
+                w = font.size(ch)[0]
+                if cur and cur_w + w > width:
+                    flush()
+                if cur and isinstance(cur[-1], TextSeg) and cur[-1].color == color:
+                    cur[-1].text += ch
+                else:
+                    cur.append(TextSeg(ch, color))
+                cur_w += w
     if cur or not lines:
         lines.append(cur)
     return lines
+
+
+# ── UI.wz / UtilDlgEx 单源小件（会话面板与 UI 回退窗共用）────────────
+
+STATUS_BAR_FALLBACK_H = 71     # StatusBar 素材缺失时的回退高度
+
+
+def ui_image(assets, img: str, path: str) -> Optional[pygame.Surface]:
+    """取 UI.wz 图：assets.ui_surface 元组的首图，缺失 None。"""
+    hit = assets.ui_surface(img, path)
+    return hit[0] if hit else None
+
+
+def status_bar_height(assets) -> int:
+    bar = ui_image(assets, "StatusBar.img", "base/backgrnd")
+    return bar.get_height() if bar is not None else STATUS_BAR_FALLBACK_H
+
+
+def draw_dlg_frame(surface, assets, x: int, y: int, w: int, content_h: int) -> None:
+    """画 UtilDlgEx 窗体：顶 it + 平铺 ic + 底 is。"""
+    t = ui_image(assets, "UIWindow.img", "UtilDlgEx/it")
+    c = ui_image(assets, "UIWindow.img", "UtilDlgEx/ic")
+    s = ui_image(assets, "UIWindow.img", "UtilDlgEx/is")
+    if t is None or c is None or s is None:
+        return
+    if w != t.get_width():
+        t = pygame.transform.smoothscale(t, (w, t.get_height()))
+        c = pygame.transform.smoothscale(c, (w, c.get_height()))
+        s = pygame.transform.smoothscale(s, (w, s.get_height()))
+    surface.blit(t, (x, y))
+    ny = y + t.get_height()
+    remaining = max(0, content_h)
+    while remaining > 0:
+        hh = min(c.get_height(), remaining)
+        surface.blit(c, (x, ny), pygame.Rect(0, 0, w, hh))
+        ny += hh
+        remaining -= hh
+    surface.blit(s, (x, y + t.get_height() + content_h))
+
+
+def resolve_item_icons(text: str, item_icon, item_name) -> str:
+    """预解析 #c 图标码的可用性：可出图保留码原样，缺素材回退物品名/#id。
+
+    会话面板与任务窗详情共用，保证同一物品码在两处回退行为一致。
+    """
+    parts: List[str] = []
+    for kind, val in split_item_icons(text or ""):
+        if kind == "t":
+            parts.append(val)
+        elif item_icon(str(val)) is not None:
+            parts.append(f"#c{int(val)}#")
+        else:
+            parts.append(item_name(str(val)) or f"#{val}")
+    return "".join(parts)
 
 
 class ConvPanel:
@@ -92,6 +171,7 @@ class ConvPanel:
         # 上一帧登记的热区，供下一帧命中判断
         self.buttons: List[Tuple[pygame.Rect, str]] = []    # (rect, key)
         self.entry_rects: List[Tuple[pygame.Rect, int]] = []
+        self._icon_cache: dict = {}
 
     # ── 状态装载 ────────────────────────────────────────────────────
     def show(self, title: str, lines: List[str],
@@ -155,49 +235,59 @@ class ConvPanel:
         return [(x + DLG_TEXT_X, top + i * LIST_ROW_H,
                  w - 2 * DLG_TEXT_X, LIST_ROW_H) for i in range(n_rows)]
 
-    # ── 素材与绘制小件 ───────────────────────────────────────────────
+    # ── 素材与绘制小件（转发模块级单源）────────────────────────────────
     def _img(self, img: str, path: str) -> Optional[pygame.Surface]:
-        hit = self.assets.ui_surface(img, path)
-        return hit[0] if hit else None
+        return ui_image(self.assets, img, path)
 
     def _status_bar_h(self) -> int:
-        bar = self._img("StatusBar.img", "base/backgrnd")
-        return bar.get_height() if bar is not None else 71
+        return status_bar_height(self.assets)
 
     def _dlg_frame(self, surface, x: int, y: int, w: int, content_h: int) -> None:
-        """画 UtilDlgEx 窗体：顶 it + 平铺 ic + 底 is。"""
-        t = self._img("UIWindow.img", "UtilDlgEx/it")
-        c = self._img("UIWindow.img", "UtilDlgEx/ic")
-        s = self._img("UIWindow.img", "UtilDlgEx/is")
-        if t is None or c is None or s is None:
-            return
-        if w != t.get_width():
-            t = pygame.transform.smoothscale(t, (w, t.get_height()))
-            c = pygame.transform.smoothscale(c, (w, c.get_height()))
-            s = pygame.transform.smoothscale(s, (w, s.get_height()))
-        surface.blit(t, (x, y))
-        ny = y + t.get_height()
-        remaining = max(0, content_h)
-        while remaining > 0:
-            hh = min(c.get_height(), remaining)
-            surface.blit(c, (x, ny), pygame.Rect(0, 0, w, hh))
-            ny += hh
-            remaining -= hh
-        surface.blit(s, (x, y + t.get_height() + content_h))
+        draw_dlg_frame(surface, self.assets, x, y, w, content_h)
+
+    # ── 物品内联图标 ─────────────────────────────────────────────────
+    def _icon_surf(self, iid: str) -> Optional[pygame.Surface]:
+        getter = getattr(self.assets, "item_icon", None)
+        if getter is None:
+            return None
+        if iid not in self._icon_cache:
+            self._icon_cache[iid] = getter(iid)
+        return self._icon_cache[iid]
+
+    def _icon_width(self, iid: int) -> int:
+        surf = self._icon_surf(str(iid))
+        return surf.get_width() if surf is not None else 0
 
     # ── 绘制（单一渲染路径）──────────────────────────────────────────
     def draw(self, surface) -> None:
         if not self.visible:
             return
         vw, vh = surface.get_width(), surface.get_height()
-        wrapped: List[List[Tuple[str, Optional[tuple]]]] = []
+        # 正文先折行成素表面行（图标底对齐、行高取元素最大但不低于 DLG_LINE_H）
+        text_rows: List[Tuple[List[Tuple[pygame.Surface, int]], int]] = []
         for ln in self.lines:
-            for part in ln.split("\n"):
-                wrapped.extend(wrap_segments(part, DLG_TEXT_W, self.font))
+            prepared = resolve_item_icons(ln, self._icon_surf, self.assets.item_name)
+            for line in wrap_segments(prepared, DLG_TEXT_W, self.font,
+                                      self._icon_width):
+                elems: List[Tuple[pygame.Surface, int]] = []
+                line_h = DLG_LINE_H
+                for seg in line:
+                    if isinstance(seg, IconSeg):
+                        surf = self._icon_surf(str(seg.item_id))
+                        if surf is None:
+                            continue
+                        gap = 2
+                    else:
+                        surf = self.font.render(seg.text, True,
+                                                seg.color or DLG_TEXT_BASE)
+                        gap = 0
+                    line_h = max(line_h, surf.get_height())
+                    elems.append((surf, gap))
+                text_rows.append((elems, line_h))
         has_links = bool(self.links)
-        text_h = len(wrapped) * DLG_LINE_H
+        text_h = sum(h for _, h in text_rows)
         link_block = len(self.links) * LIST_ROW_H
-        if wrapped and has_links:
+        if text_rows and has_links:
             link_block += CONV_TEXT_LINK_GAP
         body_h = max(70, LIST_PAD_TOP + text_h + link_block + LIST_PAD_BOTTOM)
         h = DLG_TOP_H + body_h + DLG_BOTTOM_H
@@ -212,24 +302,23 @@ class ConvPanel:
         #              (x + DLG_TEXT_X, y + 7))
         # 黑正文行：逐段着色（颜色码/实体名高亮），None = 基色
         ty = y + DLG_TOP_H + LIST_PAD_TOP
-        for segs in wrapped:
+        for elems, line_h in text_rows:
             tx = x + DLG_TEXT_X
-            for seg, color in segs:
-                t = self.font.render(seg, True, color or (60, 52, 44))
-                surface.blit(t, (tx, ty))
-                tx += t.get_width()
-            ty += DLG_LINE_H
+            for surf, gap in elems:
+                surface.blit(surf, (tx, ty + line_h - surf.get_height()))
+                tx += surf.get_width() + gap
+            ty += line_h
 
         # 蓝字链接行：起点在标题+黑文本之后，悬停高亮与 Lv 灰标注沿用列表画法
         self.entry_rects = []
         if has_links:
-            gap = CONV_TEXT_LINK_GAP if wrapped else 0
+            gap = CONV_TEXT_LINK_GAP if text_rows else 0
             mx, my = pygame.mouse.get_pos()
             hx = mx * settings.VIEW_W // settings.WINDOW_W
             hy = my * settings.VIEW_H // settings.WINDOW_H
-            rows = self.row_rects(x, y + text_h + gap,
+            link_rows = self.row_rects(x, y + text_h + gap,
                                   DLG_TEXT_W + 2 * DLG_TEXT_X, len(self.links))
-            for i, ((rx, ry, rw, rh), (label, note)) in enumerate(zip(rows, self.links)):
+            for i, ((rx, ry, rw, rh), (label, note)) in enumerate(zip(link_rows, self.links)):
                 rect = pygame.Rect(rx, ry, rw, rh)
                 self.entry_rects.append((rect, i))
                 hovered = rect.collidepoint(hx, hy)

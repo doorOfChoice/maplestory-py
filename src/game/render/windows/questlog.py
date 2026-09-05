@@ -17,6 +17,8 @@ from typing import Dict, List, Optional, Tuple
 import pygame
 
 from game.core.jobs import JOBS
+from game.render.conv import (DLG_TEXT_BASE, IconSeg, resolve_item_icons,
+                              wrap_segments)
 from game.render.windows.core import widgets
 from game.render.windows.core.services import WindowServices
 from game.render.windows.core.window import Window
@@ -171,60 +173,55 @@ class QuestLogWindow(Window):
         return "".join(parts)
 
     def _markup(self, text: str) -> str:
-        """富文本路径（详情正文）：脱颜色/名称码但保留 #c 物品图标码。"""
+        """富文本路径（详情正文）：与会话面板 qmark 同参数 —— 保留色码并给
+        实体名自动包色，#c 物品图标码原样保留供折行层切段。"""
         a = self.svc.assets
         return render_markup(text, map_name=a.map_name_of, npc_name=a.npc_name,
-                             item_name=a.item_name, mob_name=a.mob_name_of)
+                             item_name=a.item_name, mob_name=a.mob_name_of,
+                             colors=True)
 
     def _draw_rich_text(self, surface, x: int, y: int, text: str,
                         width: int, fs, color) -> int:
-        """绘制一行（可含 \\n 与 #c 图标）并按宽折行，返回本行底部 y。
+        """绘制富文本（\\n / #c 图标 / 色码）并返回底部 y。
 
-        行内元素先缓冲再统一落笔：行高取元素最大高度、全部底对齐，
-        大物品图标不会压到上下文字行。
+        折行与会话面板共用 conv.wrap_segments 单源；本函数只负责落笔：
+        行内元素行高取元素最大高度、全部底对齐，大物品图标不压相邻文字行，
+        图标素材缺失回退物品名文字。
         """
         a = self.svc.assets
+        icons: Dict[int, Optional[pygame.Surface]] = {}
+
+        def resolve(iid: int) -> Optional[pygame.Surface]:
+            if iid not in icons:
+                icons[iid] = a.item_icon(str(iid))
+            return icons[iid]
+
+        def icon_width(iid: int) -> int:
+            surf = resolve(iid)
+            return surf.get_width() + 2 if surf is not None else fs.size(f"#{iid}#")[0]
+
+        prepared = resolve_item_icons(text, lambda iid: resolve(int(iid)), a.item_name)
         base_h = fs.get_height()
         ty = y
-        line: List[Tuple[pygame.Surface, int, int]] = []   # (surf, h, 右间距)
-        line_w, line_h = 0, base_h
-
-        def flush() -> None:
-            nonlocal line, line_w, line_h, ty
+        for line in wrap_segments(prepared, width, fs, icon_width):
+            elems: List[Tuple[pygame.Surface, int]] = []
+            line_h = base_h
+            for seg in line:
+                if isinstance(seg, IconSeg):
+                    surf = resolve(seg.item_id)
+                    if surf is None:
+                        surf = fs.render(f"#{seg.item_id}#", True, color)
+                    gap = 2
+                else:
+                    surf = fs.render(seg.text, True, seg.color or color)
+                    gap = 0
+                line_h = max(line_h, surf.get_height())
+                elems.append((surf, gap))
             px = x
-            for surf, h, gap in line:
-                surface.blit(surf, (px, ty + line_h - h))
+            for surf, gap in elems:
+                surface.blit(surf, (px, ty + line_h - surf.get_height()))
                 px += surf.get_width() + gap
-            advance = line_h + 4
-            line, line_w, line_h = [], 0, base_h
-            ty += advance
-
-        def add(surf: pygame.Surface, h: int, gap: int) -> None:
-            nonlocal line_w, line_h
-            w = surf.get_width()
-            if line and line_w + w > width:
-                flush()
-            line.append((surf, h, gap))
-            line_w += w + gap
-            line_h = max(line_h, h)
-
-        for kind, val in split_item_icons(text):
-            if kind == "i":
-                icon = a.item_icon(str(val))
-                if icon is not None:
-                    add(icon, icon.get_height(), 2)
-                    continue
-                val = a.item_name(str(val)) or f"#{val}"
-            for ch in val:
-                if ch == "\n":
-                    if line:
-                        flush()
-                    else:
-                        ty += base_h + 4
-                    continue
-                add(fs.render(ch, True, color), base_h, 0)
-        if line:
-            flush()
+            ty += line_h + 4
         return ty
 
     # ── 绘制：列表窗 ───────────────────────────────────────────────
@@ -303,7 +300,7 @@ class QuestLogWindow(Window):
             name = widgets.ellipsize(self._clean(defs[qid].name), fs,
                                      row_w - 8)
             surface.blit(fs.render(name, True, (255, 255, 255) if sel
-                                   else (60, 52, 44)),
+                                   else DLG_TEXT_BASE),
                          (rect.x + 4, rect.y + (ROW_H - fs.get_height()) // 2))
             self.row_rects.append((rect, qid))
         if len(ids) > VISIBLE_ROWS:
@@ -461,7 +458,7 @@ class QuestLogWindow(Window):
         ty = 0
         for text in chunks:
             ty = self._draw_rich_text(scratch, 10, ty, self._markup(text),
-                                      width, fs, (70, 62, 52)) + 2
+                                      width, fs, DLG_TEXT_BASE) + 2
         max_off = max(0, min(ty - view_h, scratch.get_height() - view_h))
         self.detail_offset = max(0, min(self.detail_offset, max_off))
         h = min(view_h, scratch.get_height() - self.detail_offset)
