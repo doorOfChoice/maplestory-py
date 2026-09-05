@@ -34,6 +34,9 @@ class _FakeAssets:
     def item_name(self, item_id: str) -> str:
         return f"物品{item_id[-2:]}"
 
+    def item_desc(self, item_id: str) -> str:
+        return f"介绍{item_id[-2:]}"
+
     def item_icon(self, item_id: str):
         return None
 
@@ -415,6 +418,40 @@ def test_shop_thumb_drag_scrolls():
     release(mgr, motion_pos)
     assert win._scroll_shelf > 0
     assert win._drag_bar is None
+
+
+# ── 商店：悬停 tooltip ─────────────────────────────────────────────
+def test_shop_hover_shelf_row_shows_tooltip_with_desc():
+    """鼠标悬停货架行：深色 Tooltip 含名称、单价与 String.wz 介绍。"""
+    win, mgr, _player, _combat = _shop_window()
+    motion(mgr, win.shelf_rects[0][0].center)
+    draw_once(mgr)
+    assert mgr._tip is not None
+    assert "物品00" in mgr._tip and "介绍00" in mgr._tip and "100" in mgr._tip
+
+
+def test_shop_hover_bag_row_shows_sell_tooltip():
+    """悬停背包行：Tooltip 给出卖价（单件 × 数量）。"""
+    from game.systems import shop as shop_mod
+    win, mgr, player, _combat = _shop_window()
+    player.inventory.consumes["02800000"].count = 3
+    draw_once(mgr)
+    motion(mgr, win.bag_rects[0][0].center)
+    draw_once(mgr)
+    assert mgr._tip is not None
+    assert "背包0" in mgr._tip and "×3" in mgr._tip
+    assert f"合计 {3 * shop_mod.sell_price(400)}" in mgr._tip
+
+
+def test_shop_tooltip_clears_when_leaving_rows():
+    """移开所有行后 Tooltip 不再出现（每帧重算）。"""
+    win, mgr, _player, _combat = _shop_window()
+    motion(mgr, win.shelf_rects[0][0].center)
+    draw_once(mgr)
+    assert mgr._tip is not None
+    motion(mgr, (win.rect.x + 5, win.rect.y + 5))
+    draw_once(mgr)
+    assert mgr._tip is None
 
 
 # ── 仓库 ───────────────────────────────────────────────────────────

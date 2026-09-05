@@ -22,6 +22,7 @@ from game.render.assets import Assets
 from game.render.effects import Effect
 from game.systems.drops import OfficialDropTable, load_official_table
 from game.systems.inventory import make_item
+from game.systems.scrolls import is_scroll_id
 from game.core.fonts import render_text
 
 
@@ -214,6 +215,9 @@ class DropItem:
             return None
         if self.item is not None and self.assets is not None:
             iid = self.item.get("id")
+            if is_scroll_id(iid):
+                from game.render.windows.core.widgets import scroll_icon
+                return scroll_icon()    # 234 段自制卷轴：统一自绘图标
             s = self.assets.item_icon(iid)
             if s is None:
                 s = self.assets.equip_icon(iid)

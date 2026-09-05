@@ -84,6 +84,8 @@ def _tab_items(inv: Inventory, tab: str) -> List[Item]:
 
 
 def _icon_of(svc: WindowServices, item: Item) -> Optional[pygame.Surface]:
+    if is_scroll_id(item.id):    # 234 段自制卷轴：WZ 同段是「祝福卷轴」，用自绘图标
+        return widgets.scroll_icon()
     if item.kind == "equip":
         return svc.assets.equip_icon(item.id)
     return svc.assets.item_icon(item.id)
@@ -97,8 +99,19 @@ def _blit_icon(surface, icon: pygame.Surface, cell: pygame.Rect,
                         cell.y + (cell.height - icon.get_height()) // 2))
 
 
-def _item_tip(item: Item) -> str:
-    """物品悬停提示文本（同 panels._item_tip）。"""
+def _asset_desc(svc: WindowServices, item_id: str) -> str:
+    """String.wz 物品描述（assets 无 item_desc 或无 desc 时为空串）。"""
+    getter = getattr(svc.assets, "item_desc", None)
+    if getter is None:
+        return ""
+    try:
+        return getter(item_id) or ""
+    except Exception:
+        return ""
+
+
+def _item_tip(item: Item, desc: str = "") -> str:
+    """物品悬停提示文本（同 panels._item_tip）；desc 为 String.wz 介绍。"""
     lines = [item.name]
     if item.kind == "equip":
         parts = []
@@ -126,8 +139,10 @@ def _item_tip(item: Item) -> str:
             if sc:
                 lines.append(f"{sc['name']} 成功率 {sc['rate']}%")
             lines.append("双击对当前武器强化")
-        else:
-            lines.append("点击使用")
+        elif spec.get("hp") or spec.get("mp"):
+            lines.append("双击使用")
+    if desc:
+        lines.append(desc)
     return "\n".join(lines)
 
 
@@ -219,10 +234,13 @@ class InventoryWindow(Window):
                 if is_scroll_id(item.id):
                     self._apply_scroll(item, player)
                     return
-                spec = inv.use_consume(item.id)
-                if spec:
-                    hp = int(spec.get("hp") or 0)
-                    mp = int(spec.get("mp") or 0)
+                spec = item.info.get("spec") or {}
+                hp = int(spec.get("hp") or 0)
+                mp = int(spec.get("mp") or 0)
+                if not hp and not mp:         # 弹药/宠物食品等无恢复效果：不吞物品
+                    self.svc.flash(f"无法使用 {item.name}")
+                    return
+                if inv.use_consume(item.id):
                     if hp:
                         player.hp = min(player.max_hp, player.hp + hp)
                     if mp:
@@ -320,7 +338,7 @@ class InventoryWindow(Window):
         sl = self._scroll_for(self.tab)
         sl.clamp(len(items), INV_SLOTS)
         base = sl.offset
-        mouse = pygame.mouse.get_pos()
+        mouse = self.svc.mouse()
         for i in range(INV_SLOTS):
             idx = base + i
             cx = x + INV_CELL_X[i % INV_COLS]
@@ -339,7 +357,7 @@ class InventoryWindow(Window):
                     surface.blit(cnt, (cell.right - cnt.get_width() - 2,
                                        cell.bottom - cnt.get_height()))
                 if cell.collidepoint(mouse):
-                    self.svc.tooltip(_item_tip(item))
+                    self.svc.tooltip(_item_tip(item, _asset_desc(self.svc, item.id)))
             self._cell_rects.append((cell, self.tab, idx))
 
         # 底部页脚：金币图标 + 持有数（白底板 → 深棕字）
@@ -373,7 +391,7 @@ class InventoryWindow(Window):
         sl.clamp(len(items), INV_SLOTS)
         cols = 6
         rows = (h - 58) // CELL
-        mouse = pygame.mouse.get_pos()
+        mouse = self.svc.mouse()
         for i in range(cols * rows):
             idx = sl.offset + i
             cx = x + PAD + (i % cols) * CELL
@@ -390,7 +408,7 @@ class InventoryWindow(Window):
                     surface.blit(cnt, (cell.right - cnt.get_width() - 2,
                                        cell.bottom - cnt.get_height() + 1))
                 if cell.collidepoint(mouse):
-                    self.svc.tooltip(_item_tip(item))
+                    self.svc.tooltip(_item_tip(item, _asset_desc(self.svc, item.id)))
             self._cell_rects.append((cell, self.tab, idx))
 
 
@@ -455,7 +473,7 @@ class EquipWindow(Window):
         self._size = (158, _inv_last_rect.height) if self._fallback else (EQP_W, EQP_H)
         self._slot_rects.clear()
         x, y = self.place(surface, self._size)
-        mouse = pygame.mouse.get_pos()
+        mouse = self.svc.mouse()
         if self._fallback:
             self._draw_fallback(surface, inv, mouse)
             return
@@ -475,7 +493,7 @@ class EquipWindow(Window):
                 if icon is not None:
                     _blit_icon(surface, icon, cell, 32)
                 if cell.collidepoint(mouse):
-                    self.svc.tooltip(_item_tip(item))
+                    self.svc.tooltip(_item_tip(item, _asset_desc(self.svc, item.id)))
             self._slot_rects.append((cell, slot))
 
         # 标题条右侧：职业 + 攻/防摘要（浅色条 → 深字）
@@ -517,7 +535,7 @@ class EquipWindow(Window):
                     surface.blit(icon, (cx + cell.w - icon.get_width() - 3,
                                         cy + cell.h - icon.get_height() - 3))
                 if cell.collidepoint(mouse):
-                    self.svc.tooltip(_item_tip(item))
+                    self.svc.tooltip(_item_tip(item, _asset_desc(self.svc, item.id)))
             self._slot_rects.append((cell, slot))
 
 

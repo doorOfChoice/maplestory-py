@@ -30,6 +30,22 @@ def ui_button_surface(svc: WindowServices, prefix: str, rect: pygame.Rect,
     return wz_surface(svc, f"{prefix}/{state}/0", img=img)
 
 
+# ── 自制卷轴图标（234xxxxx 段，Item.wz 无对应素材时自绘）────────────
+_scroll_icon: Optional[pygame.Surface] = None
+
+
+def scroll_icon() -> pygame.Surface:
+    """自制强化卷轴的 26×26 自绘卷轴图（模块级缓存，各窗口共用）。"""
+    global _scroll_icon
+    if _scroll_icon is None:
+        surf = pygame.Surface((26, 26), pygame.SRCALPHA)
+        pygame.draw.rect(surf, (216, 198, 156), (3, 3, 20, 20), border_radius=2)
+        for dx in (7, 12, 17):
+            pygame.draw.line(surf, (120, 90, 40), (dx, 5), (dx, 21), 1)
+        _scroll_icon = surf
+    return _scroll_icon
+
+
 def fit_icon(icon: pygame.Surface, size: int) -> pygame.Surface:
     """图标等比缩进 size×size 框（不放大）。"""
     if icon.get_width() > size or icon.get_height() > size:
@@ -68,6 +84,23 @@ class ScrollList:
 
 
 # ── 官方深色菜单底（ContextMenu t/c/s 三段）────────────────────────
+def _stretch_menu_top(t: pygame.Surface, W: int) -> pygame.Surface:
+    """顶段横向三段拉伸：左段（箭头+名称条起点）与右边缘保持原宽，
+    仅拉伸中段，保证名称条始终左对齐。"""
+    tw, th = t.get_size()
+    if W == tw:
+        return t
+    lw, rw = 18, 8
+    if W < lw + rw + 1:
+        return pygame.transform.smoothscale(t, (W, th))
+    out = pygame.Surface((W, th), pygame.SRCALPHA)
+    out.blit(t.subsurface(pygame.Rect(0, 0, lw, th)), (0, 0))
+    mid = t.subsurface(pygame.Rect(lw, 0, tw - lw - rw, th))
+    out.blit(pygame.transform.smoothscale(mid, (W - lw - rw, th)), (lw, 0))
+    out.blit(t.subsurface(pygame.Rect(tw - rw, 0, rw, th)), (W - rw, 0))
+    return out
+
+
 def draw_menu_bg(surface, svc: WindowServices, rect: pygame.Rect) -> bool:
     """UIWindow/ContextMenu 三段拼出任意高度深色底；素材缺失返回 False。"""
     t = wz_surface(svc, "ContextMenu/t")
@@ -77,7 +110,7 @@ def draw_menu_bg(surface, svc: WindowServices, rect: pygame.Rect) -> bool:
         return False
     W, H = rect.size
     th, sh = t.get_height(), s.get_height()
-    top = t if W == t.get_width() else pygame.transform.smoothscale(t, (W, th))
+    top = _stretch_menu_top(t, W)
     bot = s if W == s.get_width() else pygame.transform.smoothscale(s, (W, sh))
     surface.blit(top, rect.topleft)
     surface.blit(bot, (rect.x, rect.bottom - sh))
@@ -96,16 +129,19 @@ def panel_frame(surface, rect: pygame.Rect,
 
 
 # ── Tooltip / Toast ────────────────────────────────────────────────
+TOOLTIP_MAX_W = 320    # Tooltip 最大宽度，超出则正文折行
+
+
 def draw_tooltip(surface, svc: WindowServices, mouse_pos: Tuple[int, int],
                  text: str) -> None:
-    """鼠标旁官方深色 Tooltip：首行标题（font），其余正文（font_small）。"""
+    """鼠标旁官方深色 Tooltip：首行标题（font），其余正文（font_small，超宽折行）。"""
     fs, f = svc.ui.font_small, svc.ui.font
     lines = text.split("\n")
     text_pad = 9
     inner = max(f.size(lines[0])[0],
                 max((fs.size(l)[0] for l in lines[1:]), default=0))
-    avail_w = min(inner + text_pad * 2, surface.get_width() - 20)
-    x = min(mouse_pos[0] + 14, surface.get_width() - avail_w - 20)
+    avail_w = min(inner + text_pad * 2, TOOLTIP_MAX_W, surface.get_width() - 20)
+    x = min(mouse_pos[0] + 34, surface.get_width() - avail_w - 20)
     y = mouse_pos[1] + 14
     rect = pygame.Rect(x, y, avail_w, 26 + 16 + 8)
     if rect.bottom > surface.get_height():
@@ -119,7 +155,7 @@ def draw_tooltip(surface, svc: WindowServices, mouse_pos: Tuple[int, int],
     if not draw_menu_bg(surface, svc, rect):
         panel_frame(surface, rect, (120, 126, 140))
     surface.blit(f.render(wrapped[0][0], True, (245, 220, 140)),
-                 (rect.x + text_pad, rect.y + 5))
+                 (rect.x + 14, rect.y + 5))    # 落在左对齐的蓝色名称条内
     ty = rect.y + 27
     for group in wrapped[1:]:
         for ln in group:

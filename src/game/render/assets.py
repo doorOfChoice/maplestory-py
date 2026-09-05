@@ -873,7 +873,9 @@ class Assets:
             group = self._item_wz().root.subdirs.get(sub)
             img_name = f"{cat:04d}.img"
             if group is not None and img_name in group.images:
-                node = group.images[img_name].parse().get(f"{iid:08d}/info/icon")
+                # 官方卷轴（204xxxx 等）的 icon 多为 UOL 引用，先解析再解码
+                node = _resolve_uol(
+                    group.images[img_name].parse().get(f"{iid:08d}/info/icon"))
                 if isinstance(node, WzCanvasProperty):
                     pil = _decode_canvas_prop(node, self.region, self._item_wz())
                     if pil is not None:
@@ -989,7 +991,7 @@ class Assets:
             grp = self.wz["Character"].root.subdirs.get(subdir)
             img_name = f"{int(item_id):08d}.img"
             if grp is not None and img_name in grp.images:
-                node = grp.images[img_name].parse().get("info/icon")
+                node = _resolve_uol(grp.images[img_name].parse().get("info/icon"))
                 if isinstance(node, WzCanvasProperty):
                     pil = _decode_canvas_prop(node, self.region,
                                               self.wz["Character"])
@@ -1055,44 +1057,34 @@ class Assets:
         self._icon_cache[key] = result
         return result
 
-    def item_name(self, item_id: str) -> Optional[str]:
-        """String.wz 物品名（消耗品 / 装备 / 其他）。缓存。"""
-        key = f"name:{item_id}"
-        hit = self._icon_cache.get(key)
-        if hit is not None:
-            return hit
-        result = None
+    _EQP_STRING_CAT = {"Cap": "Cap", "Accessory": "Accessory",
+                       "Coat": "Coat", "Longcoat": "Longcoat",
+                       "Pants": "Pants", "Shoes": "Shoes",
+                       "Glove": "Glove", "Shield": "Shield",
+                       "Cape": "Cape", "Ring": "Ring",
+                       "Pendant": "Pendant", "Belt": "Belt",
+                       "Medal": "Medal", "Shoulder": "Shoulder",
+                       "Pocket": "Pocket", "Badge": "Badge",
+                       "Emblem": "Emblem", "Weapon": "Weapon",
+                       "PetEquip": "PetEquip", "TamingMob": "Taming"}
+
+    def _string_item_node(self, item_id: str):
+        """物品名 / 介绍所在的 String.wz 节点；找不到返回 None。"""
         try:
             iid = int(item_id)
         except (TypeError, ValueError):
-            iid = -1
+            return None
         try:
             sz = self.wz["String"]
             if 1000000 <= iid < 2000000:
                 subdir = self.equip_subdir(item_id)
-                cat_map = {"Cap": "Cap", "Accessory": "Accessory",
-                           "Coat": "Coat", "Longcoat": "Longcoat",
-                           "Pants": "Pants", "Shoes": "Shoes",
-                           "Glove": "Glove", "Shield": "Shield",
-                           "Cape": "Cape", "Ring": "Ring",
-                           "Pendant": "Pendant", "Belt": "Belt",
-                           "Medal": "Medal", "Shoulder": "Shoulder",
-                           "Pocket": "Pocket", "Badge": "Badge",
-                           "Emblem": "Emblem", "Weapon": "Weapon",
-                           "PetEquip": "PetEquip", "TamingMob": "Taming"}
                 node = sz.root.images.get("Eqp.img")
-                if node is not None and subdir in cat_map:
-                    n = (node.parse().get(f"Eqp/{cat_map[subdir]}/{iid}"))
-                    if n is not None:
-                        nm = n.get("name")
-                        result = str(nm.value) if nm is not None else None
+                if node is not None and subdir in self._EQP_STRING_CAT:
+                    return node.parse().get(f"Eqp/{self._EQP_STRING_CAT[subdir]}/{iid}")
             elif 2000000 <= iid < 3000000:
                 node = sz.root.images.get("Consume.img")
                 if node is not None:
-                    n = node.parse().get(str(iid))
-                    if n is not None:
-                        nm = n.get("name")
-                        result = str(nm.value) if nm is not None else None
+                    return node.parse().get(str(iid))
             elif 4000000 <= iid < 5000000:
                 node = sz.root.images.get("Etc.img")
                 if node is not None:
@@ -1100,12 +1092,39 @@ class Assets:
                     n = root.get(str(iid))
                     if n is None:
                         n = root.get(f"Etc/{iid}")   # 部分 WZ 有 Etc 包裹层
-                    if n is not None:
-                        nm = n.get("name")
-                        result = str(nm.value) if nm is not None else None
+                    return n
         except Exception:
-            result = None
+            return None
+        return None
+
+    def _string_item_field(self, item_id: str, field: str) -> Optional[str]:
+        """取物品 String.wz 节点下的 name / desc 文本字段。"""
+        node = self._string_item_node(item_id)
+        if node is None:
+            return None
+        prop = node.get(field)
+        return str(prop.value) if prop is not None else None
+
+    def item_name(self, item_id: str) -> Optional[str]:
+        """String.wz 物品名（消耗品 / 装备 / 其他）。缓存。"""
+        key = f"name:{item_id}"
+        hit = self._icon_cache.get(key)
+        if hit is not None:
+            return hit
+        result = self._string_item_field(item_id, "name")
         result = to_simplified(result) if result else result
+        self._icon_cache[key] = result
+        return result
+
+    def item_desc(self, item_id: str) -> Optional[str]:
+        """String.wz 物品介绍（desc）；WZ 内换行是字面 \\n，转为真实换行。缓存。"""
+        key = f"desc:{item_id}"
+        hit = self._icon_cache.get(key)
+        if hit is not None:
+            return hit
+        raw = self._string_item_field(item_id, "desc") or ""
+        raw = raw.replace("\\r\\n", "\n").replace("\\n", "\n").strip()
+        result = to_simplified(raw) if raw else None
         self._icon_cache[key] = result
         return result
 

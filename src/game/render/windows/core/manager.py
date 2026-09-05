@@ -15,6 +15,7 @@ import pygame
 
 from game import settings
 from game.render.windows.core import widgets
+from game.systems.scrolls import is_scroll_id
 from game.render.windows.core.services import WindowServices
 from game.render.windows.core.window import DOUBLE_CLICK_TIME, DRAG_THRESHOLD, \
     DragPickup, Window
@@ -48,8 +49,10 @@ class WindowManager:
         self._toast: Optional[Tuple[str, float]] = None
         self._tip: Optional[str] = None
         self._view: Tuple[int, int] = (settings.VIEW_W, settings.VIEW_H)
+        self._mouse: Tuple[int, int] = (-1, -1)   # 最近事件位置（VIEW 坐标）
         svc.flash = self.flash
         svc.tooltip = self.set_tooltip
+        svc.mouse = lambda: self._mouse
 
     # ── 注册 ───────────────────────────────────────────────────────
     def add(self, win: Window) -> Window:
@@ -93,6 +96,8 @@ class WindowManager:
 
     # ── 事件分发（返回 True = UI 已消费）───────────────────────────
     def dispatch(self, event) -> bool:
+        if hasattr(event, "pos"):
+            self._mouse = to_view_pos(event.pos)   # hover/tooltip 用最近位置
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             return self._left_down(to_view_pos(event.pos))
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
@@ -228,8 +233,7 @@ class WindowManager:
             if win.visible:
                 win.draw(surface)
         if self._tip is not None:
-            widgets.draw_tooltip(surface, self.svc, pygame.mouse.get_pos(),
-                                 self._tip)
+            widgets.draw_tooltip(surface, self.svc, self._mouse, self._tip)
         if self._pick is not None and self._pick.active:
             self._draw_drag_icon(surface, self._pick)
         if self._toast is not None:
@@ -254,8 +258,11 @@ class WindowManager:
             self._draw_drag_label(surface, d)
             return
         item = d.pk.item
-        icon = (self.svc.assets.equip_icon(item.id) if item.kind == "equip"
-                else self.svc.assets.item_icon(item.id))
+        if is_scroll_id(item.id):
+            icon = widgets.scroll_icon()        # 234 段自制卷轴：统一自绘图标
+        else:
+            icon = (self.svc.assets.equip_icon(item.id) if item.kind == "equip"
+                    else self.svc.assets.item_icon(item.id))
         if icon is None:
             return
         icon = widgets.fit_icon(icon, 32)

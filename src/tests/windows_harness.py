@@ -62,6 +62,9 @@ class FakeAssets:
     def item_name(self, item_id: str) -> str:
         return ""
 
+    def item_desc(self, item_id: str) -> str:
+        return ""
+
     def mob_name_of(self, mob_id) -> str:
         return f"mob{mob_id}"
 

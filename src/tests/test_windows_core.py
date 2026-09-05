@@ -6,7 +6,9 @@ import pygame
 
 from game import settings
 from game.systems.inventory import Item
+from game.render.windows.core import widgets
 from game.render.windows.core.manager import to_view_pos
+from game.render.windows.core.window import Window
 from tests.windows_harness import (BoxWindow, close_button_pos, draw_once,
                                    key_press, make_manager, make_services,
                                    motion, press, release, wheel)
@@ -188,6 +190,22 @@ def test_to_view_pos_identity_at_scale_one():
 
 
 # ── toast / tooltip 服务 ───────────────────────────────────────────
+def test_tooltip_long_desc_wraps_within_max_width():
+    svc = make_services()
+
+    class TipWindow(Window):
+        def draw(self, surface):
+            self.svc.tooltip("药水\n" + "红色药草研磨作成的药水，恢复HP约50" * 8)
+
+    win = TipWindow(svc)
+    win.visible = True
+    mgr = make_manager(win)
+    surface = draw_once(mgr)
+    area = surface.get_bounding_rect()
+    assert area.width <= widgets.TOOLTIP_MAX_W   # 超宽被折行压住
+    assert area.height > 3 * 16                  # 正文换成了多行
+
+
 def test_flash_is_rendered_frame_and_decays():
     mgr = make_manager()
     mgr.flash("背包已满")

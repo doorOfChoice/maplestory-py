@@ -12,9 +12,10 @@ from typing import List, Optional, Tuple
 import pygame
 
 from game import settings
-from game.render.windows.core.widgets import draw_menu_bg, ellipsize
+from game.render.windows.core.widgets import draw_menu_bg, ellipsize, scroll_icon
 from game.render.windows.core.window import Window
 from game.systems.inventory import Item, item_kind
+from game.systems.scrolls import is_scroll_id
 
 PANEL_W, PANEL_H = 600, 330
 TITLE_H = 26
@@ -54,6 +55,8 @@ class StorageWindow(Window):
         return max(1, (PANEL_H - TITLE_H - 20 - 56) // ROW_H)
 
     def _icon(self, item_id: str) -> Optional[pygame.Surface]:
+        if is_scroll_id(item_id):    # 234 段自制卷轴：统一用自绘图标
+            return scroll_icon()
         if item_kind(item_id) == "equip":
             return self.svc.assets.equip_icon(item_id)
         return self.svc.assets.item_icon(item_id)

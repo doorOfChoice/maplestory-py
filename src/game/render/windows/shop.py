@@ -17,7 +17,8 @@ from typing import List, Optional, Tuple
 import pygame
 
 from game.render.conv import ui_image
-from game.render.windows.core.widgets import ellipsize, draw_menu_bg
+from game.render.windows.inventory import _asset_desc
+from game.render.windows.core.widgets import ellipsize, draw_menu_bg, scroll_icon
 from game.render.windows.core.window import DOUBLE_CLICK_TIME, Window
 from game.systems import shop as shop_mod
 from game.systems.inventory import Item, item_kind, make_item
@@ -90,7 +91,6 @@ class ShopWindow(Window):
         self._shelf_bar_thumb = pygame.Rect(0, 0, 0, 0)
         self._bag_bar_thumb = pygame.Rect(0, 0, 0, 0)
         self._drag_bar: Optional[str] = None
-        self._scroll_icon: Optional[pygame.Surface] = None
         self._exit_rect = pygame.Rect(0, 0, 0, 0)   # fallback 底部关闭钮
 
     # ── 素材取值 ───────────────────────────────────────────────────
@@ -155,19 +155,10 @@ class ShopWindow(Window):
 
     def _icon(self, item_id: str) -> Optional[pygame.Surface]:
         if is_scroll_id(item_id):
-            return self._scroll_surf()
+            return scroll_icon()
         if item_kind(item_id) == "equip":
             return self.svc.assets.equip_icon(item_id)
         return self.svc.assets.item_icon(item_id)
-
-    def _scroll_surf(self) -> pygame.Surface:
-        if self._scroll_icon is None:
-            surf = pygame.Surface((26, 26), pygame.SRCALPHA)
-            pygame.draw.rect(surf, (216, 198, 156), (3, 3, 20, 20), border_radius=2)
-            for dx in (7, 12, 17):
-                pygame.draw.line(surf, (120, 90, 40), (dx, 5), (dx, 21), 1)
-            self._scroll_icon = surf
-        return self._scroll_icon
 
     # ── 交互 ───────────────────────────────────────────────────────
     def _rows(self) -> int:
@@ -455,8 +446,49 @@ class ShopWindow(Window):
             self._draw_official(surface, bg, player, combat)
         else:
             self._draw_fallback(surface, player, combat)
+        self._apply_hover()
         if self.qty_mode is not None:
             self._draw_qty_dialog(surface, self.svc.ui.font, self.svc.ui.font_small)
+
+    # ── 悬停 tooltip ───────────────────────────────────────────────
+    def _hover_tip(self, item_id: str, count: int = 1, sell: bool = False,
+                   name: Optional[str] = None) -> str:
+        """单行悬停文本：名称 + 介绍（String.wz desc）+ 单价 / 卖价。"""
+        price = self._shop_price(item_id)
+        title = name or self._item_name(item_id)
+        lines = [title + (f" ×{count}" if count > 1 else "")]
+        if is_scroll_id(item_id):
+            sc = SCROLLS.get(item_id)
+            if sc:
+                lines.append(f"成功率 {sc['rate']}% · 双击对当前武器强化")
+        desc = _asset_desc(self.svc, item_id)
+        if desc:
+            lines.append(desc)
+        if sell:
+            unit = shop_mod.sell_price(price)
+            lines.append(f"单件卖价 {unit} · 合计 {unit * max(1, count)}")
+        else:
+            lines.append(f"单价 {price} 金币")
+        return "\n".join(lines)
+
+    def _apply_hover(self) -> None:
+        """光标悬停货架 / 背包行时给出深色 Tooltip（含商品介绍）。"""
+        mouse = self.svc.mouse()
+        items = self._shelf_items()
+        for rect, i in self.shelf_rects:
+            if rect.collidepoint(mouse):
+                if i < len(items):
+                    self.svc.tooltip(self._hover_tip(items[i]))
+                return
+        entries = self._bag_entries(self._player)
+        for rect, i in self.bag_rects:
+            if rect.collidepoint(mouse):
+                if i < len(entries):
+                    _src, item = entries[i]
+                    self.svc.tooltip(self._hover_tip(item.id, item.count,
+                                                     sell=True,
+                                                     name=item.name))
+                return
 
     def _row_rect(self, col_x: int, col_w: int, y0: int, pitch: int,
                   index: int) -> pygame.Rect:

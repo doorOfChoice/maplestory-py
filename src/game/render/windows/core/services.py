@@ -7,7 +7,7 @@ flash / tooltip 在接线前为空操作，接线后指向 WindowManager 的全�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from game.core.keybindings import KeyBindings
@@ -33,3 +33,5 @@ class WindowServices:
     quest_goal_lines: Optional[Callable[[str], List[str]]] = None
     flash: Callable[..., None] = _noop
     tooltip: Callable[..., None] = _noop
+    # 最近一次鼠标位置（VIEW 坐标，由 WindowManager 随事件更新；未接线时视为无悬停）
+    mouse: Callable[[], "Tuple[int, int]"] = lambda: (-1, -1)

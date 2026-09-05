@@ -254,3 +254,52 @@ def test_double_click_scroll_charges_meso_and_burns_tuc():
     combat = mgr.svc.combat
     assert combat.meso == 100000 - (500 + 200 * player.level)   # 强化费结算
     assert len(player.refresh_calls) == 1
+
+
+# ── 不可用消耗品：双击不吞物品 ──────────────────────────────────────
+def test_double_click_unusable_consume_not_consumed():
+    """双击弹药 / 宠物食品等无恢复效果的消耗品：提示无法使用且不扣数量。"""
+    player = make_player()
+    player.inventory.add(Item(id="02060000", name="箭矢", count=5,
+                              kind="consume", info={"spec": {}}))
+    mgr, inv, equip = build(player)
+    open_pair(mgr, inv, equip)
+    cell = inv._cell_rects[0][0]
+    for _ in range(2):
+        press(mgr, cell.center)
+        release(mgr, cell.center)
+    assert player.inventory.consumes["02060000"].count == 5
+    assert mgr._toast is not None and "无法使用" in mgr._toast[0]
+
+
+# ── 卷轴图标：WZ 无 234 段素材时自绘兜底 ───────────────────────────
+def test_scroll_cell_falls_back_to_drawn_icon():
+    """FakeAssets 无图标：234 段卷轴仍拿到自绘 Surface，其余物品保持 None。"""
+    from game.render.windows.inventory import _icon_of
+    player = make_player()
+    player.inventory.add(Item(id="02340000", name="武器攻击力卷轴 60%",
+                              count=1, kind="consume", info={"spec": {}}))
+    player.inventory.add(potion())
+    mgr, inv, equip = build(player)
+    open_pair(mgr, inv, equip)
+    svc = inv.svc
+    scroll = player.inventory.consumes["02340000"]
+    potion_item = player.inventory.consumes["2000000"]
+    assert _icon_of(svc, scroll) is not None
+    assert _icon_of(svc, potion_item) is None
+
+
+# ── 悬停 tooltip：并入 String.wz 物品介绍 ───────────────────────────
+def test_hover_cell_tooltip_includes_wz_desc():
+    """鼠标悬停物品格：Tooltip 含名称与 desc 文本。"""
+    import pygame
+    player = make_player()
+    player.inventory.add(potion())
+    mgr, inv, equip = build(player)
+    inv.svc.assets.item_desc = lambda item_id: "红色药草研磨作成的药水"
+    open_pair(mgr, inv, equip)
+    cell = inv._cell_rects[0][0]
+    motion(mgr, cell.center)
+    draw_once(mgr)
+    assert mgr._tip is not None
+    assert "红药" in mgr._tip and "红色药草研磨作成的药水" in mgr._tip

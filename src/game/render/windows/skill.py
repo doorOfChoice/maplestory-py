@@ -62,7 +62,7 @@ class SkillWindow(Window):
             if jd.code == 0:
                 tabs.append((job_sp_group(jd.code), "新手"))
             elif n < len(_SKL_ORD):
-                tabs.append((job_sp_group(jd.code), _SKL_ORD[n] + "转"))
+                tabs.append((job_sp_group(jd.code), _SKL_ORD[n - 1] + "转"))
             n += 1
         groups = [g for g, _ in tabs]
         active = self._tab if self._tab in groups else (
