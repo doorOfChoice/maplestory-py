@@ -1,0 +1,32 @@
+-- 1052104（杜卡斯）：官方 v113 商店货架（自动生成，勿手改）
+-- 数据源：src/scripts/data/official_shops.csv（重跑 import_official_shops.py 再生成）
+local M = {}
+
+function M.shops()
+  return {
+    {
+      shop_id = "1052104_shop_1",
+      name = "商店",
+      items = {
+        {item_id = "02044700", price = 70000},
+        {item_id = "02043300", price = 70000},
+        {item_id = "02044400", price = 70000},
+        {item_id = "02044300", price = 70000},
+        {item_id = "02044200", price = 70000},
+        {item_id = "02044100", price = 70000},
+        {item_id = "02044000", price = 70000},
+        {item_id = "02043200", price = 70000},
+        {item_id = "02043100", price = 70000},
+        {item_id = "02043000", price = 70000},
+        {item_id = "02040703", price = 35000},
+        {item_id = "02040700", price = 35000},
+        {item_id = "02040600", price = 35000},
+        {item_id = "02040500", price = 35000},
+        {item_id = "02040003", price = 35000},
+        {item_id = "02040000", price = 35000},
+      }
+    },
+  }
+end
+
+return M

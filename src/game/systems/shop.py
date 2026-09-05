@@ -8,6 +8,7 @@ register_lua_shop() 把每个商店的货架明细（物品 id + 买价）与显
 · SHOP_NAMES  商店 id → 显示名（脚本缺省时回退 shop_id）
 · SHOP_PRICING 商店 id → 物品 id → 脚本买价（缺省即走 WZ / 兜底表）
 · 买价优先级：脚本价 > WZ info.price（assets.item_price）> settings.FALLBACK_PRICES
+  （「其他」类再走 ETC 分档表，见 item_price）
 · buy/sell 为纯函数：buy 扣钱入包（钱不够 / 包满失败），sell 按 SELL_RATE 出售。
 """
 
@@ -65,12 +66,24 @@ def shop_price(shop_id: str, item_id: str) -> Optional[int]:
 
 
 def item_price(item_id: str, assets=None) -> Optional[int]:
-    """物品基础买价：优先 WZ price 字段；缺省回退兜底表（卷轴等自制物品）。"""
+    """物品基础买价：优先 WZ price 字段；缺省回退兜底表（卷轴等自制物品）。
+
+    「其他」类（04xxxxxx）WZ 无 price 字段，走 settings 分档表：
+    单件覆盖 ETC_PRICES > 段分档 ETC_PRICE_TIERS > ETC_DEFAULT_PRICE。
+    """
     if assets is not None:
         p = assets.item_price(item_id)
         if p is not None:
             return p
-    return settings.FALLBACK_PRICES.get(item_id)
+    p = settings.FALLBACK_PRICES.get(item_id)
+    if p is not None:
+        return p
+    iid = str(item_id).zfill(8)
+    if iid.startswith("04"):
+        return (settings.ETC_PRICES.get(iid)
+                or settings.ETC_PRICE_TIERS.get(iid[:5])
+                or settings.ETC_DEFAULT_PRICE)
+    return None
 
 
 def buy_price(shop_id: str, item_id: str, assets=None) -> Optional[int]:

@@ -2,8 +2,9 @@
 
 底板优先 UIWindow.img/Shop/backgrnd（463×339 两栏），缺失走深色 fallback。
 交互（同原版）：行点击选中（原版 select 高亮）；对可堆叠物品点「购买 /
-出售」或**双击该行**弹出白底数量输入框（数字键录入、Enter/确认成交、
-Esc/取消放弃），买入按输入数量整单结算，卖出从整堆里拆卖 N 个
+出售」（背包行选中后按 Delete 亦等同「出售」）或**双击该行**弹出白底
+数量输入框（卖出预填拥有量、数字键录入、Enter/确认成交、Esc/取消放弃），
+买入按输入数量整单结算，卖出从整堆里拆卖 N 个
 （超存量按全堆封顶）；装备不弹框按 1 件成交；双栏各自滚动条（拇指可拖）、
 页签切换重置滚动。
 toast 归 WindowManager 全局；关闭钮/热区走基类公开 rect。
@@ -77,6 +78,7 @@ class ShopWindow(Window):
         # 数量输入弹框：None / "buy" / "sell"
         self.qty_mode: Optional[str] = None
         self.qty_text: str = ""
+        self._qty_prefilled: bool = False
         self.qty_box_rect = pygame.Rect(0, 0, 0, 0)
         self.qty_ok_rect = pygame.Rect(0, 0, 0, 0)
         self.qty_cancel_rect = pygame.Rect(0, 0, 0, 0)
@@ -259,7 +261,7 @@ class ShopWindow(Window):
                 self.sel_shelf, self.sel_bag = idx, None
                 if (self._is_double_click("shelf", idx)
                         and item_kind(self._shelf_items()[idx]) != "equip"):
-                    self.qty_mode, self.qty_text = "buy", ""
+                    self._open_qty("buy")
                 return True
         if self.buy_rect.collidepoint(pos) and combat is not None:
             self._do_buy(player, combat)
@@ -272,7 +274,7 @@ class ShopWindow(Window):
                 self.sel_bag, self.sel_shelf = idx, None
                 if (self._is_double_click("bag", idx)
                         and self._bag_entries(player)[idx][0][0] == "stack"):
-                    self.qty_mode, self.qty_text = "sell", ""
+                    self._open_qty("sell", self._bag_entries(player)[idx][1].count)
                 return True
         return True
 
@@ -286,14 +288,20 @@ class ShopWindow(Window):
 
     # ── 数量输入弹框 ───────────────────────────────────────────────
     def handle_keydown(self, key: int) -> bool:
-        """弹框打开期间模态吃键：数字录入 / 退格 / Enter 确认 / Esc 取消。"""
+        """弹框打开期间模态吃键：数字录入 / 退格 / Enter 确认 / Esc 取消；
+        平时选中背包行按 Delete / Backspace（Mac  delete 即退格）= 点「出售」。"""
         if self.qty_mode is None:
+            if (key in (pygame.K_DELETE, pygame.K_BACKSPACE)
+                    and self.sel_bag is not None and self._combat is not None):
+                self._do_sell(self._player, self._combat)
+                return True
             return False
         if pygame.K_0 <= key <= pygame.K_9:
             self._qty_type(str(key - pygame.K_0))
         elif pygame.K_KP0 <= key <= pygame.K_KP9:
             self._qty_type(str(key - pygame.K_KP0))
         elif key == pygame.K_BACKSPACE:
+            self._qty_prefilled = False
             self.qty_text = self.qty_text[:-1]
         elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             self._qty_confirm(self._player, self._combat)
@@ -301,13 +309,23 @@ class ShopWindow(Window):
             self._qty_cancel()
         return True
 
+    def _open_qty(self, mode: str, default: int = 0) -> None:
+        """打开数量框；default>0 时预填（如卖出=拥有量），首个数字键会替换预填值。"""
+        self.qty_mode = mode
+        self.qty_text = str(min(default, 10 ** QTY_MAX_DIGITS - 1)) if default else ""
+        self._qty_prefilled = bool(self.qty_text)
+
     def _qty_type(self, digit: str) -> None:
+        if self._qty_prefilled:        # 预填视作整串选中：打字即替换，改数免退格
+            self._qty_prefilled = False
+            self.qty_text = ""
         if len(self.qty_text) < QTY_MAX_DIGITS:
             self.qty_text += digit
 
     def _qty_cancel(self) -> None:
         self.qty_mode = None
         self.qty_text = ""
+        self._qty_prefilled = False
 
     def _qty_confirm(self, player, combat) -> None:
         """确认成交：买入按输入数量整单结算；卖出按存量封顶拆堆。"""
@@ -386,7 +404,7 @@ class ShopWindow(Window):
         if item_kind(item_id) == "equip":     # 不可堆叠：直接按 1 件成交
             self._buy_n(player, combat, item_id, self._shop_price(item_id), 1)
         else:
-            self.qty_mode, self.qty_text = "buy", ""
+            self._open_qty("buy")
 
     def _buy_n(self, player, combat, item_id: str, price: int, count: int) -> None:
         def make_fn(iid: str, n: int) -> Item:
@@ -410,11 +428,11 @@ class ShopWindow(Window):
         entries = self._bag_entries(player)
         if self.sel_bag >= len(entries):
             return
-        src, _item = entries[self.sel_bag]
+        src, item = entries[self.sel_bag]
         if src[0] == "equip":                 # 散件装备：整件直接卖
             self._sell_got(combat, player.inventory.pop_equip(src[1]))
         else:
-            self.qty_mode, self.qty_text = "sell", ""
+            self._open_qty("sell", item.count)   # 预填拥有量，直接确认即全卖
 
     def _sell_got(self, combat, got: Optional[Item]) -> None:
         if got is None:

@@ -233,6 +233,72 @@ def test_shop_buy_unaffordable_quantity_fails_with_flash():
     assert mgr._toast is not None
 
 
+def test_shop_sell_dialog_prefills_owned_count():
+    """出售弹框默认预填拥有数量：打开即 qty_text=存量，直接 Enter 整堆卖光。"""
+    from game.systems import shop as shop_mod
+    win, mgr, player, combat = _shop_window()
+    player.inventory.consumes["02800000"].count = 5
+    draw_once(mgr)
+    _click(mgr, win.bag_rects[0][0].center)
+    draw_once(mgr)
+    _click(mgr, win.sell_rect.center)
+    assert win.qty_text == "5"
+    assert key_press(mgr, pygame.K_RETURN)
+    assert "02800000" not in player.inventory.consumes
+    assert combat.meso == 10000 + 5 * shop_mod.sell_price(400)
+
+
+def test_shop_sell_dialog_first_digit_replaces_default():
+    """预填后首个数字键替换默认值（改数量不必先退格），其后继续追加。"""
+    win, mgr, player, _combat = _shop_window()
+    player.inventory.consumes["02800000"].count = 12
+    draw_once(mgr)
+    _click(mgr, win.bag_rects[0][0].center)
+    draw_once(mgr)
+    _click(mgr, win.sell_rect.center)
+    assert win.qty_text == "12"
+    _type_digits(mgr, "3")
+    assert win.qty_text == "3"
+    _type_digits(mgr, "5")
+    assert win.qty_text == "35"
+
+
+def test_shop_delete_key_sells_selected_stack():
+    """背包堆选中后按 Delete（Mac 为退格键）等同点「出售」：弹数量框并预填拥有量。"""
+    win, mgr, player, _combat = _shop_window()
+    player.inventory.consumes["02800000"].count = 4
+    draw_once(mgr)
+    _click(mgr, win.bag_rects[0][0].center)
+    assert key_press(mgr, pygame.K_BACKSPACE)
+    assert win.qty_mode == "sell"
+    assert win.qty_text == "4"
+    assert key_press(mgr, pygame.K_DELETE)
+    assert win.qty_mode == "sell"
+
+
+def test_shop_delete_key_sells_equip_immediately():
+    """散件装备选中后按 Delete：整件直接卖出，不弹数量框。"""
+    win, mgr, player, combat = _shop_window()
+    register_shop_profile("wheelshop", "杂货",
+                          [("01452000", 5000)] + [(i, 100)
+                                                  for i in win._shelf_items()[1:]])
+    player.inventory.consumes.clear()
+    player.inventory.equips.append(Item(id="01452000", name="铁剑",
+                                        count=1, kind="equip"))
+    draw_once(mgr)
+    _click(mgr, win.bag_rects[0][0].center)
+    assert key_press(mgr, pygame.K_DELETE)
+    assert win.qty_mode is None
+    assert player.inventory.equips == []
+    assert combat.meso == 10000 + 2500
+
+
+def test_shop_delete_without_selection_not_consumed():
+    """未选中任何背包行时 Delete 不被商店吃掉（留给全局按键）。"""
+    win, mgr, _player, _combat = _shop_window()
+    assert not win.handle_keydown(pygame.K_DELETE)
+
+
 def test_shop_sell_stack_opens_dialog_partial_sell():
     """卖消耗品堆：点「出售」弹数量框 → 输 2 → 卖半堆留 3、金币按 2 件计。"""
     from game.systems import shop as shop_mod

@@ -107,6 +107,25 @@ def test_item_price_fallback_for_scrolls():
     assert item_price("02340000", assets=None) == settings.FALLBACK_PRICES["02340000"]
 
 
+def test_item_price_etc_by_tier():
+    """「其他」类 WZ 无 price → 按 id 段分档兜底（母矿 / 催化剂 / 普通素材）。"""
+    assert item_price("04004000", assets=None) == settings.ETC_PRICE_TIERS["04004"]
+    assert item_price("04130000", assets=None) == settings.ETC_PRICE_TIERS["04130"]
+    assert item_price("4000000", assets=None) == settings.ETC_DEFAULT_PRICE  # 未补零 id
+
+
+def test_item_price_etc_rare_override():
+    """稀有怪兽素材单件显式覆盖，优先于分档价。"""
+    assert item_price("04000244", assets=None) == settings.ETC_PRICES["04000244"]
+    assert item_price("04000244", assets=None) > settings.ETC_DEFAULT_PRICE
+
+
+def test_sell_etc_uses_tier_price():
+    """出售「其他」经分档兜底价计价，卖价不再是 0。"""
+    price = buy_price("potions", "04006000", assets=None)   # 魔法石
+    assert price is not None and sell_price(price) > 0
+
+
 def test_register_lua_shop_for_unknown_npc():
     """未注册的 NPC 返回空列表。"""
     assert shops_of("9999998") == []
