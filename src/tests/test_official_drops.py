@@ -49,6 +49,34 @@ def test_meso_row_rolls_separately_from_items():
     assert [it["id"] for it in res.items] == ["4000000"]
 
 
+def test_quest_row_needs_active_quest():
+    """带 quest 的行：不在进行中任务集内不掷骰；传入该任务才按掉率掉。"""
+    table = OfficialDropTable.from_dict({
+        "210100": [{"item": "4031273", "min": 1, "max": 1, "chance": 1_000_000,
+                    "quest": 2104}],
+    })
+    assert table.roll("210100", random.Random(1)).items == []
+    assert table.roll("210100", random.Random(1), active_quests={"2104"}
+                     ).items == [{"id": "4031273", "count": 1}]
+    assert table.roll("210100", random.Random(1), active_quests={"2105"}
+                     ).items == []
+
+
+def test_quest_filter_only_skips_quest_rows():
+    """任务过滤只作用于任务限定行：普通物品/金币行不受进行中任务集影响。"""
+    table = OfficialDropTable.from_dict({
+        "210100": [
+            {"item": "0", "min": 8, "max": 12, "chance": 1_000_000},
+            {"item": "4000000", "min": 1, "max": 1, "chance": 1_000_000,
+             "quest": 2104},
+            {"item": "2000000", "min": 1, "max": 1, "chance": 1_000_000},
+        ],
+    })
+    res = table.roll("210100", random.Random(1))
+    assert 8 <= res.meso <= 12
+    assert [it["id"] for it in res.items] == ["2000000"]
+
+
 def test_all_rows_roll_independently_multiple_drops():
     """逐行独立掷骰：全命中的行一次击杀全部掉出（原版可多件）。"""
     table = OfficialDropTable.from_dict({

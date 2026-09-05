@@ -65,6 +65,15 @@ def test_force_complete_marks_completed_without_rewards():
     assert [q.qid for q in got] == []
 
 
+def test_active_quests_lists_only_accepted():
+    """active_quests 只含进行中任务：已完成与未接取都不在内（任务限定掉落下判定用）。"""
+    defs = make_defs()
+    log = QuestLog(defs)
+    log.status["1"] = "accepted"
+    log.status["2"] = "completed"
+    assert log.active_quests() == {"1"}
+
+
 def test_force_complete_unknown_qid_noop():
     """不存在的 qid 调用 force_complete 不报错。"""
     defs = make_defs()

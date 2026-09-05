@@ -2,11 +2,13 @@
 
 数据源：台服 v113 服务端 SQL 的 drop_data 表，经 src/scripts/import_official_drops.py
 提取为 resources/content/drops.json，按 mob 分组，每行
-{item, min, max, chance}：item 为 "0" 表示金币行，chance 为百万分比
-（个别行 >1000000，按必掉处理）。
+{item, min, max, chance[, quest]}：item 为 "0" 表示金币行，chance 为百万分比
+（个别行 >1000000，按必掉处理）；quest 为任务限定行专属，表示需进行中该任务
+（quest_id）才会掉。
 
 掷骰模型与服务端一致：逐行独立 roll，命中则在 [min, max] 均匀取数量；
-一行都不中则无掉落。金币行命中后合并为一堆。
+一行都不中则无掉落。金币行命中后合并为一堆。任务限定行只在调用方传入的
+进行中任务集（active_quests）含该任务时参与掷骰。
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import json
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from game import settings
 
@@ -56,10 +58,15 @@ class OfficialDropTable:
         return _canon_mob_id(mob_id) in self._rows
 
     def roll(self, mob_id: str,
-             rng: Optional[random.Random] = None) -> DropRoll:
+             rng: Optional[random.Random] = None,
+             active_quests: Optional[Set[str]] = None) -> DropRoll:
+        """掷骰一个怪的掉落行；任务限定行仅当 quest 在 active_quests 内才参与。"""
         rng = rng or random
         res = DropRoll()
         for row in self._rows.get(_canon_mob_id(mob_id), []):
+            quest = int(row.get("quest", 0) or 0)
+            if quest > 0 and str(quest) not in (active_quests or ()):
+                continue
             if rng.randrange(1_000_000) >= int(row["chance"]):
                 continue
             qty = rng.randint(int(row["min"]), int(row["max"]))

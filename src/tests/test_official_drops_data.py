@@ -34,6 +34,16 @@ def test_all_rows_have_valid_item_ids_and_chance():
             assert item.isdigit() and 1 <= len(item) <= 9, mob_id
             assert row["chance"] >= 0
             assert 1 <= row["min"] <= row["max"]
+            assert int(row.get("quest", 0)) >= 0
+
+
+def test_quest_conditional_rows_are_exported():
+    """任务限定行保留在生成物中并带 quest 字段（运行时按进行中任务过滤）。"""
+    quest_rows = [r for rows in _raw().values() for r in rows
+                  if int(r.get("quest", 0)) > 0]
+    assert len(quest_rows) == 406
+    pig = next(r for r in _raw()["6230100"] if r["item"] == "4031213")
+    assert pig["quest"] == 2097 and pig["chance"] == 200_000
 
 
 def test_blue_snail_official_meso_and_shell_drops():

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from game.render.assets import Assets
 from game.core.localize import to_simplified
@@ -438,6 +438,10 @@ class QuestLog:
 
     def started(self, qid: str) -> bool:
         return qid in self.status
+
+    def active_quests(self) -> Set[str]:
+        """进行中任务的 qid 集合（任务限定掉落的参与判定）。"""
+        return {qid for qid, st in self.status.items() if st == Q_ACCEPTED}
 
     def quest(self, qid: str) -> Optional[QuestDef]:
         return self.defs.get(qid)

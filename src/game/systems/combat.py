@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import random
-from typing import List, Optional, Protocol, Tuple
+from typing import List, Optional, Protocol, Set, Tuple
 
 import pygame
 
@@ -496,7 +496,7 @@ class Combat:
             pass
         ground = self._surface_y(mob.x, mob.cy)
         if self.drop_table is not None and self.drop_table.has_mob(str(mob.mob_id)):
-            self._spawn_official_drops(mob, ground)
+            self._spawn_official_drops(mob, ground, self._active_quest_ids(player))
             return
         meso = mob.exp * random.randint(3, 6) + random.randint(1, 5)
         self.drops.append(DropItem(
@@ -508,9 +508,16 @@ class Combat:
                 mob.x + random.uniform(-18, 18), mob.cy - 20,
                 item=drop, ground_y=ground, assets=self.assets))
 
-    def _spawn_official_drops(self, mob, ground: Optional[float]) -> None:
+    @staticmethod
+    def _active_quest_ids(player) -> Set[str]:
+        """玩家进行中任务 id 集（str）：任务限定掉落的参与判定。"""
+        getter = getattr(getattr(player, "quests", None), "active_quests", None)
+        return {str(q) for q in getter()} if callable(getter) else set()
+
+    def _spawn_official_drops(self, mob, ground: Optional[float],
+                              active_quests: Optional[Set[str]] = None) -> None:
         """官方掉落下同一击杀可出多件物品 + 一堆金币（金币行命中时）。"""
-        res = self.drop_table.roll(str(mob.mob_id))
+        res = self.drop_table.roll(str(mob.mob_id), active_quests=active_quests)
         if res.meso > 0:
             self.drops.append(DropItem(
                 mob.x + random.uniform(-14, 14), mob.cy - 20,

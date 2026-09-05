@@ -117,6 +117,40 @@ def test_mob_id_with_leading_zero_matches_official_table():
     assert len(c.drops) == 2   # 金币 + 物品，官方路径而非回退
 
 
+def test_quest_row_drops_only_with_active_quest():
+    """任务限定行：玩家进行中任务含该行 quest 才掉，否则按缺行处理。"""
+    table = OfficialDropTable.from_dict({
+        "210100": [
+            {"item": "2000000", "min": 1, "max": 1, "chance": 1_000_000},
+            {"item": "4031273", "min": 1, "max": 1, "chance": 1_000_000,
+             "quest": 2104},
+        ],
+    })
+
+    class _Quests:
+        def __init__(self, active):
+            self._active = active
+
+        def on_kill(self, mob_id):
+            pass
+
+        def active_quests(self):
+            return self._active
+
+    player = _Player()
+    player.quests = _Quests({"2104"})
+    c = Combat(_Assets(), drop_table=table)
+    c.player_attack(player, [_Mob()])
+    assert [d.item["id"] for d in c.drops if not d.is_meso] == \
+        ["2000000", "4031273"]
+
+    c2 = Combat(_Assets(), drop_table=table)
+    player2 = _Player()
+    player2.quests = _Quests(set())
+    c2.player_attack(player2, [_Mob()])
+    assert [d.item["id"] for d in c2.drops if not d.is_meso] == ["2000000"]
+
+
 def test_item_row_without_icon_is_not_spawned():
     """图标解析不出（如 8 位商城道具）的行不生成看不见的掉落。"""
     class _NoIconAssets(_Assets):
