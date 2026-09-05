@@ -71,6 +71,16 @@ def usable_portals(portals: List[Dict],
     return result
 
 
+# ── 回程卷轴目标 ────────────────────────────────────────────────────
+
+def scroll_target(move_to: int, return_map) -> Optional[str]:
+    """回程卷轴落点：moveTo 为哨兵时取当前地图 returnMap；无落点返回 None。"""
+    if move_to == NO_TARGET:
+        mid = str(int(return_map)) if return_map else None
+        return None if mid == str(NO_TARGET) else mid
+    return str(move_to)
+
+
 # ── NPC 传送目的地（由 content/npc/*.lua 的 entries() 注册）──────────
 
 # npc_id → [(目的地名, 地图 id), ...]；出租车等传送 NPC 的唯一事实来源在 Lua

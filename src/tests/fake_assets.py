@@ -91,6 +91,9 @@ class FakeAssets:
     def map_exists(self, map_id: str) -> bool:
         return str(map_id) in ("100010000", "200000000")
 
+    def current_return_map(self) -> int:
+        return 200000000 if self.map_id == "100010000" else 0
+
     def npc_name(self, *a) -> str:
         return "假NPC"
 

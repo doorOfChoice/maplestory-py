@@ -18,6 +18,7 @@ import pygame
 from game import settings
 from game.core.chat import Chat
 from game.core.keybindings import KeyBindings, item_id_of_action
+from game.core import travel
 from game.render.assets import Assets
 from game.render.chat import ChatView
 from game.render.cursor import GameCursor
@@ -175,6 +176,8 @@ class Game:
         self._dialogue = NpcDialogueController(self.ctx, self.quest_defs)
         # 出租车菜单点选目的地 → 走与传送门同一套切图加载（落目标图出生门）
         self._dialogue.warp = lambda map_id: self._enter_map(map_id, None)
+        # 回程卷轴：moveTo → 同一套切图（哨兵解析为当前图 returnMap）
+        self.ctx.world.player.on_warp = self._warp_from_scroll
         self._banner: Optional[Tuple[str, str]] = None
         self._banner_timer = 0.0
         self._pickup_timer = 0.0
@@ -492,6 +495,18 @@ class Game:
         self.ctx.world.respawn_scene()
 
     # ── 传送门 / 地图切换 ──────────────────────────────────────────
+    def _warp_from_scroll(self, move_to: int) -> Optional[str]:
+        """回程卷轴落点校验 + 切图：成功 None，失败返回原因（不扣卷轴）。"""
+        if self._loading:
+            return "地图切换中，暂不能使用"
+        if self.dead:
+            return "无法在死亡状态下使用"
+        target = travel.scroll_target(move_to, self.assets.current_return_map())
+        if target is None or not self.assets.map_exists(target):
+            return "当前地图无法使用回程卷轴"
+        self._enter_map(target, None)
+        return None
+
     def _enter_map(self, map_id: str, portal_name: Optional[str]) -> None:
         """切换到目标地图：后台渲染地图，主线程显示加载画面。"""
         if self._loading:

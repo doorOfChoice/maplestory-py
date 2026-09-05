@@ -1,7 +1,8 @@
 """地图通行纯函数：传送门目标解析、触发方式分类、可用性过滤（合成数据，不依赖 WZ）。"""
 from __future__ import annotations
 
-from game.core.travel import portal_target, portal_trigger, portal_hidden, usable_portals
+from game.core.travel import (NO_TARGET, portal_hidden, portal_target,
+                              portal_trigger, scroll_target, usable_portals)
 
 
 def portal(ptype, tm=999999999, name="p"):
@@ -72,3 +73,14 @@ def test_same_map_flag_marks_self_target():
     by_name = {p["name"]: p for p in result}
     assert by_name["loop"]["same_map"] is True
     assert by_name["out"]["same_map"] is False
+
+
+def test_scroll_target_resolves_sentinel_to_return_map():
+    """回程卷轴 moveTo=999999999 → 当前图 returnMap；显式目标原样字符串化。"""
+    assert scroll_target(NO_TARGET, 100000000) == "100000000"
+    assert scroll_target(104000000, 100000000) == "104000000"
+
+
+def test_scroll_target_without_return_map_is_none():
+    assert scroll_target(NO_TARGET, 0) is None
+    assert scroll_target(NO_TARGET, None) is None

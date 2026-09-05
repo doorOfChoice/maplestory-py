@@ -272,6 +272,37 @@ def test_double_click_unusable_consume_not_consumed():
     assert mgr._toast is not None and "无法使用" in mgr._toast[0]
 
 
+# ── 双击门控：满血拒用 / 回程卷轴走 on_warp ─────────────────────────
+def test_double_click_full_hp_potion_flashes_and_keeps_stack():
+    player = make_player()
+    player.hp = player.max_hp
+    player.inventory.add(potion())
+    mgr, inv, equip = build(player)
+    open_pair(mgr, inv, equip)
+    cell = inv._cell_rects[0][0]
+    for _ in range(2):
+        press(mgr, cell.center)
+        release(mgr, cell.center)
+    assert mgr._toast is not None and "HP/MP 已满" in mgr._toast[0]
+    assert player.inventory.consumes["2000000"].count == 12
+
+
+def test_double_click_return_scroll_warps_and_consumes():
+    player = make_player()
+    warped: list = []
+    player.on_warp = lambda move_to: warped.append(move_to) or None
+    player.inventory.add(Item(id="02030000", name="回程卷轴", count=1,
+                              kind="consume", info={"spec": {"moveTo": 999999999}}))
+    mgr, inv, equip = build(player)
+    open_pair(mgr, inv, equip)
+    cell = inv._cell_rects[0][0]
+    for _ in range(2):
+        press(mgr, cell.center)
+        release(mgr, cell.center)
+    assert warped == [999999999]
+    assert "02030000" not in player.inventory.consumes
+
+
 # ── 卷轴图标：WZ 无 234 段素材时自绘兜底 ───────────────────────────
 def test_scroll_cell_falls_back_to_drawn_icon():
     """FakeAssets 无图标：234 段卷轴仍拿到自绘 Surface，其余物品保持 None。"""

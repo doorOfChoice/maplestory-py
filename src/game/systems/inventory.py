@@ -198,6 +198,13 @@ class Inventory:
         return False
 
     # ── 消耗品 ─────────────────────────────────────────────────────
+    def peek_consume(self, item_id: str) -> Optional[dict]:
+        """预览消耗品 spec（不扣数量）；不存在或数量非法返回 None。"""
+        item = self.consumes.get(item_id)
+        if item is None or item.count <= 0:
+            return None
+        return dict(item.info.get("spec") or {})
+
     def use_consume(self, item_id: str) -> Optional[dict]:
         """使用一个消耗品，返回其 spec（hp/mp 恢复）；用完自动移除。"""
         item = self.consumes.get(item_id)

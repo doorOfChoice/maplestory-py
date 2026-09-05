@@ -86,6 +86,30 @@ def test_map_switch_finishes_loading(game):
     assert game.ctx.assets.map_id == "200000000"
 
 
+def test_return_scroll_wires_player_warp_to_map_switch(game):
+    """回程卷轴端到端：使用 → 哨兵解析为当前图 returnMap → 进入切图加载。"""
+    from game.systems.inventory import Item
+    _boot(game)
+    p = game.ctx.world.player
+    p.inventory.add(Item(id="02030000", name="回程卷轴", count=1,
+                         kind="consume", info={"spec": {"moveTo": 999999999}}))
+    assert p.use_item_by_id("02030000")
+    assert game._loading
+    assert "02030000" not in p.inventory.consumes
+
+
+def test_return_scroll_refused_on_unknown_target_keeps_item(game):
+    """目标图不存在：拒绝使用并保留卷轴。"""
+    from game.systems.inventory import Item
+    _boot(game)
+    p = game.ctx.world.player
+    p.inventory.add(Item(id="02030001", name="某城卷轴", count=1,
+                         kind="consume", info={"spec": {"moveTo": 123456789}}))
+    assert not p.use_item_by_id("02030001")
+    assert p.inventory.consumes["02030001"].count == 1
+    assert not game._loading
+
+
 def test_respawn_recovers_player(game):
     """重生：hp 回满、世界实体重建、无崩溃。"""
     _boot(game)

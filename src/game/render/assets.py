@@ -385,6 +385,10 @@ class Assets:
         """地图是否存在（GM 传送前的廉价校验，不渲染）。"""
         return self.map_renderer.has_map(map_id)
 
+    def current_return_map(self) -> int:
+        """当前地图 info.returnMap（回程卷轴哨兵落点）；无则 0。"""
+        return int((self.map_desc or {}).get("returnMap") or 0)
+
     def start_load_map(self, map_id: str) -> None:
         """请求真实切图：高优先级入队，主线程轮询 is_load_done。"""
         self._load_result = None

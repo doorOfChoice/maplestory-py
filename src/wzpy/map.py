@@ -443,6 +443,7 @@ class MapRenderer:
                 "name": name,
                 "street": street,
                 "bounds": self._bounds(root).as_dict(),
+                "returnMap": _int(root.get("info/returnMap")),
                 "layers": layers,
                 "counts": {
                     "tiles": tile_total,

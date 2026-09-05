@@ -12,6 +12,8 @@ import pygame
 
 from game import settings
 from game.core import stats as stats_mod
+from game.core import consumables
+from game.core.consumables import WarpFn
 from game.core.animation import Animation
 from game.render.assets import Assets
 from game.core.buffs import BuffList, StatusList
@@ -78,6 +80,9 @@ class Player:
             self._apply_save_data(save_data, assets, quest_defs)
         else:
             self._init_new_game(assets, quest_defs)
+
+        # 回程卷轴切图回调（Game 接线）：moveTo → None=成功 / str=拒绝原因
+        self.on_warp: Optional[WarpFn] = None
 
         # buff / 状态异常（不入库：死亡与重登清空，同原版）
         self.buffs = BuffList()
@@ -275,18 +280,13 @@ class Player:
         self.hp = min(self.hp, self.max_hp)
         self.mp = min(self.mp, self.max_mp)
 
+    def try_use_consume(self, item_id: str) -> Optional[str]:
+        """使用消耗品（先验后扣）：成功返回 None，失败返回原因（供 flash）。"""
+        return consumables.use(self, item_id)
+
     def use_item_by_id(self, item_id: str) -> bool:
-        """使用指定消耗品（键位绑定的物品宏走这里）；结算 hp/mp 恢复。"""
-        spec = self.inventory.use_consume(item_id)
-        if not spec:
-            return False
-        hp = int(spec.get("hp") or 0)
-        mp = int(spec.get("mp") or 0)
-        if hp:
-            self.hp = min(self.max_hp, self.hp + hp)
-        if mp:
-            self.mp = min(self.max_mp, self.mp + mp)
-        return True
+        """使用指定消耗品（键位绑定的物品宏走这里）；结算恢复/传送效果。"""
+        return self.try_use_consume(item_id) is None
 
     # ── 控制 ───────────────────────────────────────────────────────
     def stop_move(self) -> None:

@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pygame
 
+from game.core import consumables
 from game.core.jobs import JOBS
 from game.core.stats import wear_block
 from game.render.windows.core import widgets
@@ -132,14 +133,20 @@ def _item_tip(item: Item, desc: str = "") -> str:
         spec = item.info.get("spec") or {}
         if spec.get("hp"):
             lines.append(f"恢复 HP {spec['hp']}")
+        elif spec.get("hpR"):
+            lines.append(f"恢复 HP {spec['hpR']}%")
         if spec.get("mp"):
             lines.append(f"恢复 MP {spec['mp']}")
+        elif spec.get("mpR"):
+            lines.append(f"恢复 MP {spec['mpR']}%")
         if is_scroll_id(item.id):
             sc = SCROLLS.get(item.id)
             if sc:
                 lines.append(f"{sc['name']} 成功率 {sc['rate']}%")
             lines.append("双击对当前武器强化")
-        elif spec.get("hp") or spec.get("mp"):
+        elif consumables.is_return_scroll(spec):
+            lines.append("双击返回城镇")
+        elif consumables.is_healing(spec):
             lines.append("双击使用")
     if desc:
         lines.append(desc)
@@ -231,20 +238,12 @@ class InventoryWindow(Window):
             items = list(inv.consumes.values())
             if idx < len(items):
                 item = items[idx]
-                if is_scroll_id(item.id):
+                if is_scroll_id(item.id):    # 234 段自制强化卷轴：走强化流程
                     self._apply_scroll(item, player)
                     return
-                spec = item.info.get("spec") or {}
-                hp = int(spec.get("hp") or 0)
-                mp = int(spec.get("mp") or 0)
-                if not hp and not mp:         # 弹药/宠物食品等无恢复效果：不吞物品
-                    self.svc.flash(f"无法使用 {item.name}")
-                    return
-                if inv.use_consume(item.id):
-                    if hp:
-                        player.hp = min(player.max_hp, player.hp + hp)
-                    if mp:
-                        player.mp = min(player.max_mp, player.mp + mp)
+                err = consumables.use(player, item.id)
+                if err is not None:
+                    self.svc.flash(f"{item.name}：{err}")
         elif tab == "equip":
             items = list(inv.equips)
             if idx < len(items) and items[idx].slot is None:
