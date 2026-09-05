@@ -175,7 +175,8 @@ class Game:
         self.chat_view = ChatView()
         self.combat_log_view = CombatLogView()
         self.gm_ctx = GmContext(warp=self._gm_warp, heal=self._gm_heal,
-                                meso=self._gm_meso, drop_rate=self._gm_drop_rate)
+                                meso=self._gm_meso, add_level=self._gm_add_level,
+                                drop_rate=self._gm_drop_rate)
         self._dialogue = NpcDialogueController(self.ctx, self.quest_defs)
         # 出租车菜单点选目的地 → 走与传送门同一套切图加载（落目标图出生门）
         self._dialogue.warp = lambda map_id: self._enter_map(map_id, None)
@@ -397,6 +398,13 @@ class Game:
     def _gm_meso(self, amount: int) -> Tuple[str, str]:
         self.ctx.world.combat.meso += amount
         return ("system", f"获得金币 {amount}")
+
+    def _gm_add_level(self, count: int) -> Tuple[str, str]:
+        p = self.ctx.world.player
+        old = p.level
+        p.add_levels(count)
+        old_level_text = f"（{old} → {p.level}）" if count == 1 else ""
+        return ("system", f"等级已提升 {count} 级{old_level_text}，当前 Lv.{p.level}")
 
     def _gm_drop_rate(self, mult: int) -> Tuple[str, str]:
         set_equip_drop_mult(mult)

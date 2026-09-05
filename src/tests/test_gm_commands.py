@@ -17,7 +17,8 @@ class Recorder:
 
 def make_ctx(warp_result=("system", "正在传送")):
     return GmContext(warp=Recorder(warp_result), heal=Recorder(("system", "已恢复")),
-                     meso=Recorder(("system", "金币已增加")))
+                     meso=Recorder(("system", "金币已增加")),
+                     add_level=Recorder(("system", "等级已提升")))
 
 
 # ── 前缀识别 ────────────────────────────────────────────────────────
@@ -95,6 +96,36 @@ def test_meso_rejects_negative():
     assert lines[0][0] == "error"
 
 
+# ── /addlevel ────────────────────────────────────────────────────────
+
+def test_add_level_parses_amount():
+    ctx = make_ctx()
+    execute("/addlevel 10", ctx)
+    assert ctx.add_level.calls == [(10,)]
+
+
+def test_add_level_rejects_bad_amount():
+    ctx = make_ctx()
+    lines = execute("/addlevel abc", ctx)
+    assert ctx.add_level.calls == []
+    assert lines[0][0] == "error"
+
+
+def test_add_level_rejects_negative_and_zero():
+    ctx = make_ctx()
+    assert execute("/addlevel -5", ctx)[0][0] == "error"
+    assert execute("/addlevel 0", ctx)[0][0] == "error"
+    assert ctx.add_level.calls == []
+
+
+def test_add_level_without_arg_shows_usage():
+    ctx = make_ctx()
+    lines = execute("/addlevel", ctx)
+    assert ctx.add_level.calls == []
+    assert lines[0][0] == "error"
+    assert "/addlevel <等级数>" in lines[0][1]
+
+
 # ── 通用 ────────────────────────────────────────────────────────────
 
 def test_unknown_command_reports_name():
@@ -114,5 +145,5 @@ def test_help_lists_all_commands():
     """多空格分隔容错；/help 输出覆盖全部已注册指令名。"""
     lines = execute("/help", make_ctx())
     text = "\n".join(t for _, t in lines)
-    for name in ("warp", "heal", "meso", "help"):
+    for name in ("warp", "heal", "meso", "addlevel", "help"):
         assert name in text

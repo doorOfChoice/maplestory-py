@@ -429,6 +429,17 @@ class Player:
             leveled = True
         return leveled
 
+    def add_levels(self, count: int) -> None:
+        """GM 加等级：直接升 N 级（不填经验），补 AP/SP/上下限并回满。
+        每级重算上限并回满；升级可跨过转职等级，不校验职业门槛。"""
+        for _ in range(max(0, count)):
+            self.level += 1
+            self.ap += settings.AP_PER_LEVEL
+            self.recalc_vitals()
+            self.hp = self.max_hp
+            self.mp = self.max_mp
+            self.skills.gain_sp_for_level(self.level, settings.SP_PER_LEVEL)
+
     def damage(self, amount: int) -> None:
         self.hp = max(0, self.hp - amount)
 
