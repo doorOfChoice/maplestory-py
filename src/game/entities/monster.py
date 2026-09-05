@@ -160,8 +160,8 @@ class Monster:
             if not self.boss:
                 self.aggro = True
             if self.state_timer > 0:
-                # 受击小击退（钳在巡逻平台内）
-                away = 1 if self.x < from_x else -1
+                # 受击小击退（钳在巡逻平台内）：朝远离攻击者的方向退
+                away = -1 if self.x < from_x else 1
                 self.x = min(max(self.x + away * 10.0, self.rx0), self.rx1)
                 self._resnap_ground()
         if self.hp <= 0:
