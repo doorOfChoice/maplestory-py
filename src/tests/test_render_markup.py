@@ -79,6 +79,19 @@ def test_plain_mode_still_strips_everything():
     assert out == "菇菇宝贝伞"
 
 
+def test_emphasis_codes_stripped_in_plain_mode():
+    """#e 强调 / #n 恢复码在纯文本模式下整体移除。"""
+    out = render_markup("#e重要事项#n，请确认。")
+    assert out == "重要事项，请确认。"
+
+
+def test_split_colors_handles_emphasis_and_normal():
+    """split_colors：#e 着强调色（橙），#n 恢复基色。"""
+    segs = split_colors("前置#e强调#n结尾")
+    assert segs == [("前置", None), ("强调", MARKUP_COLORS["e"]),
+                    ("结尾", None)]
+
+
 # ── split_colors：带码文本 → (片段, 颜色) ──
 def test_split_colors_pairs_tokens_with_segments():
     segs = split_colors("前置#r红色#k回到基色")

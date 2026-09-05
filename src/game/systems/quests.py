@@ -337,8 +337,8 @@ _NAME_RE = re.compile(r"#([ptmoi])(\d+)#")
 _BARE_NUM_RE = re.compile(r"#(\d+)#")
 # 选项标记：#L0# ... #l（整体去掉）
 _CHOICE_RE = re.compile(r"#L\d+#|#l")
-# 颜色标记：#b #r #g #d #k 等
-_COLOR_RE = re.compile(r"#[brgdk]")
+# 颜色标记：#b #r #g #d #k 与强调对 #e/#n
+_COLOR_RE = re.compile(r"#[brgdken]")
 
 
 _NAME_COLORS = {"p": "d", "t": "b", "i": "b", "m": "g", "o": "r"}
