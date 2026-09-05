@@ -61,6 +61,31 @@ def test_drops_quest_with_garbled_name():
     assert set(kept) == {"3"}
 
 
+def test_drops_event_quest_by_qid_range():
+    """活动类任务（季节/联动/周年庆）按编号区段剔除，即便 NPC 真实存在。"""
+    defs = {
+        "9004": _d(qid="9004", start_npc=9000),     # 中秋/圣诞等 9xxx 季节活动
+        "10000": _d(qid="10000", start_npc=9000),   # 特殊干员O 活动线
+        "28000": _d(qid="28000", start_npc=9000),   # 圣诞惊喜舞会
+        "52001": _d(qid="52001", start_npc=9000),   # 4周年庆
+        "4437": _d(qid="4437", start_npc=9000),     # 白色圣诞节（散落个体）
+    }
+    assert filter_world_quest_defs(defs, NPCS, MOBS) == {}
+
+
+def test_keeps_normal_quest_outside_event_ranges():
+    """活动区段边界外的常规任务照常保留（区间为左闭右开）。"""
+    defs = {
+        "8999": _d(qid="8999", start_npc=9000),
+        "11000": _d(qid="11000", start_npc=9000),
+        "29000": _d(qid="29000", start_npc=9000),   # 称号挑战非活动，保留
+        "4436": _d(qid="4436", start_npc=9000),
+        "20000": _d(qid="20000", start_npc=9000),   # 20xxx 主线不误伤
+    }
+    kept = filter_world_quest_defs(defs, NPCS, MOBS)
+    assert set(kept) == set(defs)
+
+
 def test_filters_per_quest_not_wholesale():
     defs = {
         "1": _d(qid="1", start_npc=9000),

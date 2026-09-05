@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
+from game import settings
 from game.render.assets import Assets
 from game.core.localize import to_simplified
 
@@ -199,6 +200,15 @@ def is_garbled_name(name: str) -> bool:
     return bool(_HANGUL_RE.search(name)) or name.count("?") >= 2
 
 
+def is_event_quest_qid(qid: str) -> bool:
+    """编号是否落在活动类任务黑名单区段（settings.QUEST_EVENT_RANGES，左闭右开）。"""
+    try:
+        n = int(qid)
+    except (TypeError, ValueError):
+        return False
+    return any(lo <= n < hi for lo, hi in settings.QUEST_EVENT_RANGES)
+
+
 def filter_world_quest_defs(defs: Dict[str, QuestDef], npc_ids: set,
                             mob_ids: set) -> Dict[str, QuestDef]:
     """按世界真实存在性过滤官方任务：给予/交付 NPC 与击杀怪必须出现在地图 life 中。
@@ -206,9 +216,12 @@ def filter_world_quest_defs(defs: Dict[str, QuestDef], npc_ids: set,
     ``npc_ids`` / ``mob_ids`` 为字符串集合（来自 core.life_index 的 Map.wz 扫描）。
     收集类目标（end_items）不在此判定 —— 物品可获得性无法由 life 数据推出。
     韩文残留 / ? 占位的乱码名任务一并剔除（此类多为已下线活动任务）。
+    活动类任务（季节/联动/庆典）按编号区段整段剔除，NPC 常驻也不加载。
     """
     out: Dict[str, QuestDef] = {}
     for qid, d in defs.items():
+        if is_event_quest_qid(qid):
+            continue
         if is_garbled_name(d.name):
             continue
         if d.start_npc is None or str(d.start_npc) not in npc_ids:
