@@ -1,6 +1,18 @@
-"""聊天框模型：聚焦态、输入缓冲编辑、发送语义、日志滚动上限。"""
+"""聊天框模型：聚焦态、输入缓冲编辑、发送语义、日志滚动上限、无操作自动消失。"""
 
-from game.core.chat import MAX_LOG_LINES, Chat
+from typing import Callable, Tuple
+
+from game.core.chat import LOG_TTL_SECONDS, MAX_LOG_LINES, Chat
+
+
+def make_chat() -> Tuple[Chat, Callable[[float], None]]:
+    """带可控假时钟的 Chat：advance(秒) 拨动当前时间。"""
+    t = [0.0]
+
+    def advance(seconds: float) -> None:
+        t[0] += seconds
+
+    return Chat(now=lambda: t[0]), advance
 
 
 def test_enter_chat_opens_and_closes_without_losing_log():
@@ -67,3 +79,42 @@ def test_log_lines_carry_kind():
     chat.add("player", "大家好")
     chat.add("error", "未知指令")
     assert [ln.kind for ln in chat.lines] == ["player", "error"]
+
+
+def test_log_expires_after_idle_timeout():
+    """日志静默超过 LOG_TTL_SECONDS 后 expire 清空（面板自动消失）。"""
+    chat, advance = make_chat()
+    chat.add("system", "/heal 已恢复")
+    advance(LOG_TTL_SECONDS - 0.1)
+    chat.expire()
+    assert chat.lines
+    advance(0.2)
+    chat.expire()
+    assert chat.lines == []
+
+
+def test_activity_delays_expiry():
+    """任何操作（打字 / 新日志）刷新活跃时间，5 秒从最后一次操作起算。"""
+    chat, advance = make_chat()
+    chat.add("system", "第一条")
+    advance(LOG_TTL_SECONDS - 1.0)
+    chat.open()
+    chat.type("/warp")
+    advance(LOG_TTL_SECONDS - 1.0)      # 距最后操作 4s，未超时
+    chat.close()
+    chat.expire()
+    assert chat.lines
+    chat.add("system", "第二条")         # 新日志同样续命
+    advance(LOG_TTL_SECONDS + 0.1)
+    chat.expire()
+    assert chat.lines == []
+
+
+def test_expiry_paused_while_focused():
+    """聚焦输入中不清日志（无操作指面板闲置，不含正在打字）。"""
+    chat, advance = make_chat()
+    chat.add("system", "历史")
+    chat.open()
+    advance(LOG_TTL_SECONDS + 1.0)
+    chat.expire()
+    assert chat.lines

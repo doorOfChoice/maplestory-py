@@ -482,6 +482,8 @@ class Game:
 
     # ── 更新 ───────────────────────────────────────────────────────
     def _update(self, dt: float) -> None:
+        # 聊天/指令日志：无操作 5 秒自动消失
+        self.chat.expire()
         if self._banner_timer > 0:
             self._banner_timer -= dt
         # 黑场淡入计时（切图 / 重生后用真实 dt 递减）
