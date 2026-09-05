@@ -9,7 +9,7 @@ from game.render.windows.questlog import (BAR_RESERVE, GAP, LIST_W,
                                           QUEST_WIN_W, QuestLogWindow,
                                           strip_static_goal_lines)
 from tests.windows_harness import (close_button_pos, draw_once, make_manager,
-                                   make_services, press, wheel)
+                                   make_services, motion, press, wheel)
 
 
 # ── 测试数据助手 ───────────────────────────────────────────────────
@@ -169,6 +169,17 @@ def test_wheel_scrolls_list():
     win, mgr = open_log(make_player([f"q{i}" for i in range(40)], defs))
     assert win.list_offset == 0
     assert wheel(mgr, win.row_rects[0][0].center, up=False)
+    assert win.list_offset == 1
+
+
+def test_mousewheel_event_dispatches_to_list():
+    """真实 pygame.MOUSEWHEEL 事件走 dispatch：以最近鼠标位滚列表。"""
+    import pygame
+
+    defs = {f"q{i}": make_def(f"任务{i}") for i in range(40)}
+    win, mgr = open_log(make_player([f"q{i}" for i in range(40)], defs))
+    motion(mgr, win.row_rects[0][0].center)          # 记录鼠标所在行
+    assert mgr.dispatch(pygame.event.Event(pygame.MOUSEWHEEL, y=-1))
     assert win.list_offset == 1
 
 

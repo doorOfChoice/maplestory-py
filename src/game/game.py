@@ -213,6 +213,14 @@ class Game:
                 self.running = False
             elif self._loading:
                 continue       # 加载期间只处理关闭事件
+            elif event.type == pygame.MOUSEWHEEL:
+                if self.dead:
+                    continue
+                # 滚轮无坐标，取当前鼠标位：对话层正文滚动优先，其余交窗口
+                mpos = to_view_pos(pygame.mouse.get_pos())
+                if self._dialogue.consume_wheel(mpos, -1 if event.y > 0 else 1):
+                    continue
+                self.ctx.windows.dispatch(event)
             elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP,
                                 pygame.MOUSEMOTION):
                 if self.dead:

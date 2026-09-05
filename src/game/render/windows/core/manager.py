@@ -105,6 +105,8 @@ class WindowManager:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button in (4, 5):
             return self._wheel(to_view_pos(event.pos),
                                -1 if event.button == 4 else 1)
+        if event.type == pygame.MOUSEWHEEL:      # pygame2 滚轮事件无 pos，用最近鼠标位
+            return self._wheel(self._mouse, -1 if event.y > 0 else 1)
         if event.type == pygame.MOUSEMOTION:
             return self._motion(to_view_pos(event.pos))
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:

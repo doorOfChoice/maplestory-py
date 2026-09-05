@@ -190,6 +190,12 @@ class NpcDialogueController:
             return True
         return False
 
+    def consume_wheel(self, pos: Tuple[int, int], amount: int) -> bool:
+        """滚轮是否被会话面板正文滚动消费（仅在指针悬于面板视口时）。"""
+        if self._conv is not None:
+            return self.ctx.ui.conv.handle_wheel(pos, amount)
+        return False
+
     def consume_keydown(self, key: int) -> bool:
         """回车/空格/Esc 是否被对话层消费；否则交回 game.py（移动/商店等）。"""
         if self._conv is not None:
@@ -277,11 +283,13 @@ class NpcDialogueController:
         适配器（quest_flow）已 qmark 过的文本不含残留标记，重复解析无损。
         """
         snap = self._conv.current()
+        npc = self._conv_npc
         self.ctx.ui.conv.show(snap.title,
                               [self._qmark(l) for l in snap.lines],
                               [(self._qmark(label), note)
                                for label, note in snap.links],
-                              snap.buttons, snap.terminal)
+                              snap.buttons, snap.terminal,
+                              npc_id=str(npc.npc_id) if npc is not None else None)
 
     def _close_conv(self) -> None:
         self.ctx.ui.conv.hide()

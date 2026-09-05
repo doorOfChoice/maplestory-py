@@ -31,6 +31,8 @@ LIST_ROW_H = 26
 LIST_PAD_TOP = 12
 LIST_PAD_BOTTOM = 10
 CONV_TEXT_LINK_GAP = 6     # 黑文本与蓝字同时存在时的节间空隙
+MAX_BODY_H = 340           # 正文视口最高：内容超限即封顶并滚轮滚动，不再撑开面板
+WHEEL_STEP = LIST_ROW_H    # 滚轮每格滚动像素
 QUEST_LIST_BLUE = (51, 102, 204)
 QUEST_LIST_BLUE_HOVER = (120, 175, 250)
 
@@ -167,7 +169,12 @@ class ConvPanel:
         self.links: List[Tuple[str, int]] = []              # 蓝字 (标注, Lv)
         self.button_keys: List[str] = []                    # yes/no 子集
         self.terminal = False                               # 终态画 BtOK
+        self.npc_id: Optional[str] = None                   # 锚定 NPC（右侧立绘）
         self.rect: Optional[pygame.Rect] = None
+        # 正文滚动：scroll 为像素偏移，body_rect 为上一帧登记的视口
+        self.scroll = 0
+        self._max_scroll = 0
+        self.body_rect: Optional[pygame.Rect] = None
         # 上一帧登记的热区，供下一帧命中判断
         self.buttons: List[Tuple[pygame.Rect, str]] = []    # (rect, key)
         self.entry_rects: List[Tuple[pygame.Rect, int]] = []
@@ -176,16 +183,18 @@ class ConvPanel:
     # ── 状态装载 ────────────────────────────────────────────────────
     def show(self, title: str, lines: List[str],
              links: List[Tuple[str, int]], buttons: List[str],
-             terminal: bool) -> None:
-        """buttons 为 ["yes","no"] 子集；terminal 时画 BtOK。"""
+             terminal: bool, npc_id: Optional[str] = None) -> None:
+        """buttons 为 ["yes","no"] 子集；terminal 时画 BtOK；npc_id 锚定右侧立绘。"""
         self.visible = True
         self.title = title
         self.lines = list(lines)
         self.links = list(links)
         self.button_keys = [b for b in buttons if b in ("yes", "no")]
         self.terminal = terminal
+        self.npc_id = npc_id
         self.buttons = []
         self.entry_rects = []
+        self.scroll = 0
 
     def hide(self) -> None:
         self.visible = False
@@ -194,9 +203,13 @@ class ConvPanel:
         self.links = []
         self.button_keys = []
         self.terminal = False
+        self.npc_id = None
         self.rect = None
         self.buttons = []
         self.entry_rects = []
+        self.body_rect = None
+        self.scroll = 0
+        self._max_scroll = 0
 
     # ── 命中判断 ────────────────────────────────────────────────────
     def link_hit(self, pos) -> Optional[int]:
@@ -220,6 +233,16 @@ class ConvPanel:
     def panel_hit(self, pos) -> bool:
         return (self.visible and self.rect is not None
                 and self.rect.collidepoint(pos))
+
+    def handle_wheel(self, pos, amount: int) -> bool:
+        """正文视口内滚轮滚动内容（amount：+1 下滚 / -1 上滚）；消费返回 True。"""
+        if not self.visible or self.body_rect is None:
+            return False
+        if not self.body_rect.collidepoint(pos):
+            return False
+        self.scroll = max(0, min(self._max_scroll,
+                                 self.scroll + amount * WHEEL_STEP))
+        return True
 
     # ── 列表几何（纯函数，供测试）─────────────────────────────────────
     @staticmethod
@@ -258,6 +281,34 @@ class ConvPanel:
         surf = self._icon_surf(str(iid))
         return surf.get_width() if surf is not None else 0
 
+    # ── NPC 立绘（右侧米色空区，画法与任务日志详情窗一致）─────────────
+    def _draw_npc_portrait(self, surface, x: int, y: int, w: int,
+                           body_h: int) -> None:
+        if not self.npc_id:
+            return
+        getter = getattr(self.assets, "npc_frames", None)
+        if getter is None:
+            return
+        try:
+            frames = getter(str(self.npc_id), "stand")
+        except Exception:
+            return
+        if not frames:
+            return
+        img = frames[0][0]
+        left = x + DLG_TEXT_W + 2 * DLG_TEXT_X + 4
+        box_w = max(0, x + w - 18 - left)        # 右缘避开滚动条细条
+        box_h = max(0, body_h - 8)
+        if box_w <= 0 or img.get_width() <= 0 or img.get_height() <= 0:
+            return
+        scale = min(1.0, box_w / img.get_width(), box_h / img.get_height())
+        if scale < 1.0:
+            img = pygame.transform.smoothscale(
+                img, (max(1, int(img.get_width() * scale)),
+                      max(1, int(img.get_height() * scale))))
+        surface.blit(img, (left + (box_w - img.get_width()) // 2,
+                           y + DLG_TOP_H + (body_h - img.get_height()) // 2))
+
     # ── 绘制（单一渲染路径）──────────────────────────────────────────
     def draw(self, surface) -> None:
         if not self.visible:
@@ -289,54 +340,83 @@ class ConvPanel:
         link_block = len(self.links) * LIST_ROW_H
         if text_rows and has_links:
             link_block += CONV_TEXT_LINK_GAP
-        body_h = max(70, LIST_PAD_TOP + text_h + link_block + LIST_PAD_BOTTOM)
+        content_h = max(70, LIST_PAD_TOP + text_h + link_block + LIST_PAD_BOTTOM)
+        body_h = min(content_h, MAX_BODY_H)
+        self._max_scroll = max(0, content_h - body_h)
+        self.scroll = max(0, min(self.scroll, self._max_scroll))
         h = DLG_TOP_H + body_h + DLG_BOTTOM_H
         w = DLG_W
         x = (vw - w) // 2
         y = vh - self._status_bar_h() - 8 - h
         self.rect = pygame.Rect(x, y, w, h)
         self._dlg_frame(surface, x, y, w, body_h)
+        self.body_rect = pygame.Rect(x, y + DLG_TOP_H, w, body_h)
 
-        # 标题（任务名/会话名，金色）
-        # surface.blit(self.font_big.render(self.title, True, (255, 216, 96)),
-        #              (x + DLG_TEXT_X, y + 7))
+        # 正文整体先画进 scratch（内容坐标系），再按滚动偏移贴出视口窗口：
+        # 超限内容不撑高面板，改为视口内滚动。
+        scratch = pygame.Surface((w, content_h), pygame.SRCALPHA)
         # 黑正文行：逐段着色（颜色码/实体名高亮），None = 基色
-        ty = y + DLG_TOP_H + LIST_PAD_TOP
+        ty = LIST_PAD_TOP
         for elems, line_h in text_rows:
-            tx = x + DLG_TEXT_X
+            tx = DLG_TEXT_X
             for surf, gap in elems:
-                surface.blit(surf, (tx, ty + line_h - surf.get_height()))
+                scratch.blit(surf, (tx, ty + line_h - surf.get_height()))
                 tx += surf.get_width() + gap
             ty += line_h
 
-        # 蓝字链接行：起点在标题+黑文本之后，悬停高亮与 Lv 灰标注沿用列表画法
+        # 蓝字链接行：起点在黑文本之后，悬停高亮与 Lv 灰标注沿用列表画法；
+        # 热区只登记视口内（含部分可见）的行，索引保持全列表序号
         self.entry_rects = []
         if has_links:
             gap = CONV_TEXT_LINK_GAP if text_rows else 0
             mx, my = pygame.mouse.get_pos()
             hx = mx * settings.VIEW_W // settings.WINDOW_W
             hy = my * settings.VIEW_H // settings.WINDOW_H
-            link_rows = self.row_rects(x, y + text_h + gap,
-                                  DLG_TEXT_W + 2 * DLG_TEXT_X, len(self.links))
-            for i, ((rx, ry, rw, rh), (label, note)) in enumerate(zip(link_rows, self.links)):
-                rect = pygame.Rect(rx, ry, rw, rh)
-                self.entry_rects.append((rect, i))
-                hovered = rect.collidepoint(hx, hy)
+            link_rows = self.row_rects(x, text_h + gap - DLG_TOP_H,
+                                       DLG_TEXT_W + 2 * DLG_TEXT_X,
+                                       len(self.links))
+            for i, ((rx, cy, rw, rh), (label, note)) in enumerate(
+                    zip(link_rows, self.links)):
+                rect = pygame.Rect(rx, y + DLG_TOP_H + cy - self.scroll, rw, rh)
+                vis = rect.clip(self.body_rect)
+                if vis.height <= 0:
+                    continue
+                self.entry_rects.append((vis, i))
+                hovered = vis.collidepoint(hx, hy)
+                lx = rx - x          # scratch 为面板局部坐标，须剥掉面板绝对偏移
                 if hovered:
                     hl = pygame.Surface((rw, rh), pygame.SRCALPHA)
                     pygame.draw.rect(hl, (150, 190, 250, 70), (0, 0, rw, rh),
                                      border_radius=6)
-                    surface.blit(hl, (rx, ry))
+                    scratch.blit(hl, (lx, cy))
                 base = QUEST_LIST_BLUE_HOVER if hovered else QUEST_LIST_BLUE
-                tx = rx + 6
+                tx = lx + 6
                 for seg, color in split_colors(label):
                     t = self.font.render(seg, True, color or base)
-                    surface.blit(t, (tx, ry + (rh - t.get_height()) // 2))
+                    scratch.blit(t, (tx, cy + (rh - t.get_height()) // 2))
                     tx += t.get_width()
                 if note:
                     lv = self.font_small.render(f"Lv {note}", True, (150, 140, 128))
-                    surface.blit(lv, (rx + rw - lv.get_width() - 6,
-                                      ry + (rh - lv.get_height()) // 2))
+                    scratch.blit(lv, (lx + rw - lv.get_width() - 6,
+                                      cy + (rh - lv.get_height()) // 2))
+
+        surface.blit(scratch, (x, y + DLG_TOP_H),
+                     pygame.Rect(0, self.scroll, w,
+                                 min(body_h, content_h - self.scroll)))
+
+        # NPC 立绘：右侧米色空区，上下居中、随面板固定不随正文滚动
+        self._draw_npc_portrait(surface, x, y, w, body_h)
+
+        # 滚动条：内容超出视口时在白纸右缘画细条（与任务日志窗同款画法）
+        if self._max_scroll > 0:
+            track = pygame.Rect(x + w - 14, y + DLG_TOP_H + 6, 5, body_h - 12)
+            n = max(12, body_h * body_h // content_h)
+            thumb = pygame.Rect(track.x,
+                                track.y + (track.height - n) * self.scroll
+                                // self._max_scroll,
+                                track.width, min(n, track.height))
+            pygame.draw.rect(surface, (176, 186, 198), track, border_radius=2)
+            pygame.draw.rect(surface, (110, 122, 140), thumb, border_radius=2)
 
         # 按钮行：先画的在最右（右起叠放），ok 由终态追加
         keys = list(self.button_keys) + (["ok"] if self.terminal else [])
