@@ -124,6 +124,57 @@ def test_climb_snaps_player_to_rope_center(monkeypatch):
     assert p.x == pytest.approx(ROPE["x"])
 
 
+class FakeSkillDef:
+    """技能 level 表桩：只提供 stat(level, key) 查询，避免依赖 WZ。"""
+
+    name = "测试技能"
+
+    def __init__(self, table):
+        self.table = table
+
+    def stat(self, level, key, default=0):
+        return self.table.get(key, default)
+
+
+def climb_player(monkeypatch) -> Player:
+    """构造一个刚挂上梯子的玩家。"""
+    ph = make()
+    p = make_player(monkeypatch, ph, ROPE["x"], 434)
+    k = Keys()
+    k.up = True
+    p.update(0.016, k, ph)
+    assert p.climbing is True
+    return p
+
+
+def test_cannot_attack_while_climbing(monkeypatch):
+    """挂在绳/梯上时无法发起普攻：start_attack 返回 False 且不进入攻击状态。"""
+    p = climb_player(monkeypatch)
+    assert p.start_attack() is False
+    assert p.attacking is False
+
+
+def test_buff_skill_usable_while_climbing(monkeypatch):
+    """绳上可施放非攻击（纯 buff）技能：扣 MP、上 buff、不进入攻击状态。"""
+    p = climb_player(monkeypatch)
+    data = {"id": 1001, "level": 1, "mp_con": 5, "hp_con": 0,
+            "def": FakeSkillDef({"time": 60, "dex": 10})}
+    assert p.start_attack(data) is True
+    assert p.mp == 45
+    assert p.attacking is False
+    assert len(p.buffs.active()) == 1
+
+
+def test_attack_skill_blocked_while_climbing(monkeypatch):
+    """绳上不可施放攻击技能：不扣 MP、不进入攻击状态。"""
+    p = climb_player(monkeypatch)
+    data = {"id": 1002, "level": 1, "mp_con": 5, "hp_con": 0,
+            "def": FakeSkillDef({"time": 60, "damage": 100, "mobCount": 1})}
+    assert p.start_attack(data) is False
+    assert p.mp == 50
+    assert p.attacking is False
+
+
 def test_climb_down_from_top_platform(monkeypatch):
     """站在梯顶平台按↓直接下滑；再按↓到梯底落地。"""
     ph = make()

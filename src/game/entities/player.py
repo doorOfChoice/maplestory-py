@@ -207,29 +207,39 @@ class Player:
             return pm["crit_mult"] / 100.0
         return settings.CRIT_MULT
 
-    def _apply_buff_skill(self, skill_data: dict) -> bool:
-        """纯 buff 技能接线：有 time 字段且不含任何攻击属性时上 buff 返回 True。
+    def _pure_buff_seconds(self, skill_data: dict) -> float:
+        """技能若为纯 buff（非攻击）则返回其持续秒数，否则返回 0.0。
 
         关键区分：原版多个弓系攻击技能（烈火箭/炸弹箭）的 level 表也带 time
         （燃烧 DoT / 引信计时），若仅凭 time 判定会被误当 buff 吞掉、不触发攻击。
-        故再看 damage/mobCount/range/bulletCount 任一 > 0 即视为攻击技能，返回
-        False 让 start_attack 继续走攻击流程（其 DoT/引信暂不建模）。
-        mods 从 level 表映射：attack→atk、dex→dex、criticalrate→crit、hp→hp。
+        故再看 damage/mobCount/range/bulletCount 任一 > 0 即视为攻击技能。
         """
         d = skill_data.get("def")
         lv = int(skill_data.get("level", 0))
         if d is None or lv <= 0:
-            return False
+            return 0.0
         seconds = d.stat(lv, "time", 0)
         if seconds <= 0:
-            return False
+            return 0.0
         if any(d.stat(lv, atk_key, 0) > 0
                for atk_key in ("damage", "mobCount", "range", "bulletCount")):
+            return 0.0
+        return float(seconds)
+
+    def _apply_buff_skill(self, skill_data: dict) -> bool:
+        """纯 buff 技能接线：命中判定则上 buff 返回 True，否则 False。
+
+        mods 从 level 表映射：attack→atk、dex→dex、criticalrate→crit、hp→hp。
+        """
+        seconds = self._pure_buff_seconds(skill_data)
+        if seconds <= 0:
             return False
+        d = skill_data["def"]
+        lv = int(skill_data["level"])
         mods = {key: d.stat(lv, src, 0)
                 for src, key in BUFF_MOD_MAP.items()}
         mods = {k: v for k, v in mods.items() if v}
-        self.buffs.apply(str(skill_data["id"]), d.name, float(seconds), mods)
+        self.buffs.apply(str(skill_data["id"]), d.name, seconds, mods)
         return True
 
     def defense_value(self) -> int:
@@ -364,8 +374,12 @@ class Player:
         """发起攻击；skill_data 非空时为技能攻击（先扣 MP/HP 消耗）。
 
         buff 技能（level 表含 time）不进入攻击：扣消耗后直接上 buff。
+        挂在绳/梯上时只允许施放纯 buff（非攻击）技能，普攻与攻击技能均被拒。
         """
         if not self.attack_slot_free(for_skill=skill_data is not None):
+            return False
+        if self.climbing and (skill_data is None
+                              or self._pure_buff_seconds(skill_data) <= 0):
             return False
         if skill_data is not None:
             if (self.mp < skill_data["mp_con"]
