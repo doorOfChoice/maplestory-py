@@ -482,7 +482,7 @@ class Combat:
         self.arrows = [a for a in self.arrows if not a.dead]
 
     def _on_kill(self, player, mob) -> None:
-        """击杀结算：经验 + 金币必掉 + 概率掉物品。"""
+        """击杀结算：经验 + 金币必掉 + 逐件掷骰掉物品（可能不掉）。"""
         self.total_kills += 1
         self.pending_exp.append(mob.exp)
         # 任务进度：击杀计数
@@ -495,12 +495,11 @@ class Combat:
         self.drops.append(DropItem(
             mob.x + random.uniform(-14, 14), mob.cy - 20,
             meso=meso, ground_y=ground, assets=self.assets))
-        if random.random() < settings.DROP_ITEM_CHANCE:
-            drop = mob.roll_drop()
-            if drop is not None:
-                self.drops.append(DropItem(
-                    mob.x + random.uniform(-18, 18), mob.cy - 20,
-                    item=drop, ground_y=ground, assets=self.assets))
+        drop = mob.roll_drop()
+        if drop is not None:
+            self.drops.append(DropItem(
+                mob.x + random.uniform(-18, 18), mob.cy - 20,
+                item=drop, ground_y=ground, assets=self.assets))
 
     def apply_mob_hits(self, player, hits: List[dict]) -> None:
         """怪物接触伤害队列 → 玩家扣血（受击硬直 + 无敌内忽略）。

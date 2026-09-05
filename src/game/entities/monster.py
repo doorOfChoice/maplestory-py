@@ -325,9 +325,14 @@ class Monster:
 
     # ── 掉落（死亡时调用）──────────────────────────────────────────
     def roll_drop(self) -> Optional[dict]:
-        if not self.drops:
-            return None
-        return random.choice(self.drops)
+        """逐件按类别掉率独立掷骰，第一件命中的即掉落；全不中返回 None。"""
+        for drop in self.drops:
+            item_id = str(drop.get("id") or "")
+            rate = settings.DROP_ITEM_RATE.get(
+                item_id[:1], settings.DROP_ITEM_DEFAULT_RATE)
+            if random.random() < rate:
+                return drop
+        return None
 
     # ── 异常技能（毒/晕/减速）─────────────────────────────────────
     def _load_status_attacks(self) -> List[dict]:
