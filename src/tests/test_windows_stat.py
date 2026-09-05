@@ -27,6 +27,7 @@ def make_player(ap: int = 0, alloc_ok: bool = True, auto_ok: bool = True):
     return SimpleNamespace(
         ap=ap, level=12, hp=77.5, max_hp=120, mp=31.25, max_mp=60,
         exp=1234, exp_to_next=lambda: 4321,
+        attack_value=lambda: 120, defense_value=lambda: 45,
         total_stats=lambda: {"str": 25, "dex": 20, "int": 4, "luk": 6},
         inventory=SimpleNamespace(bonus=lambda st: 3 if st == "str" else 0),
         job=next(iter(JOBS)),
@@ -104,6 +105,52 @@ def test_auto_button_without_ap_flashes_no_point_message():
     assert press(mgr, win._auto_rect.center)
     assert player.calls == ["auto"]
     assert mgr._toast[0] == "没有可分配的属性点"
+
+
+def test_detail_button_toggles_popup_open_close():
+    """点 BtDetail 打开「詳細說明」，再点关闭；默认关闭。"""
+    player = make_player(ap=8)
+    win, mgr = open_stat(player)
+    assert not win._detail
+    assert win._detail_rect is not None
+    assert press(mgr, win._detail_rect.center)
+    assert win._detail
+    assert press(mgr, win._detail_rect.center)
+    assert not win._detail
+
+
+def test_detail_popup_reads_attack_and_defense():
+    """详情弹窗打开时，绘制读取攻击力与物理防御力合计。"""
+    seen: List[str] = []
+
+    def atk() -> int:
+        seen.append("atk")
+        return 120
+
+    def dfe() -> int:
+        seen.append("def")
+        return 45
+
+    player = make_player(ap=8)
+    player.attack_value = atk
+    player.defense_value = dfe
+    win, mgr = open_stat(player)
+    assert seen == []                       # 关闭时不读战斗数值
+    press(mgr, win._detail_rect.center)     # 打开详情
+    draw_once(mgr)                          # 重建热区并绘制弹窗
+    assert seen == ["atk", "def"]
+
+
+def test_detail_popup_click_consumed_without_action():
+    """点击已打开的详情弹窗被消费，不触发加点、不穿透。"""
+    player = make_player(ap=8)
+    win, mgr = open_stat(player)
+    press(mgr, win._detail_rect.center)
+    draw_once(mgr)
+    assert win._detail_popup_rect is not None
+    assert press(mgr, win._detail_popup_rect.center)
+    assert player.calls == []
+    assert win._detail
 
 
 def test_click_inside_window_consumed_without_side_effects():
