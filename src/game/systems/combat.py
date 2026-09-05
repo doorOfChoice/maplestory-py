@@ -20,6 +20,7 @@ from game.core import stats as stats_mod
 from game.core.animation import Animation
 from game.render.assets import Assets
 from game.render.effects import Effect
+from game.systems.drops import OfficialDropTable, load_official_table
 from game.systems.inventory import make_item
 from game.core.fonts import render_text
 
@@ -330,8 +331,11 @@ class Arrow:
 
 
 class Combat:
-    def __init__(self, assets: Assets):
+    def __init__(self, assets: Assets,
+                 drop_table: Optional[OfficialDropTable] = None):
         self.assets = assets
+        self.drop_table = drop_table if drop_table is not None \
+            else load_official_table()
         self.numbers: List[DamageNumber] = []
         self.drops: List[DropItem] = []
         self.effects: List[object] = []      # 命中火花 / 升级特效等
@@ -482,7 +486,7 @@ class Combat:
         self.arrows = [a for a in self.arrows if not a.dead]
 
     def _on_kill(self, player, mob) -> None:
-        """击杀结算：经验 + 金币必掉 + 逐件掷骰掉物品（可能不掉）。"""
+        """击杀结算：经验 + 掉落（官方 drop_data 优先，缺数据回退启发式）。"""
         self.total_kills += 1
         self.pending_exp.append(mob.exp)
         # 任务进度：击杀计数
@@ -491,6 +495,9 @@ class Combat:
         except Exception:
             pass
         ground = self._surface_y(mob.x, mob.cy)
+        if self.drop_table is not None and self.drop_table.has_mob(str(mob.mob_id)):
+            self._spawn_official_drops(mob, ground)
+            return
         meso = mob.exp * random.randint(3, 6) + random.randint(1, 5)
         self.drops.append(DropItem(
             mob.x + random.uniform(-14, 14), mob.cy - 20,
@@ -500,6 +507,39 @@ class Combat:
             self.drops.append(DropItem(
                 mob.x + random.uniform(-18, 18), mob.cy - 20,
                 item=drop, ground_y=ground, assets=self.assets))
+
+    def _spawn_official_drops(self, mob, ground: Optional[float]) -> None:
+        """官方掉落下同一击杀可出多件物品 + 一堆金币（金币行命中时）。"""
+        res = self.drop_table.roll(str(mob.mob_id))
+        if res.meso > 0:
+            self.drops.append(DropItem(
+                mob.x + random.uniform(-14, 14), mob.cy - 20,
+                meso=res.meso, ground_y=ground, assets=self.assets))
+        for it in res.items:
+            if not self._has_item_icon(it["id"]):
+                continue
+            name = self.assets.item_name(it["id"]) if self.assets else None
+            self.drops.append(DropItem(
+                mob.x + random.uniform(-18, 18), mob.cy - 20,
+                item={"id": it["id"], "count": it["count"], "name": name},
+                ground_y=ground, assets=self.assets))
+
+    def _has_item_icon(self, item_id: str) -> bool:
+        """物品图标可解析才生成掉落：解析不出（如 8 位商城道具）宁可不出。"""
+        if self.assets is None:
+            return True
+        found_api = False
+        for name in ("item_icon", "equip_icon"):
+            getter = getattr(self.assets, name, None)
+            if getter is None:
+                continue
+            found_api = True
+            try:
+                if getter(item_id) is not None:
+                    return True
+            except Exception:
+                return True
+        return True if not found_api else False
 
     def apply_mob_hits(self, player, hits: List[dict]) -> None:
         """怪物接触伤害队列 → 玩家扣血（受击硬直 + 无敌内忽略）。
