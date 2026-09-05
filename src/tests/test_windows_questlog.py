@@ -91,6 +91,14 @@ def test_quests_for_tab_uses_can_start_and_completed():
     assert win.quests_for_tab("done") == ["c"]
 
 
+def test_ready_tab_sorts_level_required_first_desc():
+    """可接页排序：有等级限制的排前、按等级从高到低，无等级限制的靠后。"""
+    defs = {"a": make_def("无限制"), "b": make_def("十级", lvmin=10),
+            "c": make_def("三十级", lvmin=30)}
+    win, _ = open_log(make_player([], defs, ready=["a", "b", "c"]))
+    assert win.quests_for_tab("ready") == ["c", "b", "a"]
+
+
 def test_tab_click_switches_filter():
     """点击页签热区切换当前页签。"""
     defs = {"a": make_def("可接")}

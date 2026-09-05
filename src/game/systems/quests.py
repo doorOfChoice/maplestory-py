@@ -188,15 +188,29 @@ def load_quest_defs(assets: Assets,
     return defs
 
 
+_HANGUL_RE = re.compile(r"[\uac00-\ud7a3\u3131-\u318e]")
+
+
+def is_garbled_name(name: str) -> bool:
+    """判定乱码/未本地化任务名：含韩文残留，或有 2 处以上 '?' 占位符。
+
+    单个 '?' 多为标题党式标点（如「欺骗骗子!?」），不视为乱码。
+    """
+    return bool(_HANGUL_RE.search(name)) or name.count("?") >= 2
+
+
 def filter_world_quest_defs(defs: Dict[str, QuestDef], npc_ids: set,
                             mob_ids: set) -> Dict[str, QuestDef]:
     """按世界真实存在性过滤官方任务：给予/交付 NPC 与击杀怪必须出现在地图 life 中。
 
     ``npc_ids`` / ``mob_ids`` 为字符串集合（来自 core.life_index 的 Map.wz 扫描）。
     收集类目标（end_items）不在此判定 —— 物品可获得性无法由 life 数据推出。
+    韩文残留 / ? 占位的乱码名任务一并剔除（此类多为已下线活动任务）。
     """
     out: Dict[str, QuestDef] = {}
     for qid, d in defs.items():
+        if is_garbled_name(d.name):
+            continue
         if d.start_npc is None or str(d.start_npc) not in npc_ids:
             continue
         if d.end_npc is not None and str(d.end_npc) not in npc_ids:

@@ -76,7 +76,10 @@ class QuestLogWindow(Window):
 
     # ── 数据 ───────────────────────────────────────────────────────
     def quests_for_tab(self, tab: str) -> List[str]:
-        """当前页签对应的 qid 列表（可接按 can_start、完成按 is_completed）。"""
+        """当前页签对应的 qid 列表（可接按 can_start、完成按 is_completed）。
+
+        可接页排序：有等级限制的排前并按 lvmin 从高到低，无限制的靠后。
+        """
         player = self.svc.player()
         quests = player.quests
         defs = quests.defs
@@ -87,7 +90,8 @@ class QuestLogWindow(Window):
             return sorted((qid for qid in defs if quests.is_completed(qid)),
                           key=lambda q: (len(q), q))
         return sorted((qid for qid in defs if quests.can_start(qid, player)),
-                      key=lambda q: (len(q), q))
+                      key=lambda q: (defs[q].lvmin == 0, -defs[q].lvmin,
+                                     len(q), q))
 
     def _ensure_selection(self, ids: List[str]) -> None:
         if self.selected not in ids:

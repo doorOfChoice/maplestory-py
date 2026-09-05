@@ -50,6 +50,17 @@ def test_drops_collection_quest_when_item_unavailable():
     assert filter_world_quest_defs(defs, NPCS, MOBS) == defs
 
 
+def test_drops_quest_with_garbled_name():
+    """乱码/未本地化任务名剔除：韩文残留、多处 ? 占位；含 ?! 标点的正常中文名保留。"""
+    defs = {
+        "1": _d(qid="1", start_npc=9000, name="마야의 사랑의 증표"),
+        "2": _d(qid="2", start_npc=9000, name="???? ????<??>-1??"),
+        "3": _d(qid="3", start_npc=9000, name="欺骗骗子!?"),
+    }
+    kept = filter_world_quest_defs(defs, NPCS, MOBS)
+    assert set(kept) == {"3"}
+
+
 def test_filters_per_quest_not_wholesale():
     defs = {
         "1": _d(qid="1", start_npc=9000),
