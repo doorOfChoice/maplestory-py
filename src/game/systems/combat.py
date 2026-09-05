@@ -207,7 +207,7 @@ class DropItem:
 
     def _sprite(self) -> Optional[pygame.Surface]:
         if self.is_meso:
-            frames = self.assets.meso_frames() if self.assets else []
+            frames = self.assets.meso_frames(self.meso) if self.assets else []
             if frames:
                 idx = Animation.frame_at(frames, self._age * 1000)
                 return frames[idx][0]

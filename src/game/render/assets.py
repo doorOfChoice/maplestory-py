@@ -1180,16 +1180,26 @@ class Assets:
         self._effect_cache[key] = result
         return result
 
-    def meso_frames(self) -> List[Tuple[pygame.Surface, int]]:
-        """金币（Item.wz/Special/09000000 iconRaw 的 4 帧旋转动画）。缓存。"""
-        key = "meso"
+    def meso_icon_index(self, amount: int) -> int:
+        """按面额选出金币图标的档号（0~3），对应 0900 的 0900000X。"""
+        for upper, idx in settings.MESO_ICON_TIERS:
+            if amount < upper:
+                return idx
+        return settings.MESO_ICON_TIERS[-1][1]
+
+    def meso_frames(self, amount: int = 0) -> List[Tuple[pygame.Surface, int]]:
+        """金币图标（Item.wz/Special/0900 的 0900000X iconRaw 4 帧旋转动画）。
+        按面额分档选堆叠大小。缓存。"""
+        idx = self.meso_icon_index(amount)
+        item_id = f"0900000{idx}"
+        key = f"meso:{item_id}"
         hit = self._icon_cache.get(key)
         if hit is not None:
             return hit
         frames: List[Tuple[pygame.Surface, int]] = []
         group = self._item_wz().root.subdirs.get("Special")
         if group is not None and "0900.img" in group.images:
-            node = group.images["0900.img"].parse().get("09000000/iconRaw")
+            node = group.images["0900.img"].parse().get(f"{item_id}/iconRaw")
             if node is not None:
                 for child in node.children():
                     real = _resolve_uol(child)

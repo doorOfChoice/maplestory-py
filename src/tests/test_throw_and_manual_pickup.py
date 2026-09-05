@@ -20,7 +20,7 @@ class FakeAssets:
     def equip_icon(self, iid):
         return None
 
-    def meso_frames(self):
+    def meso_frames(self, amount: int = 0):
         return []
 
     footholds = []
