@@ -160,9 +160,9 @@ class ConvPanel:
 
     def __init__(self, assets) -> None:
         self.assets = assets
-        self.font = load_cjk_font(11)
+        self.font = load_cjk_font(12)
         self.font_big = load_cjk_font(14)
-        self.font_small = load_cjk_font(10)
+        self.font_small = load_cjk_font(12)
         self.visible = False
         self.title = ""
         self.lines: List[str] = []                          # 黑正文行（已解析标记）

@@ -16,7 +16,7 @@ from game.core.fonts import load_cjk_font, render_text
 
 CHAT_W = 380                # 日志 / 输入区宽度
 CHAT_MARGIN = 8             # 距屏边与状态栏的间距
-CHAT_LINE_H = 15            # 日志行高
+CHAT_LINE_H = 19            # 日志行高（随 12px 字号放大）
 CHAT_VISIBLE_LINES = 8      # 日志最多同时显示的行数
 INPUT_H = 20                # 输入行高
 
@@ -46,7 +46,7 @@ def visible_tail(text: str, font: pygame.font.Font, max_w: int) -> str:
 
 class ChatView:
     def __init__(self) -> None:
-        self.font = load_cjk_font(11)
+        self.font = load_cjk_font(12)
 
     def draw(self, surface, chat: Chat, bar_h: int) -> None:
         """绘制日志区（有内容才画底）与输入行（聚焦时画底）。"""

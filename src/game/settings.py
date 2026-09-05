@@ -15,6 +15,8 @@ WZ_DIR = RESOURCE_DIR / "wz"
 REGION = "EMS"
 # 自绘鼠标光标的 PNG 目录（官方光标不在 WZ 里，来自客户端 cursor.wzl 的提取件）
 CURSOR_DIR = RESOURCE_DIR / "cursor"
+# 捆绑字体目录（如思源宋体 otf），存在时 UI 中文优先用它而非系统字体
+FONT_DIR = RESOURCE_DIR / "fonts"
 CURSOR_FRAME_MS = 160           # 光标动画每帧毫秒数
 
 SAVE_DIR = PROJECT_ROOT / "saves"
