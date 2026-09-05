@@ -18,6 +18,7 @@ import pygame
 from game import settings
 from game.core import stats as stats_mod
 from game.core.animation import Animation
+from game.core.combat_log import CombatLog
 from game.render.assets import Assets
 from game.render.effects import Effect
 from game.systems.drops import OfficialDropTable, load_official_table
@@ -347,6 +348,7 @@ class Combat:
         self.meso = 0                        # 拾取的金币
         self.total_kills = 0
         self.pending_exp: List[int] = []
+        self.combat_log = CombatLog()        # 右下角战斗明细（击杀/拾取）
 
     def _surface_y(self, x: float, ref_y: float) -> Optional[float]:
         """x 处与 ref_y 最接近的 foothold 表面 y（dict 数据，无 Foothold 对象）。"""
@@ -493,6 +495,8 @@ class Combat:
         """击杀结算：经验 + 掉落（官方 drop_data 优先，缺数据回退启发式）。"""
         self.total_kills += 1
         self.pending_exp.append(mob.exp)
+        self.combat_log.add_exp(str(mob.mob_id), getattr(mob, "name", "") or "",
+                                mob.exp)
         # 任务进度：击杀计数
         try:
             player.quests.on_kill(int(mob.mob_id))
@@ -575,6 +579,7 @@ class Combat:
         if drop.is_meso:
             drop.taken = True
             self.meso += drop.meso
+            self.combat_log.add_meso(drop.meso)
             return True
         if drop.item is not None:
             item = make_item(drop.item.get("id"), self.assets,
@@ -582,6 +587,7 @@ class Combat:
                              name=drop.item.get("name"))
             if player.inventory.add(item):
                 drop.taken = True
+                self.combat_log.add_item(item.id, item.name or "", item.count)
                 return True
         return False
 
@@ -632,6 +638,7 @@ class Combat:
     def update(self, dt: float, player=None) -> None:
         """推进战斗实体（伤害飘字 / 特效 / 掉落物物理 / 吸附动画）。"""
         self.numbers = [n for n in self.numbers if n.update(dt)]
+        self.combat_log.update()
         for e in self.effects:
             e.update(dt)
         self.effects = [e for e in self.effects if not e.done]

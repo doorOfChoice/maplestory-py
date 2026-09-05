@@ -21,6 +21,7 @@ from game.core.keybindings import KeyBindings, item_id_of_action
 from game.core import travel
 from game.render.assets import Assets
 from game.render.chat import ChatView
+from game.render.combat_log import CombatLogView
 from game.render.cursor import GameCursor
 from game.render.effects import Effect
 from game.render.ui import KEY_BUTTON_WINDOWS
@@ -171,6 +172,7 @@ class Game:
         # 聊天框（模型 + 视图）与 GM 指令上下文：世界效果回调全部留在 game 层
         self.chat = Chat()
         self.chat_view = ChatView()
+        self.combat_log_view = CombatLogView()
         self.gm_ctx = GmContext(warp=self._gm_warp, heal=self._gm_heal,
                                 meso=self._gm_meso)
         self._dialogue = NpcDialogueController(self.ctx, self.quest_defs)
@@ -644,6 +646,8 @@ class Game:
         self.ctx.ui.draw_dialog(self.canvas, self.ctx.world.camera)
         self.ctx.ui.conv.draw(self.canvas)
         self.chat_view.draw(self.canvas, self.chat, self.ctx.ui.status_bar_height())
+        self.combat_log_view.draw(self.canvas, self.ctx.world.combat.combat_log,
+                                  self.assets, self.ctx.ui.status_bar_height())
         self.ctx.ui.draw_death(self.canvas)
 
         # 黑场淡入（切图 / 重生后从黑渐变到场景，避免瞬间弹出）

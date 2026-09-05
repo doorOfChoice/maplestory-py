@@ -85,10 +85,11 @@ def find_bundled_font(font_dir: Optional[Path] = None,
     return files[0]
 
 
-def _candidate_paths(size: int) -> list:
-    """按字号给出字体文件候选（依优先级）：小字重字 > 标题宋体 > 系统字体。"""
+def _candidate_paths(size: int, prefer: Tuple[str, ...] = ()) -> list:
+    """按字号给出字体文件候选（依优先级）：显式指定 > 小字重字 > 标题宋体 > 系统字体。"""
     regular = find_bundled_font()
     paths = []
+    paths += [path for name in prefer if (path := pygame.font.match_font(name))]
     if size < _TITLE_SERIF_MIN_SIZE:
         heavy = find_bundled_font(weights=_SMALL_UI_WEIGHTS)
         if heavy is not None:
@@ -103,24 +104,25 @@ def _candidate_paths(size: int) -> list:
     return paths
 
 
-def load_cjk_font(size: int) -> pygame.font.Font:
-    """返回一个可渲染中文的 pygame 字体：捆绑字体 > 系统字体 > Font(None)。
+def load_cjk_font(size: int, prefer: Tuple[str, ...] = ()) -> pygame.font.Font:
+    """返回一个可渲染中文的 pygame 字体：显式指定 > 捆绑字体 > 系统字体 > Font(None)。
 
     小字号（< _TITLE_SERIF_MIN_SIZE）优先挑捆绑字体中的重字重（SemiBold /
     Medium），避免宋体细笔画在 UI 尺寸下发虚；大字号标题保留 Regular 宋体。
+    prefer 传入字体名元组时最先尝试（如 ("stheitimedium",) 强制黑体粗字重）。
     """
-    hit = _FONT_CACHE.get(size)
+    hit = _FONT_CACHE.get((size, prefer))
     if hit is not None:
         return hit
-    for path in _candidate_paths(size):
+    for path in _candidate_paths(size, prefer):
         try:
             font = pygame.font.Font(path, size)
-            _FONT_CACHE[size] = font
+            _FONT_CACHE[(size, prefer)] = font
             return font
         except Exception:
             continue
     font = pygame.font.Font(None, size)
-    _FONT_CACHE[size] = font
+    _FONT_CACHE[(size, prefer)] = font
     return font
 
 

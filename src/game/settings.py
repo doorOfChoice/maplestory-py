@@ -108,6 +108,7 @@ MOB_WANDER_PAUSE = (1.0, 4.0)    # 漫游两段行走之间随机站桩时长（
 MOB_ATTACK_RANGE = 40.0          # 接触伤害距离（水平）
 MOB_CONTACT_Y_RANGE = 40.0       # 接触伤害距离（垂直，脚底 y 差）
 MOB_KNOCKBACK = 60.0             # 受击击退
+MOB_HP_BAR_TTL = 8.0             # 受击后脚下血条的显示时长（秒，再受击刷新）
 SPAWN_GRACE = 3.0                # 出生/重生后怪物不追击不攻击的秒数
 MOB_RESPAWN_DELAY = 5.0          # 怪物死亡后原地重生延迟秒数
 

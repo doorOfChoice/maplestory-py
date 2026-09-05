@@ -104,6 +104,7 @@ class Monster:
         self._wander_timer = random.uniform(*settings.MOB_WANDER_PAUSE)
         self.state_timer = 0.0
         self.hit_flash = 0.0
+        self.hp_bar_timer = 0.0    # 受击后脚下血条剩余显示时长
         self.attack_cooldown = 0.0
         self.dead = False
         self.remove_after = 0.0
@@ -155,6 +156,7 @@ class Monster:
         self.state = "hit"
         self.state_timer = 0.25
         self.hit_flash = 0.15
+        self.hp_bar_timer = settings.MOB_HP_BAR_TTL
         if from_x is not None:
             # 原版只在被打了之后才反击追击（boss 站桩除外）
             if not self.boss:
@@ -191,6 +193,9 @@ class Monster:
 
         if self.hit_flash > 0:
             self.hit_flash -= dt
+
+        if self.hp_bar_timer > 0:
+            self.hp_bar_timer -= dt
 
         # 攻击冷却
         if self.attack_cooldown > 0:
@@ -411,6 +416,23 @@ class Monster:
             return {}
 
     # ── 绘制 ───────────────────────────────────────────────────────
+    @property
+    def hp_bar_visible(self) -> bool:
+        """受击后限时显示脚下血条（再受击刷新，死亡后不显示）。"""
+        return self.hp_bar_timer > 0.0 and not self.dead
+
+    def _draw_hp_bar(self, surface: pygame.Surface, camera) -> None:
+        """脚下血条：白底，红色液面 = 剩余 HP（受伤后红缩白显）。"""
+        w, h = 41, 5
+        sx, sy = camera.to_screen(self.x, self.cy)
+        x = int(sx - w / 2)
+        y = int(sy + 4)
+        ratio = max(0, self.hp) / max(1, self.max_hp)
+        pygame.draw.rect(surface, (255, 255, 255), (x, y, w, h))
+        if ratio > 0:
+            pygame.draw.rect(surface, (220, 40, 40),
+                             (x, y, max(1, int(w * ratio)), h))
+
     def draw(self, surface: pygame.Surface, camera) -> None:
         # 朝向为右时用预翻转帧，避开每帧 transform.flip（频繁分配触发 GC 尖峰）
         frames = self._flipped if self.dir > 0 else self.anim.frames
@@ -420,11 +442,15 @@ class Monster:
         if frame_surf is None:
             return
         if self.hit_flash > 0 and int(self.hit_flash * 60) % 2 == 0:
+            if self.hp_bar_visible:
+                self._draw_hp_bar(surface, camera)
             return
         # 锚点：脚底 = (x, cy)；origin 是帧内原点（脚底）相对左上角偏移
         sx, sy = camera.to_screen(self.x, self.cy)
         top_left = (sx - self.origin[0], sy - self.origin[1])
         surface.blit(frame_surf, (int(top_left[0]), int(top_left[1])))
+        if self.hp_bar_visible:
+            self._draw_hp_bar(surface, camera)
 
     @property
     def sprite_w(self) -> int:
