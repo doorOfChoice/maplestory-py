@@ -53,6 +53,7 @@ ACTIONS: List[ActionDef] = [
     ActionDef("window_stat", "状态窗口", GROUP_UI, pygame.K_b),
     ActionDef("window_quest", "任务日志", GROUP_UI, pygame.K_q),
     ActionDef("minimap", "小地图开关", GROUP_UI, pygame.K_m),
+    ActionDef("quest_tracker", "任务追踪", GROUP_UI, pygame.K_t),
     ActionDef("window_keyconfig", "按键设置", GROUP_UI, pygame.K_o),
 ] + [
     ActionDef(f"skill_{i + 1}", f"技能 {i + 1}", GROUP_SKILL, key)

@@ -241,6 +241,7 @@ MINIMAP_PORTAL_COLOR = (90, 220, 100)      # 传送门
 # ── 任务系统 ─────────────────────────────────────────────────────────
 # 任务池不再手工白名单：启动时全量解析 Quest.wz，并按 Map.wz 真实出现的
 # NPC / 怪物过滤（见 core.life_index + systems.quests.filter_world_quest_defs）。
+QUEST_TRACKER_MAX = 3          # 追踪悬浮框最多同时显示的进行中任务数（T 键开关）
 # ── 地图通行 / 缓存 ────────────────────────────────────────────────
 # 连通关系由 Map.wz portal 的 tm/tn 数据驱动（见 game/travel.py），
 # 不再使用白名单。以下为整图 Surface LRU 缓存与切图横幅参数。

@@ -42,6 +42,7 @@ SHORT_LABELS = {
     "window_inventory": "背包", "window_skill": "技能",
     "window_stat": "状态", "window_quest": "任务",
     "minimap": "地图", "window_keyconfig": "按键",
+    "quest_tracker": "追踪",
 }
 
 

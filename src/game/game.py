@@ -32,6 +32,7 @@ from game.systems.lua_quests import build_advance_quest_defs, load_lua_quest_def
 from game.npc_dialogue import NpcDialogueController
 from game.save_manager import SaveManager
 from game.render.splash import Splash
+from game.render.tracker import QuestTracker, build_entries
 from game.render.windows.inventory import toggle_inventory_pair
 from game.render.windows.core.manager import to_view_pos
 from game.context import GameContext
@@ -72,6 +73,9 @@ class Game:
 
         # 全局键位配置（独立于角色存档，缺失/损坏回退默认）
         self.keybindings = KeyBindings.load(settings.KEYBINDINGS_FILE)
+
+        # 任务追踪悬浮框（T 键开关；右上角小地图下方，状态独立于世界构建）
+        self.quest_tracker = QuestTracker()
 
         # 存档概览（轻量、先读），世界构建在后台线程完成
         self.save_manager = SaveManager(settings.SAVE_FILE)
@@ -275,6 +279,8 @@ class Game:
                     self.ctx.windows.get("keyconfig").toggle()
                 elif action == "minimap":
                     self.ctx.world.minimap.toggle()
+                elif action == "quest_tracker":
+                    self.quest_tracker.toggle()
                 elif action is not None and action.startswith("skill_"):
                     self._cast_skill(int(action[len("skill_"):]))
                 elif action is not None and item_id_of_action(action):
@@ -444,6 +450,30 @@ class Game:
             lines.append(f"收集 #c{iid}# {self.assets.item_name(str(iid)) or ''}  {cur}/{count}")
         return lines
 
+    def _tracker_goal_lines(self, qid: str) -> List[str]:
+        """追踪框：进行中任务的目标进度行（纯文本，无对话色码）。"""
+        d = self.quest_defs.get(qid)
+        if d is None:
+            return []
+        q = self.ctx.world.player.quests
+        lines: List[str] = []
+        for mid, count in d.kills:
+            cur = q.kill_progress(qid, mid)
+            lines.append(f"击杀 {self.assets.mob_name_of(mid)} {cur}/{count}")
+        for iid, count in d.end_items:
+            cur = q.item_progress(self.ctx.world.player, qid, iid)
+            name = self.assets.item_name(str(iid)) or f"#{iid}"
+            lines.append(f"收集 {name} {cur}/{count}")
+        return lines
+
+    def _tracker_entries(self):
+        """组装追踪框当前应显示的任务行（受 QUEST_TRACKER_MAX 限制）。"""
+        player = self.ctx.world.player
+        return build_entries(
+            player.quests, player, settings.QUEST_TRACKER_MAX,
+            goal_lines=self._tracker_goal_lines,
+            is_ready=lambda qid: player.quests.can_complete(qid, player))
+
     # ── 重生 ───────────────────────────────────────────────────────
     def respawn(self) -> None:
         self.dead = False
@@ -582,6 +612,11 @@ class Game:
         name_y = (settings.MINIMAP_MARGIN + settings.MINIMAP_H + 8
                   if self.ctx.world.minimap.visible else 8)
         self.ctx.ui.draw_map_name(self.canvas, self.assets.map_name(), name_y)
+        # 任务追踪框：贴在小地图 / 名牌下方（T 键开关，无进行中任务时不绘制）
+        if self.quest_tracker.visible and self._world_ready:
+            self.quest_tracker.draw(
+                self.canvas, self.ctx.ui, self._tracker_entries(),
+                top=name_y + 22 + 4)
         self.ctx.windows.draw(self.canvas)
         self.ctx.ui.draw_dialog(self.canvas, self.ctx.world.camera)
         self.ctx.ui.conv.draw(self.canvas)
