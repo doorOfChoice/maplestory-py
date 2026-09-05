@@ -174,6 +174,7 @@ class Game:
         self._banner: Optional[Tuple[str, str]] = None
         self._banner_timer = 0.0
         self._pickup_timer = 0.0
+        self._skill_buffer: Optional[Tuple[int, float]] = None
         self.spawn_grace = settings.SPAWN_GRACE
         self.fade = 1.0        # 开屏进入游戏时黑场淡入
 
@@ -336,7 +337,7 @@ class Game:
         # 兜底：弹窗瞬间按住的 A 等按键事件会被模态分支吞掉，
         # 用持续按键状态补触发攻击（按下即生效，无需等松开重按）
         if (self.keys.attack and not self.ctx.ui.dialog_visible
-                and not self.dead and not self.ctx.world.player.attacking):
+                and not self.dead and self.ctx.world.player.attack_slot_free()):
             if self.ctx.world.player.start_attack():
                 self.ctx.audio.play_attack(self.ctx.world.player.equips)
 
@@ -378,19 +379,48 @@ class Game:
         return ("system", f"获得金币 {amount}")
 
     def _cast_skill(self, hotkey: int) -> None:
-        """按技能槽施放（键位经 KeyBindings 解析成槽号）。成功则播放施放特效。"""
-        sid = self.ctx.world.player.skills.hotkeys.get(hotkey)
+        """按技能槽施放（键位经 KeyBindings 解析成槽号）。
+
+        攻击锁定期内按下则进输入缓冲，窗口内一旦解锁立即补放；
+        cast 无副作用，只有真正出手成功才写冷却。
+        """
+        if not self.ctx.world.player.attack_slot_free(for_skill=True):
+            self._skill_buffer = (hotkey, settings.SKILL_INPUT_BUFFER)
+            return
+        self._try_cast(hotkey)
+
+    def _try_cast(self, hotkey: int) -> None:
+        """尝试施放技能槽 hotkey 对应的技能；失败（CD/MP/锁）静默放弃。"""
+        player = self.ctx.world.player
+        sid = player.skills.hotkeys.get(hotkey)
         if sid is None:
             return
-        data = self.ctx.world.player.skills.cast(sid, self.ctx.world.player.level)
+        data = player.skills.cast(sid, player.level)
         if data is None:
             return
-        if self.ctx.world.player.start_attack(data):
-            self.ctx.audio.play_skill_cast(sid, self.ctx.world.player.equips)
-            eff = self.assets.skill_effect_frames(sid)
-            if eff:
-                self.ctx.world.combat.effects.append(Effect(
-                    eff, self.ctx.world.player.x, self.ctx.world.player.y))
+        if not player.start_attack(data):
+            return
+        player.skills.start_cooldown(sid)
+        self.ctx.audio.play_skill_cast(sid, player.equips)
+        eff = self.assets.skill_effect_frames(sid)
+        if eff:
+            self.ctx.world.combat.effects.append(Effect(
+                eff, player.x, player.y))
+
+    def _tick_skill_buffer(self, dt: float) -> None:
+        """输入缓冲计时：攻击槽一旦空闲立即补放，超窗作废。"""
+        if self._skill_buffer is None:
+            return
+        hotkey, left = self._skill_buffer
+        left -= dt
+        if left <= 0.0:
+            self._skill_buffer = None
+            return
+        if self.ctx.world.player.attack_slot_free(for_skill=True):
+            self._skill_buffer = None
+            self._try_cast(hotkey)
+        else:
+            self._skill_buffer = (hotkey, left)
 
     def _qmark(self, text: str) -> str:
         """把官方 Say 文本里的标记替换为可读文本。"""
@@ -437,6 +467,7 @@ class Game:
         if self._loading:
             return
         self._dialogue.close_all()
+        self._skill_buffer = None
         self.ctx.windows.cancel_interactions()
         self.ctx.windows.close_npc_windows()
         self.ctx.audio.stop_bgm()
@@ -507,6 +538,9 @@ class Game:
         # 对话框不再暂停世界；走远 / 切图自动收起
         self._dialogue.update()
 
+        # 技能输入缓冲：攻击槽一空闲就补放锁定期内按下的技能
+        self._tick_skill_buffer(dt)
+
         # 出生保护计时
         if self.spawn_grace > 0:
             self.spawn_grace -= dt
@@ -526,6 +560,7 @@ class Game:
         # 死亡检测
         if self.ctx.world.player.hp <= 0:
             self.dead = True
+            self._skill_buffer = None
             self.ctx.ui.show_death()
             self.ctx.audio.play("GameIn", 0.4)
 

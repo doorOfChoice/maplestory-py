@@ -139,6 +139,8 @@ SP_PER_LEVEL = 3                 # 每级获得 SP
 SKILL_MP_REGEN = 1.2             # MP 自然回复 / 秒
 SKILL_COOLDOWN: dict = {}        # 施放冷却覆盖表（秒）；缺省回退 0.8
 SKILL_MAX_LEVEL = 20             # 技能最高等级（裁剪 WZ level 表）
+ATTACK_CANCEL_DELAY = 0.25       # 攻击起手后允许被下一击取消后摇的最短秒数
+SKILL_INPUT_BUFFER = 0.4         # 技能键在攻击锁定期内按下时的输入缓冲时长（秒）
 
 # ── Buff / 状态异常（game/buffs.py）──────────────────────────────────
 CRIT_MULT = 1.5                  # 暴击伤害倍率

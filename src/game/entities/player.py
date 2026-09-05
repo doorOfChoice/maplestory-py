@@ -59,6 +59,7 @@ class Player:
         self.attack_hit_applied = False
         self.attack_projectile_spawned = False
         self.attack_timer = 0.0
+        self.attack_elapsed = 0.0
         self.climbing = False
         self.detach_cooldown = 0.0
         self.wall_dir = 0
@@ -342,12 +343,29 @@ class Player:
             self.on_ground = False
             self.vy = 60.0
 
+    def attack_slot_free(self, for_skill: bool = False) -> bool:
+        """攻击槽是否可用：未在攻击中；技能施放（for_skill）还可取消已结算普攻的后摇。
+
+        结算点 = 近战命中已应用 / 远程弹道已生成（伤害在起手帧完成，
+        之后的动画纯属后摇）。取消规则对齐原版手感与平衡：
+        普攻不可互取消（攻速由动画决定）；技能可取消普攻后摇，
+        但技能动画（含技能接技能）必须完整播完，防止双技交替变相提速。
+        """
+        if self.hurt_timer > 0 or self.statuses.locked():
+            return False
+        if not self.attacking:
+            return True
+        if not for_skill or self.pending_skill is not None:
+            return False
+        settled = self.attack_hit_applied or self.attack_projectile_spawned
+        return settled and self.attack_elapsed >= settings.ATTACK_CANCEL_DELAY
+
     def start_attack(self, skill_data: Optional[dict] = None) -> bool:
         """发起攻击；skill_data 非空时为技能攻击（先扣 MP/HP 消耗）。
 
         buff 技能（level 表含 time）不进入攻击：扣消耗后直接上 buff。
         """
-        if self.attacking or self.hurt_timer > 0 or self.statuses.locked():
+        if not self.attack_slot_free(for_skill=skill_data is not None):
             return False
         if skill_data is not None:
             if (self.mp < skill_data["mp_con"]
@@ -365,6 +383,7 @@ class Player:
         self.attack_hit_applied = False
         self.attack_projectile_spawned = False
         self.attack_timer = 3.0
+        self.attack_elapsed = 0.0
         self._load_anim(self.attack_pose)
         return True
 
@@ -427,6 +446,7 @@ class Player:
         # 攻击结束回 idle（带超时保险，防止动画状态卡死无法再次攻击）
         if self.attacking:
             self.attack_timer -= dt
+            self.attack_elapsed += dt
             done = self._tick_frame(dt, loop=False) or self.attack_timer <= 0
             if done:
                 self.attacking = False

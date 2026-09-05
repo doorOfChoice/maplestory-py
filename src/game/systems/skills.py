@@ -309,7 +309,10 @@ class SkillBook:
 
     # ── 施放 ───────────────────────────────────────────────────────
     def cast(self, skill_id: str, player_level: int) -> Optional[dict]:
-        """尝试施放：返回施放数据（消耗 + 倍率 + 弹道参数），失败返回 None。"""
+        """校验并返回施放数据（消耗 + 倍率 + 弹道参数），失败返回 None。
+
+        无副作用：不写冷却。确认出手成功后由调用方 start_cooldown。
+        """
         d = self.defs.get(skill_id)
         if d is None:
             return None
@@ -318,7 +321,6 @@ class SkillBook:
             return None
         if self.cooldowns.get(skill_id, 0.0) > 0.0:
             return None
-        self.cooldowns[skill_id] = settings.SKILL_COOLDOWN.get(skill_id, 0.8)
         data = {
             "id": skill_id,
             "def": d,
@@ -335,6 +337,10 @@ class SkillBook:
             data["speed"] = settings.SNAIL_THROW_SPEED
             data["life"] = settings.SNAIL_THROW_LIFETIME
         return data
+
+    def start_cooldown(self, skill_id: str) -> None:
+        """确认出手后写入施放冷却（cast 本身无副作用）。"""
+        self.cooldowns[skill_id] = settings.SKILL_COOLDOWN.get(skill_id, 0.8)
 
     def tick(self, dt: float) -> None:
         for sid in list(self.cooldowns):
