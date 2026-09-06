@@ -361,15 +361,18 @@ class WindowManager:
         for win in self._stack:
             if win.visible:
                 win.draw(surface)
-        if self._modal is not None:
-            self._modal.draw(surface, self.svc)   # 模态框盖在所有窗口上
-            self._draw_toasts(surface)
-            return
-        if self._tip is not None:
-            widgets.draw_tooltip(surface, self.svc, self._mouse, self._tip)
-        if self._pick is not None and self._pick.active:
-            self._draw_drag_icon(surface, self._pick)
+        if self._modal is None:                   # 模态框打开时不画气泡/拖影
+            if self._tip is not None:
+                widgets.draw_tooltip(surface, self.svc, self._mouse, self._tip)
+            if self._pick is not None and self._pick.active:
+                self._draw_drag_icon(surface, self._pick)
         self._draw_toasts(surface)
+
+    def draw_modal(self, surface) -> None:
+        """模态框单独最外层绘制：game.py 在对话/聊天/死亡面板之后再调用，
+        否则出租车确认框会被后画的 NPC 对话气泡盖住。"""
+        if self._modal is not None:
+            self._modal.draw(surface, self.svc)
 
     def _draw_toasts(self, surface) -> None:
         """toast 队列：每条独立倒计时，同屏最多叠 3 条，先到先消。"""

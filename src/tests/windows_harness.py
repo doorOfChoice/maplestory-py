@@ -183,4 +183,5 @@ def key_press(mgr, key):
 def draw_once(mgr, size=(800, 600)) -> pygame.Surface:
     surface = pygame.Surface(size, pygame.SRCALPHA)
     mgr.draw(surface)
+    mgr.draw_modal(surface)      # 同 game.py：模态框最后独立顶层绘制
     return surface

@@ -720,6 +720,7 @@ class Game:
         self.combat_log_view.draw(self.canvas, self.ctx.world.combat.combat_log,
                                   self.assets, self.ctx.ui.status_bar_height())
         self.ctx.ui.draw_death(self.canvas)
+        self.ctx.windows.draw_modal(self.canvas)   # 模态框永远盖过对话/聊天/死亡
 
         # 黑场淡入（切图 / 重生后从黑渐变到场景，避免瞬间弹出）
         if self.fade > 0.0:

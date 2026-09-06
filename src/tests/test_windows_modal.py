@@ -66,6 +66,17 @@ def test_numeric_modal_clamps_quantity():
     assert not mgr.modal_open()
 
 
+def test_modal_draws_above_panels_rendered_after_manager():
+    """对话气泡在 windows.draw 之后绘制也不能盖住模态框（draw_modal 顶层通道）。"""
+    mgr = make_manager()
+    m, _ = _modal(mgr)
+    surface = pygame.Surface((800, 600), pygame.SRCALPHA)
+    mgr.draw(surface)
+    surface.fill((1, 2, 3, 255), m.ok_rect)   # 模拟后画的对话层糊在上面
+    mgr.draw_modal(surface)
+    assert surface.get_at(m.ok_rect.center) != (1, 2, 3, 255)
+
+
 def test_events_swallowed_while_modal_open():
     win = BoxWindow(make_services())
     win.open()
