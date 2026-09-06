@@ -6,8 +6,9 @@ import random
 from game import settings
 from game.core.stats import (accuracy, allocate, attack, attack_range,
                              auto_allocate, base_stats, defense, evasion,
-                             exp_to_next, magic_attack, magic_defense,
-                             max_hp, max_mp, roll_damage, wear_block)
+                             exp_to_next, hit_chance, magic_attack,
+                             magic_defense, max_hp, max_mp, roll_damage,
+                             wear_block)
 
 
 def test_allocate_adds_stat_and_consumes_ap():
@@ -119,8 +120,16 @@ def test_magic_defense_includes_int_and_equipment():
 
 
 def test_accuracy_includes_dex_equipment_skill():
-    """命中 = DEX//2 + 装备 ACC 总和 + 被动/buff 加值。"""
-    assert accuracy({"str": 4, "dex": 40, "int": 4, "luk": 4}, 20, 5) == 45
+    """命中 = 基础 20 + DEX//2 + 装备 ACC 总和 + 被动/buff 加值。"""
+    assert accuracy({"str": 4, "dex": 40, "int": 4, "luk": 4}, 20, 5) == 65
+
+
+def test_hit_chance_level_term_and_clamps():
+    """命中概率 = acc/(acc+eva) + 1%/级差，钳在 [5%, 95%]。"""
+    assert hit_chance(100, 100) == 0.5
+    assert hit_chance(100, 100, level_diff=10) == 0.6
+    assert hit_chance(100, 100, level_diff=-95) == 0.05    # 地板：永远打得中
+    assert hit_chance(100, 0, level_diff=95) == 0.95       # 天花板：留 5% MISS 手感
 
 
 def test_evasion_includes_luk_and_equipment():

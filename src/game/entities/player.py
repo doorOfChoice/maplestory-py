@@ -259,7 +259,7 @@ class Player:
                                        self.inventory.stat_sum("incMDD"))
 
     def accuracy_value(self) -> int:
-        """命中率：DEX//2 + 装备 ACC + 被动/buff 加值。"""
+        """命中率：基础 20 + DEX//2 + 装备 ACC + 被动/buff 加值。"""
         extra = self.skills.passive_mods().get("acc", 0) \
             + self.buffs.mod_sum("acc")
         return stats_mod.accuracy(self.total_stats(),
@@ -274,6 +274,12 @@ class Player:
         """攻击速度：武器 WZ speed 值（0 最快、越大越慢）；空手为 0。"""
         weapon = self.inventory.equipped.get("weapon")
         return weapon.stat("speed") if weapon is not None else 0
+
+    def attack_anim_rate(self) -> float:
+        """攻速 → 攻击动画推进倍率：delay=300+60×speed，基准 speed4 为 1.0。"""
+        delay = settings.ATTACK_DELAY_BASE_MS \
+            + self.attack_speed_value() * settings.ATTACK_DELAY_STEP_MS
+        return settings.ATTACK_DELAY_REF_MS / delay
 
     def move_speed_display(self) -> int:
         """移动速度（面板 %）：100 + 装备 incSpeed 加成折算。"""
@@ -520,7 +526,8 @@ class Player:
         if self.attacking:
             self.attack_timer -= dt
             self.attack_elapsed += dt
-            done = self._tick_frame(dt, loop=False) or self.attack_timer <= 0
+            done = self._tick_frame(dt * self.attack_anim_rate(),
+                                    loop=False) or self.attack_timer <= 0
             if done:
                 self.attacking = False
                 self.pending_skill = None

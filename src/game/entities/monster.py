@@ -78,6 +78,10 @@ class Monster:
         self.level = int(stats.get("level") or 0)
         self.attack_power = int(stats.get("weaponAttack") or 10)
         self.pd = int(stats.get("weaponDefense") or 0)
+        self.mad = int(stats.get("magicAttack") or 0)
+        self.mdd = int(stats.get("magicDefense") or 0)
+        self.acc = int(stats.get("accuracy") or 0)
+        self.eva = int(stats.get("evasion") or 0)
         # WZ speed 是有符号偏移值（-80..140，0≈常速），仿射映射并钳到可见区间
         self.speed = float(stats.get("speed") or 0)
         raw = settings.MOB_SPEED_BASE + self.speed * settings.MOB_SPEED_FACTOR
@@ -257,9 +261,13 @@ class Monster:
                 and self.attack_cooldown <= 0):
             if audio:
                 audio.play("GameIn", 0.3)
+            magic = self.mad > self.attack_power
             mobs.append({
                 "type": "contact",
-                "amount": roll_damage(self.attack_power),
+                "amount": roll_damage(self.mad if magic else self.attack_power),
+                "acc": self.acc,
+                "level": self.level,
+                "magic": magic,
                 "x": self.x, "y": self.cy - 30,
                 "id": self.mob_id,
                 "status_attacks": self.status_attacks,

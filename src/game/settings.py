@@ -79,6 +79,15 @@ ATTACK_RANGE = 58.0              # 攻击命中框向前延伸距离
 ATTACK_HEIGHT = 30.0
 BASE_DAMAGE = 25                 # 基础攻击力
 ATTACK_MOVE_FRICTION = 8.0       # 攻击期间水平速度每秒摩擦衰减系数（保留惯性滑行至停）
+# 武器攻速：WZ speed 值（0~6，越小越快）→ 出手延迟 delay = BASE + STEP×speed，
+# 动画推进倍率 = REF / delay（REF 取单手剑 speed4 作基准 1.0 倍速）
+ATTACK_DELAY_BASE_MS = 300
+ATTACK_DELAY_STEP_MS = 60
+ATTACK_DELAY_REF_MS = 540
+# 命中判定：acc/(acc+eva) + LEVEL_STEP×攻方等级优势，钳 [FLOOR, CEIL]
+HIT_RATE_FLOOR = 0.05
+HIT_RATE_CEIL = 0.95
+HIT_RATE_LEVEL_STEP = 0.01
 # 经验需求：官方逐级表见 game/stats.py EXP_TO_NEXT，此处不再用指数近似
 RESPAWN_FULL = True
 

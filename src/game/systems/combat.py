@@ -45,6 +45,7 @@ class Combatant(Protocol):
     def attack_range(self) -> Tuple[int, int]: ...
     def crit_rate(self) -> float: ...
     def crit_mult(self) -> float: ...
+    def accuracy_value(self) -> int: ...
     def attack_rect(self) -> Optional[pygame.Rect]: ...
 
 
@@ -54,6 +55,7 @@ class CombatTarget(Protocol):
     cy: float
     sprite_h: float
     pd: int
+    eva: int
     level: int
     dead: bool
 
@@ -290,17 +292,25 @@ class Arrow:
             if not self.rect().colliderect(mob.rect()):
                 continue
             self.hit_ids.add(id(mob))
-            luk = player.luk if player is not None else 0
-            dmg = max(1, self.dmg - int(mob.pd * (1 - luk / 100.0)))
-            combat.numbers.append(DamageNumber(
-                mob.x, mob.cy - mob.sprite_h, dmg,
-                "violet" if self.crit else "red", big=self.crit))
-            if self.hit_frames:
-                combat.effects.append(Effect(
-                    self.hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45))
-            died = mob.take_hit(dmg, from_x=self.x)
-            if died and player is not None:
-                combat._on_kill(player, mob)
+            missed = player is not None and combat.rng.random() >= \
+                stats_mod.hit_chance(player.accuracy_value(), mob.eva,
+                                     player.level - mob.level)
+            if missed:
+                combat.numbers.append(DamageNumber(
+                    mob.x, mob.cy - mob.sprite_h, 0))
+            else:
+                luk = player.luk if player is not None else 0
+                dmg = max(1, self.dmg - int(mob.pd * (1 - luk / 100.0)))
+                combat.numbers.append(DamageNumber(
+                    mob.x, mob.cy - mob.sprite_h, dmg,
+                    "violet" if self.crit else "red", big=self.crit))
+                if self.hit_frames:
+                    combat.effects.append(Effect(
+                        self.hit_frames, mob.x,
+                        mob.cy - mob.sprite_h * 0.45))
+                died = mob.take_hit(dmg, from_x=self.x)
+                if died and player is not None:
+                    combat._on_kill(player, mob)
             if len(self.hit_ids) >= self.mob_count:
                 self.dead = True
                 return
@@ -401,6 +411,12 @@ class Combat:
         crit_mult = player.crit_mult()
 
         for mob in targets:
+            if self.rng.random() >= stats_mod.hit_chance(
+                    player.accuracy_value(), mob.eva,
+                    player_level - mob.level):
+                self.numbers.append(DamageNumber(
+                    mob.x, mob.cy - mob.sprite_h, 0))
+                continue
             dmg, crit = stats_mod.roll_damage(
                 atk_lo, atk_hi, mult, mob.pd,
                 player_level, mob.level, random,
@@ -570,7 +586,16 @@ class Combat:
         for hit in hits:
             if not player.hurt(hit["x"]):
                 continue
-            amount = max(1, int(hit["amount"] * 100.0 / (100 + player.defense_value())))
+            acc = hit.get("acc")
+            if acc is not None and self.rng.random() >= stats_mod.hit_chance(
+                    acc, player.evasion_value(),
+                    hit.get("level", player.level) - player.level):
+                self.numbers.append(DamageNumber(
+                    player.x, player.y - 40, 0, "blue"))
+                continue
+            guard = player.magic_defense_value() if hit.get("magic") \
+                else player.defense_value()
+            amount = max(1, int(hit["amount"] * 100.0 / (100 + guard)))
             player.damage(amount)
             self.numbers.append(DamageNumber(
                 player.x, player.y - 40, amount, "red"))

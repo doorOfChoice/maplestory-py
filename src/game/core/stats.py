@@ -158,14 +158,28 @@ def magic_defense(stats: Mapping[str, int], equip_mdd: int) -> int:
     return equip_mdd + stats["int"] // 10
 
 
+ACC_BASE = 20    # 命中基础项：保证新手打常规怪不至于频繁 MISS
+
+
 def accuracy(stats: Mapping[str, int], equip_acc: int, skill_acc: int = 0) -> int:
-    """命中率：DEX//2 + 装备 ACC 总和 + 被动/buff 加值。"""
-    return stats["dex"] // 2 + equip_acc + skill_acc
+    """命中率：基础 20 + DEX//2 + 装备 ACC 总和 + 被动/buff 加值。"""
+    return ACC_BASE + stats["dex"] // 2 + equip_acc + skill_acc
 
 
 def evasion(stats: Mapping[str, int], equip_eva: int) -> int:
     """回避率：LUK//2 + 装备 EVA 总和。"""
     return stats["luk"] // 2 + equip_eva
+
+
+def hit_chance(acc: int, eva: int, level_diff: int = 0) -> float:
+    """命中概率：acc/(acc+eva) + 1%/等级差（攻方等级优势），钳在 [5%, 95%]。
+
+    钳位保证打高回避 Boss 也有 5% 能摸到、同级清怪保留 5% MISS 手感；
+    等级项让越级碾压基本必中、以下犯上明显吃力（官方体感）。
+    """
+    base = 1.0 if acc + eva <= 0 else acc / (acc + eva)
+    rate = base + settings.HIT_RATE_LEVEL_STEP * level_diff
+    return max(settings.HIT_RATE_FLOOR, min(settings.HIT_RATE_CEIL, rate))
 
 
 def exp_to_next(level: int) -> int:

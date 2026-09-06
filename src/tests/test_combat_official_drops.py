@@ -12,6 +12,7 @@ from game.systems.drops import OfficialDropTable
 
 class _Mob:
     x, cy, sprite_h, level, pd = 10.0, 100.0, 30, 1, 0
+    eva = 0
     dead = False
     exp = 10
     mob_id = "210100"
@@ -46,6 +47,9 @@ class _Player:
 
     def crit_mult(self) -> float:
         return 1.5
+
+    def accuracy_value(self) -> int:
+        return 100
 
 
 class _Assets:

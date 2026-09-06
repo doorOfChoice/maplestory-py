@@ -55,6 +55,7 @@ def test_fully_faded_at_end_of_life():
 
 class _Mob:
     x, cy, sprite_h, level, pd = 10.0, 100.0, 30, 1, 0
+    eva = 0
     dead = False
     exp = 0
     mob_id = "9999999"
@@ -87,6 +88,9 @@ class _MeleePlayer:
 
     def crit_mult(self) -> float:
         return 1.5
+
+    def accuracy_value(self) -> int:
+        return 100
 
 
 def test_noncrit_skill_melee_uses_red_numbers():
