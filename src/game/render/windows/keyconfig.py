@@ -1,7 +1,8 @@
 """按键设置窗（原版式）：上半虚拟键盘 + 下半可拖拽指令栏。
 
-纯鼠标交互：把指令栏条目或技能窗里的技能拖到键格即完成绑定（KeyBindings
-冲突自动互换、即时 save 落盘）；右键键格把该键动作恢复默认（链式归位）。
+纯鼠标交互：把指令栏条目或技能窗里的技能拖到键格即完成绑定（占用者被直接顶掉
+解绑、即时 save 落盘）；已绑定的键帽可拖到另一键格上互换键位；右键键格直接取消
+该键动作的绑定。
 Esc 键格仅展示「取消」职能，永不作为绑定落点。坐标约定同 Window 基类
 （事件 pos 为内部 VIEW 坐标），热区（key_cells / rows）由 draw 重建。
 """
@@ -64,7 +65,7 @@ def _group_entries() -> List[Tuple[str, str]]:
 
 
 class KeyConfigWindow(Window):
-    """键盘式改绑窗：拖指令方块/技能到键格绑定、右键键格重置。"""
+    """键盘式改绑窗：拖指令方块/技能到键格绑定、键帽互拖互换、右键键格解绑。"""
 
     key = "keyconfig"
     escape_closes = True
@@ -108,16 +109,29 @@ class KeyConfigWindow(Window):
 
     # ── 事件：拖拽源与落点 ─────────────────────────────────────────
     def pickup(self, pos: Tuple[int, int]) -> Optional[DragPickup]:
-        """按住指令栏动作行 → 起拖一个 cmd 载荷。"""
+        """按住指令栏动作行或已绑定的键帽 → 起拖一个 cmd 载荷。"""
         for rect, action in self.rows:
             if rect.collidepoint(pos):
                 return DragPickup(source=("cmd", action), item=None,
                                   home=rect, kind="cmd", payload=action,
                                   label=self.row_label(action))
+        bindings = self.svc.bindings
+        if bindings is not None:
+            for rect, key in self.key_cells:
+                if rect.collidepoint(pos):
+                    action = bindings.action_for(key)
+                    if action is not None:
+                        return DragPickup(source=("key", action), item=None,
+                                          home=rect, kind="cmd",
+                                          payload=action,
+                                          label=self._action_text(action))
         return None
 
     def handle_drop(self, pk: DragPickup, pos: Tuple[int, int]) -> bool:
-        """cmd / skill / item 载荷落在键格上 → 改绑（冲突互换）并落盘。"""
+        """cmd / skill / item 载荷落在键格上 → 改绑并落盘。
+
+        键帽来源的 cmd 走 swap（与占用者互换）；其余来源走 set（顶掉占用者）。
+        """
         bindings = self.svc.bindings
         if bindings is None or pk.kind not in ("cmd", "skill", "item"):
             return False
@@ -126,7 +140,8 @@ class KeyConfigWindow(Window):
         if hit is None:
             return False
         if pk.kind == "cmd":
-            if not bindings.set(str(pk.payload), hit):
+            fn = (bindings.swap if pk.source[0] == "key" else bindings.set)
+            if not fn(str(pk.payload), hit):
                 return False
             bindings.save()
             return True
@@ -159,7 +174,7 @@ class KeyConfigWindow(Window):
         return self.rect.collidepoint(pos)
 
     def handle_right_click(self, pos: Tuple[int, int]) -> bool:
-        """右键键格：该键上的动作恢复默认绑法（被顶用的动作链式归位）。"""
+        """右键键格：直接取消该键动作的绑定。"""
         bindings = self.svc.bindings
         if bindings is None:
             return False
@@ -168,7 +183,7 @@ class KeyConfigWindow(Window):
                 action = bindings.action_for(key)
                 if action is None:
                     return True
-                bindings.reset(action)
+                bindings.unbind(action)
                 bindings.save()
                 return True
         return False
@@ -280,7 +295,7 @@ class KeyConfigWindow(Window):
             self._draw_tile(surface, tile, payload, bindings, ft, mouse)
             self.rows.append((tile, payload))
             cx += 1
-        surface.blit(fs.render("右键键位恢复默认 · 技能可从技能窗拖入", True,
+        surface.blit(fs.render("键帽互拖可换 · 右键取消绑定 · 技能可从技能窗拖入", True,
                                (140, 140, 130)),
                      (x + KC_PAD + 2, self.rect.bottom - 15))
         self._reset_rect = pygame.Rect(x + w - KC_PAD - 96,

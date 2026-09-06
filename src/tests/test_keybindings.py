@@ -1,4 +1,4 @@
-"""按键绑定模型：动作→物理键的改绑 / 冲突互换 / 反查 / 持久化。
+"""按键绑定模型：动作→物理键的改绑（顶替）/ 键帽互换 / 解绑 / 持久化。
 
 透过 KeyBindings 公开接口验证行为，不依赖 pygame 显示（仅用键码常量）。
 """
@@ -42,12 +42,36 @@ def test_set_rebinds_action():
     assert kb.action_for(pygame.K_a) is None
 
 
-def test_conflict_swaps_both_actions():
-    """攻击改到 Z（拾取键）：拾取自动顶到攻击原来的 A。"""
+def test_conflict_displaces_holder_to_unbound():
+    """攻击改到 Z（拾取键）：拾取被直接顶掉解绑，而不是换到 A。"""
     kb = KeyBindings()
     kb.set("attack", pygame.K_z)
     assert kb.key_of("attack") == pygame.K_z
+    assert kb.key_of("pickup") == -1
+
+
+def test_swap_exchanges_two_bound_actions():
+    """键帽互换：攻击与拾取对调 A/Z，双方都不解绑。"""
+    kb = KeyBindings()
+    assert kb.swap("attack", pygame.K_z)
+    assert kb.key_of("attack") == pygame.K_z
     assert kb.key_of("pickup") == pygame.K_a
+
+
+def test_swap_to_free_key_is_a_move():
+    """互换落点无占用：等同纯移动，原键腾空。"""
+    kb = KeyBindings()
+    kb.unbind("pickup")
+    assert kb.swap("attack", pygame.K_z)
+    assert kb.key_of("attack") == pygame.K_z
+    assert kb.action_for(pygame.K_a) is None
+
+
+def test_unbind_clears_action():
+    kb = KeyBindings()
+    kb.unbind("attack")
+    assert kb.key_of("attack") == -1
+    assert kb.action_for(pygame.K_a) is None
 
 
 def test_escape_is_never_bindable():
@@ -78,13 +102,13 @@ def test_item_action_displaces_holder_to_unbound():
     assert kb.key_of("attack") == -1
 
 
-def test_item_action_roundtrip_and_reset():
-    """物品宏随配置持久化；reset 即删除绑定（右键键位恢复默认）。"""
+def test_item_action_roundtrip_and_unbind():
+    """物品宏随配置持久化；unbind 即删除绑定（右键取消）。"""
     kb = KeyBindings()
     kb.set("item_2000006", pygame.K_q)
     kb2 = KeyBindings.from_dict(kb.to_dict())
     assert kb2.key_of("item_2000006") == pygame.K_q
-    kb2.reset("item_2000006")
+    kb2.unbind("item_2000006")
     assert "item_2000006" not in kb2.keys
 
 
@@ -102,10 +126,10 @@ def test_numpad_enter_normalizes_to_enter():
     assert kb.action_for(pygame.K_KP_ENTER) == "talk"
 
 
-def test_reset_restores_default_key():
+def test_reset_all_restores_every_default():
     kb = KeyBindings()
     kb.set("jump", pygame.K_w)
-    kb.reset("jump")
+    kb.reset_all()
     assert kb.key_of("jump") == pygame.K_SPACE
 
 
@@ -136,12 +160,12 @@ def test_from_dict_ignores_unknown_and_bad_values():
     assert kb.key_of("jump") == pygame.K_SPACE
 
 
-def test_from_dict_duplicate_key_resolves_by_swap():
-    """配置里两个动作占同一键：后读者生效，先读者被顶到对方原键。"""
+def test_from_dict_duplicate_key_last_wins():
+    """配置里两个动作占同一键：后读者生效，先读者被顶掉解绑。"""
     kb = KeyBindings.from_dict({"keys": {
         "attack": pygame.K_z, "pickup": pygame.K_z}})
     assert kb.key_of("pickup") == pygame.K_z
-    assert kb.key_of("attack") == pygame.K_a
+    assert kb.key_of("attack") == -1
 
 
 def test_missing_file_loads_defaults():

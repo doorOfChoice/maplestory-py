@@ -1,8 +1,8 @@
 """键盘式按键设置窗：上半虚拟键盘、下半指令栏，纯鼠标拖拽改绑。
 
 透过 KeyConfigWindow + WindowManager 公开接口验证行为（不依赖 WZ 素材）：
-指令拖到键格 = 改绑（冲突自动互换）并落盘；右键键格恢复默认；滚轮只翻指令
-栏；Esc 键格只做展示、不是落点。
+指令拖到键格 = 改绑（占用者被顶掉解绑）并落盘；键帽互拖 = 换；右键键格取消
+绑定；滚轮只翻指令栏；Esc 键格只做展示、不是落点。
 """
 
 from __future__ import annotations
@@ -24,11 +24,12 @@ from tests.windows_harness import (FakeAssets, FakeUI, draw_once,
 
 # ── 测试装配助手 ────────────────────────────────────────────────────
 class FakeBindings:
-    """记录改绑/重置/落盘调用的假绑定表；attack 恒显示占用 A 键。"""
+    """记录改绑/互换/解绑/落盘调用的假绑定表；attack 恒显示占用 A 键。"""
 
     def __init__(self) -> None:
         self.set_calls: list = []
-        self.reset_calls: list = []
+        self.swap_calls: list = []
+        self.unbind_calls: list = []
         self.saved = 0
 
     def key_of(self, action: str) -> int:
@@ -44,8 +45,12 @@ class FakeBindings:
         self.set_calls.append((action, key))
         return True
 
-    def reset(self, action: str) -> None:
-        self.reset_calls.append(action)
+    def swap(self, action: str, key: int) -> bool:
+        self.swap_calls.append((action, key))
+        return True
+
+    def unbind(self, action: str) -> None:
+        self.unbind_calls.append(action)
 
     def save(self) -> None:
         self.saved += 1
@@ -116,16 +121,37 @@ def test_drag_command_row_onto_key_binds_and_saves():
     assert fb.saved == 1
 
 
-def test_drag_command_conflict_swaps_and_persists():
-    """把「普通攻击」拖到拾取键 Z：攻击占 Z、拾取顶到 A，并写盘。"""
+def test_drag_command_conflict_displaces_and_persists():
+    """把「普通攻击」拖到拾取键 Z：攻击占 Z、拾取被顶掉解绑，并写盘。"""
     kb = KeyBindings()
     with tempfile.TemporaryDirectory() as td:
         kb.path = Path(td) / "kb.json"
         win, mgr = make_open(kb)
         drag_to_key(mgr, win, "attack", pygame.K_z)
         assert kb.key_of("attack") == pygame.K_z
-        assert kb.key_of("pickup") == pygame.K_a
+        assert kb.key_of("pickup") == -1
         assert KeyBindings.load(kb.path).key_of("attack") == pygame.K_z
+
+
+def test_drag_keycap_onto_other_key_swaps():
+    """键帽 A（攻击）拖到键帽 Z（拾取）：两动作互换键位并写盘。"""
+    kb = KeyBindings()
+    with tempfile.TemporaryDirectory() as td:
+        kb.path = Path(td) / "kb.json"
+        win, mgr = make_open(kb)
+        assert press(mgr, cell_for(win, pygame.K_a).center)
+        target = cell_for(win, pygame.K_z)
+        assert motion(mgr, target.center)
+        assert release(mgr, target.center)
+        assert kb.key_of("attack") == pygame.K_z
+        assert kb.key_of("pickup") == pygame.K_a
+        assert KeyBindings.load(kb.path).key_of("pickup") == pygame.K_a
+
+
+def test_drag_free_keycap_does_not_start_pickup():
+    """空白键帽按不住：不产生拖拽载荷。"""
+    win, _ = make_open(KeyBindings())
+    assert win.pickup(cell_for(win, pygame.K_j).center) is None
 
 
 def test_drag_release_outside_keyboard_is_noop():
@@ -145,9 +171,9 @@ def test_palette_pickup_produces_command_payload():
     assert pk.payload == "jump" and pk.label == "跳跃"
 
 
-# ── 右键恢复默认 ────────────────────────────────────────────────────
-def test_right_click_bound_key_resets_chain_and_persists():
-    """右键攻击现在所在的 J 键：攻击回 A，被顶去 A 的拾取链式回 Z。"""
+# ── 右键取消绑定 ────────────────────────────────────────────────────
+def test_right_click_bound_key_unbinds_and_persists():
+    """右键攻击现在所在的 J 键：攻击解绑，别的动作不受影响。"""
     kb = KeyBindings()
     kb.set("attack", pygame.K_j)
     kb.set("pickup", pygame.K_a)
@@ -155,16 +181,16 @@ def test_right_click_bound_key_resets_chain_and_persists():
         kb.path = Path(td) / "kb.json"
         win, mgr = make_open(kb)
         assert press(mgr, cell_for(win, pygame.K_j).center, button=3)
-        assert kb.key_of("attack") == pygame.K_a
-        assert kb.key_of("pickup") == pygame.K_z
-        assert KeyBindings.load(kb.path).key_of("attack") == pygame.K_a
+        assert kb.key_of("attack") == -1
+        assert kb.key_of("pickup") == pygame.K_a
+        assert KeyBindings.load(kb.path).key_of("attack") == -1
 
 
 def test_right_click_free_key_does_nothing():
     fb = FakeBindings()
     win, mgr = make_open(fb)
     press(mgr, cell_for(win, pygame.K_j).center, button=3)
-    assert fb.reset_calls == []
+    assert fb.unbind_calls == []
 
 
 # ── 技能落键（直接投递 handle_drop）────────────────────────────────
@@ -189,8 +215,8 @@ def test_drop_skill_onto_key_binds_its_slot():
                     label="魔法箭")
     assert win.handle_drop(pk, cell_for(win, pygame.K_z).center)
     assert player.skills.hotkeys == {1: "3001000"}
-    assert kb.key_of("skill_1") == pygame.K_z      # 顶掉的拾取换到 1 键
-    assert kb.key_of("pickup") == pygame.K_1
+    assert kb.key_of("skill_1") == pygame.K_z      # 拾取被直接顶掉解绑
+    assert kb.key_of("pickup") == -1
 
 
 def test_skill_keycap_text_uses_bound_skill_name():

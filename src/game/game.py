@@ -700,6 +700,9 @@ class Game:
         if self._loading:
             self._draw_loading()
             return
+        # 每帧清底：整图烘焙含透明空洞（天空/边缘/图小于视口），透明像素不覆盖
+        # 旧帧，不清会在部分地图上留下上一帧的重影
+        self.canvas.fill((0, 0, 0))
         # 世界实体（地图/传送门/掉落/NPC/怪物/玩家/箭/特效）
         self.ctx.world.draw(self.canvas, self._npc_marker, player_visible=not self.dead)
         # HUD / 面板 / 对话框 / 死亡
@@ -721,9 +724,11 @@ class Game:
             self.ctx.ui.draw_map_name(self.canvas, self.assets.map_name(), 8)
         # 任务追踪框：贴在小地图 / 名牌下方（T 键开关，无进行中任务时不绘制）
         if self.quest_tracker.visible and self._world_ready:
+            tracker_top = (mm.panel_rect.bottom + 4 if mm.visible
+                           else 8 + 22 + 4)
             self.quest_tracker.draw(
                 self.canvas, self.ctx.ui, self._tracker_entries(),
-                top=name_y + 22 + 4)
+                top=tracker_top)
         self.ctx.windows.draw(self.canvas)
         self.ctx.ui.draw_dialog(self.canvas, self.ctx.world.camera)
         self.ctx.ui.conv.draw(self.canvas)

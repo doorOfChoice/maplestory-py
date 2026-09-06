@@ -403,8 +403,8 @@ def assign_skill_to_key(book: SkillBook, bindings, skill_id: str,
                         key: int) -> bool:
     """技能拖到键盘某键上：复用已上槽位或取最小空闲槽，再改绑该槽动作键。
 
-    被占键的让位由 KeyBindings.set 的互换语义完成；未学 / 被动 / 槽满 / Esc
-    一律拒绝且不留脏状态。
+    被占键的让位由 KeyBindings.set 的顶替语义完成（占用者解绑）；未学 / 被动 /
+    槽满 / Esc 一律拒绝且不留脏状态。
     """
     if skill_id not in book.levels or skill_id not in book.learnable():
         return False

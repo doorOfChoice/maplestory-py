@@ -2,7 +2,7 @@
 
 设计：游戏内一切可操作键都收敛为「动作」（move_left / attack / skill_3 …），
 输入层按动作查询键码，配置层只存一张 action → keycode 表。
-- 冲突策略：改绑时与占用者自动互换（冒险岛式）。
+- 冲突策略：外部改绑直接顶掉占用者（解绑）；键帽拖到键帽上才互换（swap）。
 - Esc 固定为取消/关闭，永不参与绑定，防止把退出入口改丢。
 - 小键盘 Enter 归一化为主 Enter（同一物理语义）。
 - 全局持久化：save 目录下的 keybindings.json，与角色存档解耦；缺失/损坏回退默认。
@@ -121,7 +121,7 @@ def display_key(key: int) -> str:
 
 
 class KeyBindings:
-    """action → keycode 全表。set 即改绑（冲突自动互换），并支持文件持久化。"""
+    """action → keycode 全表。set 顶替 / swap 互换 / unbind 解绑，支持文件持久化。"""
 
     __slots__ = ("keys", "path")
 
@@ -148,18 +148,37 @@ class KeyBindings:
         return None
 
     # ── 改绑 ───────────────────────────────────────────────────────
-    def set(self, action: str, key: int) -> bool:
-        """把 action 绑到 key。Esc 与非 item_ 的未知动作拒绝；占用者互换到该动作原键。
+    def _validate(self, action: str, key: int) -> Optional[int]:
+        """set/swap 共用校验：Esc 拒绝；新 item_ 动作注册为未绑；返回归一键码。
 
-        新注册的 item_ 动作没有原键（-1），被它顶掉的占用者即告解绑。
+        校验失败返回 None（动作未知且非 item_ 族时也拒绝）。
         """
-        if key == pygame.K_ESCAPE:
-            return False
+        if key == pygame.K_ESCAPE or (action not in self.keys
+                                      and not action.startswith(
+                                          ITEM_ACTION_PREFIX)):
+            return None
         if action not in self.keys:
-            if not action.startswith(ITEM_ACTION_PREFIX):
-                return False
             self.keys[action] = -1
-        key = _normalize(key)
+        return _normalize(key)
+
+    def set(self, action: str, key: int) -> bool:
+        """外部改绑（指令栏 / 技能窗 / 背包拖入）：占用者直接顶掉解绑（-1）。"""
+        key = self._validate(action, key)
+        if key is None:
+            return False
+        if self.keys[action] == key:
+            return True
+        holder = self.action_for(key)
+        self.keys[action] = key
+        if holder is not None:
+            self.keys[holder] = -1
+        return True
+
+    def swap(self, action: str, key: int) -> bool:
+        """键帽拖到键帽：与占用者互换原键；落点无占用即纯移动。"""
+        key = self._validate(action, key)
+        if key is None:
+            return False
         old = self.keys[action]
         if old == key:
             return True
@@ -169,29 +188,16 @@ class KeyBindings:
             self.keys[holder] = old
         return True
 
+    def unbind(self, action: str) -> None:
+        """右键取消绑定：动作置为未绑（-1）；动态 item_ 动作直接删除。"""
+        if action.startswith(ITEM_ACTION_PREFIX):
+            self.keys.pop(action, None)
+        elif action in self.keys:
+            self.keys[action] = -1
+
     def reset_all(self) -> None:
         """一键还原整表默认键（清空动态 item_ 绑定）。"""
         self.keys = {a.id: a.default for a in ACTIONS}
-
-    def reset(self, action: str, _seen: Optional[set] = None) -> None:
-        """恢复默认键：默认键若被别的动作占用，递归把占用者也送回各自默认。
-
-        动态 item_ 动作没有默认键，reset 即删除绑定（解绑）。
-        """
-        d = ACTION_BY_ID.get(action)
-        if d is None:
-            if action.startswith(ITEM_ACTION_PREFIX):
-                self.keys.pop(action, None)
-            return
-        seen = _seen if _seen is not None else set()
-        if action in seen:
-            return
-        seen.add(action)
-        self.keys[action] = -1          # 暂时腾空，避免占用者查询撞到自己
-        holder = self.action_for(d.default)
-        if holder is not None:
-            self.reset(holder, seen)
-        self.keys[action] = d.default
 
     # ── 序列化 ─────────────────────────────────────────────────────
     def to_dict(self) -> dict:

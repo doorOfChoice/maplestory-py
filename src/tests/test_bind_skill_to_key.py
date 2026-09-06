@@ -1,7 +1,7 @@
-"""技能落键：把技能窗拖到键盘键上的槽位分配与改绑互换语义。
+"""技能落键：把技能窗拖到键盘键上的槽位分配与改绑顶替语义。
 
-测 assign_skill_to_key 公开函数：已学主动技复用现有槽换键、未学槽取最小
-空闲槽、被占用键自动互换、未学/槽满拒绝。不触 UI、不依赖 WZ。
+测 assign_skill_to_key 公开函数：已上槽位复用现有槽换键、未学槽取最小
+空闲槽、被占用键直接顶掉解绑、未学/槽满拒绝。不触 UI、不依赖 WZ。
 """
 
 from __future__ import annotations
@@ -34,13 +34,13 @@ def test_already_assigned_skill_moves_to_new_key():
     assert book.hotkeys == {1: "3001000"}
 
 
-def test_two_skills_swap_keys_via_slots():
-    """把技能 2 拖到技能 1 的键上：互换后各槽技能名不变、键位对调。"""
+def test_two_skills_displace_on_key():
+    """把技能 2 拖到技能 1 的键上：技能 1 被顶掉解绑，槽位映射不变。"""
     book, kb = make_book("3001000", "3001001"), KeyBindings()
     learn(book, "3001000")
     learn(book, "3001001")
     assert assign_skill_to_key(book, kb, "3001001", pygame.K_1)
-    assert kb.key_of("skill_1") == pygame.K_2
+    assert kb.key_of("skill_1") == -1
     assert kb.key_of("skill_2") == pygame.K_1
     assert book.hotkeys == {1: "3001000", 2: "3001001"}
 
@@ -56,13 +56,13 @@ def test_unassigned_skill_takes_free_slot():
     assert kb.skill_slot_for(pygame.K_w) == 2
 
 
-def test_drop_on_key_held_by_action_swaps_it_out():
-    """拖到「普通攻击」占的 A 键：攻击换到该技能槽的原键。"""
+def test_drop_on_key_held_by_action_displaces_it():
+    """拖到「普通攻击」占的 A 键：攻击被直接顶掉解绑。"""
     book, kb = make_book("3001000"), KeyBindings()
     learn(book, "3001000")
     assert assign_skill_to_key(book, kb, "3001000", pygame.K_a)
     assert kb.key_of("skill_1") == pygame.K_a
-    assert kb.key_of("attack") == pygame.K_1
+    assert kb.key_of("attack") == -1
 
 
 def test_unknown_skill_rejected():
