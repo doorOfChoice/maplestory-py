@@ -822,7 +822,7 @@ class Game:
         npc_id = npc.npc_id
         # 可交付优先
         for qid, d in self.quest_defs.items():
-            if d.end_npc is not None and str(d.end_npc) == npc_id \
+            if d.deliver_npc is not None and str(d.deliver_npc) == npc_id \
                     and quests.is_accepted(qid) and quests.can_complete(qid, self.ctx.world.player):
                 return 2
         # 可接取
@@ -832,7 +832,7 @@ class Game:
                 return 0
         # 进行中（交付 NPC 是这位）
         for qid, d in self.quest_defs.items():
-            if d.end_npc is not None and str(d.end_npc) == npc_id \
+            if d.deliver_npc is not None and str(d.deliver_npc) == npc_id \
                     and quests.is_accepted(qid):
                 return 1
         return -1

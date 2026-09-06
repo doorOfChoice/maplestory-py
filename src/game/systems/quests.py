@@ -126,6 +126,11 @@ class QuestDef:
     desc2: str = ""           # 完成描述
 
     # ── 便捷查询 ────────────────────────────────────────
+    @property
+    def deliver_npc(self) -> Optional[int]:
+        """交付 NPC：官方 Check/1 常省略 npc 节点，此时向接取 NPC 交付。"""
+        return self.end_npc if self.end_npc is not None else self.start_npc
+
     def kill_req(self, mob_id: int) -> int:
         for mid, count in self.kills:
             if mid == mob_id:
@@ -342,7 +347,7 @@ def collect_npc_quests(defs: Dict[str, QuestDef], log: "QuestLog",
     """
     out: List[NpcQuest] = []
     for qid, d in defs.items():
-        if d.end_npc is not None and str(d.end_npc) == npc_id \
+        if d.deliver_npc is not None and str(d.deliver_npc) == npc_id \
                 and log.is_accepted(qid) and log.can_complete(qid, player):
             out.append(NpcQuest(qid=qid, title=d.name, level=d.lvmin,
                                 state="complete"))

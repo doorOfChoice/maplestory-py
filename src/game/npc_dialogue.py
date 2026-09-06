@@ -268,7 +268,7 @@ class NpcDialogueController:
         quests = self.ctx.world.player.quests
         out: List[NpcQuest] = []
         for qid, d in self.quest_defs.items():
-            if d.end_npc is not None and str(d.end_npc) == str(npc.npc_id) \
+            if d.deliver_npc is not None and str(d.deliver_npc) == str(npc.npc_id) \
                     and quests.is_accepted(qid) \
                     and not quests.can_complete(qid, self.ctx.world.player):
                 out.append(NpcQuest(qid=qid, title=d.name, level=d.lvmin,

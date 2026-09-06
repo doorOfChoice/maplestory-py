@@ -477,7 +477,8 @@ class QuestLogWindow(Window):
         if area:
             map_name = a.map_name_of(str(area)) or ""
             parts.append(f"目标地图：{map_name or area}")
-        npc_id = d.start_npc if self.tab == "ready" else d.end_npc
+        npc_id = d.start_npc if self.tab == "ready" else \
+            (d.end_npc if d.end_npc is not None else d.start_npc)
         if npc_id is not None:
             parts.append(f"{'接取' if self.tab == 'ready' else '交付'} NPC："
                          f"{a.npc_name(str(npc_id)) or npc_id}")

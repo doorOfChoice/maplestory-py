@@ -51,6 +51,30 @@ def test_other_npc_quest_excluded():
     assert "3" not in [q.qid for q in got]
 
 
+def test_quest_without_end_npc_delivers_to_start_npc():
+    """Check/1 缺交付 NPC 的官方任务（如 2071）向接取 NPC 交付。"""
+    defs = make_defs()
+    log = QuestLog(defs)
+    player = make_player()
+    player.inventory.etcs["04000019"] = SimpleNamespace(count=1)
+    log.status["1"] = "accepted"
+    assert log.can_complete("1", player)
+    got = collect_npc_quests(defs, log, "1012100", player)
+    assert "1" in [q.qid for q in got]
+    assert next(q for q in got if q.qid == "1").state == "complete"
+
+
+def test_quest_without_end_npc_not_deliverable_elsewhere():
+    """缺 end_npc 时只回落给接取 NPC，不会在任何 NPC 处都能交。"""
+    defs = make_defs()
+    log = QuestLog(defs)
+    player = make_player()
+    player.inventory.etcs["04000019"] = SimpleNamespace(count=1)
+    log.status["1"] = "accepted"
+    got = collect_npc_quests(defs, log, "1012101", player)
+    assert "1" not in [q.qid for q in got]
+
+
 def test_force_complete_marks_completed_without_rewards():
     """force_complete 直接把任务置为已完成，不发任何奖励。"""
     defs = make_defs()
