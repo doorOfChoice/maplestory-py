@@ -186,6 +186,7 @@ class Game:
         self._banner_timer = 0.0
         self._pickup_timer = 0.0
         self._skill_buffer: Optional[Tuple[int, float]] = None
+        self._attack_buffer = 0.0
         self.spawn_grace = settings.SPAWN_GRACE
         self.fade = 1.0        # 开屏进入游戏时黑场淡入
 
@@ -198,17 +199,23 @@ class Game:
                 "已从本地存档载入你的进度。",
                 "（对话不影响行动，Enter/Esc 或点击关闭）"])
         else:
-            self.ctx.ui.show_dialog("欢迎", ["冒险岛 v113 · 弓箭手村东部小山",
-                                          "←→ 移动  空格 跳跃  ↓+空格 下跳  ↑ 爬绳/梯",
-                                          "A 攻击  Z 拾取  数字键 技能",
-                                          "I 道具栏  K 技能栏  B 状态  Q 任务日志  M 小地图",
-                                          "E 对话  R 复活  O 按键设置（消耗品可从背包拖到键上快捷使用）",
-                                          "Enter 聊天  输入 /help 可查看 GM 指令（/warp 传图等）",
-                                         "背包满了？双击道具使用/穿戴，把它拖出背包窗口即可扔在地上"
-                                         "（已穿装备也能从纸娃娃拖出扔掉）。",
-                                          "新手练到 Lv10 后，找出生点旁的赫丽娜转职弓箭手；"
-                                         "走到发光传送门前按 ↑ 可切换地图。"
-                                          "（对话不影响行动，Enter/Esc 或点击关闭）"])
+            self._show_welcome()
+
+    def _show_welcome(self) -> None:
+        """欢迎 / 帮助气泡（H 键可随时重开）。"""
+        self.ctx.ui.show_dialog("帮助 (H 可重开)", [
+            "冒险岛 v113 · 弓箭手村东部小山",
+            "←→ 移动  空格 跳跃(可按住连跳)  ↓+空格 下跳  ↑ 爬绳/梯",
+            "A 攻击  Z 拾取  数字键 技能  W/V 快捷药水（红/蓝）",
+            "I 道具栏  K 技能栏  B 状态  Q 任务日志  M 小地图  T 任务追踪",
+            "E 对话  R 回村重生  O 按键设置（消耗品/技能可拖到键帽上绑快捷键）",
+            "Enter 聊天  输入 /help 可查看 GM 指令（/warp 传图支持地图名）",
+            "F5 手动存档（平时每 60 秒自动存一次）",
+            "双击道具使用/穿戴，装备可直接拖到纸娃娃穿上；拖出界会先弹确认，"
+            "拖到商店/仓库窗=卖出/存入。",
+            "Esc 逐层关闭窗口；对话窗里 ↑↓/数字键可选条目，Enter 两步确认。",
+            "新手练到 Lv10 后，找出生点旁的赫丽娜转职弓箭手；"
+            "走到发光传送门前按 ↑ 可切换地图。"])
 
     # ── 输入 ───────────────────────────────────────────────────────
     def _handle_input(self) -> None:
@@ -228,6 +235,12 @@ class Game:
             elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP,
                                 pygame.MOUSEMOTION):
                 if self.dead:
+                    # 死亡界面也认鼠标：点「回村重生」按钮即可，不必记得按 R
+                    if (event.type == pygame.MOUSEBUTTONDOWN
+                            and event.button == 1
+                            and self.ctx.ui.death_click_hit(
+                                to_view_pos(event.pos))):
+                        self.respawn()
                     continue
                 # 对话层（列表/按钮/气泡）优先消费左键；其余全交窗口管理器
                 if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
@@ -258,7 +271,8 @@ class Game:
             elif event.type == pygame.KEYDOWN:
                 kb = self.keybindings
                 if self.dead:
-                    if event.key == kb.key_of("respawn"):
+                    if event.key in (kb.key_of("respawn"), pygame.K_RETURN,
+                                     pygame.K_KP_ENTER, pygame.K_SPACE):
                         self.respawn()
                     continue
                 # 任务/寒暄对话框：回车/空格/Esc 交给对话层消费；其余按键照常
@@ -299,9 +313,12 @@ class Game:
                 elif action is not None and action.startswith("skill_"):
                     self._cast_skill(int(action[len("skill_"):]))
                 elif action is not None and item_id_of_action(action):
-                    if self.ctx.world.player.use_item_by_id(
-                            item_id_of_action(action)):
-                        self.ctx.audio.play("PickUpItem", 0.4)
+                    self._use_bound_item(item_id_of_action(action))
+                elif action == "help":
+                    self._show_welcome()
+                elif action == "save_game":
+                    self._save_game()
+                    self.ctx.windows.flash("已保存")
                 elif action == "move_up":
                     if not self.keys.down and self.ctx.world.portal_at_feet() is not None:
                         pass  # 站在传送门上按 ↑ → 交给 _check_portal 切图
@@ -324,6 +341,9 @@ class Game:
                 elif action == "attack":
                     if self.ctx.world.player.start_attack():
                         self.ctx.audio.play_attack(self.ctx.world.player.equips)
+                    else:
+                        # 后摇期间的单点不丢：进短缓冲，槽一空闲立刻补上
+                        self._attack_buffer = settings.ATTACK_INPUT_BUFFER
                 elif action == "move_down" and self.keys.jump:
                     self.ctx.world.player.drop_through(self.ctx.world.physics)
                 elif action == "talk":
@@ -361,6 +381,13 @@ class Game:
                 and not self.dead and self.ctx.world.player.attack_slot_free()):
             if self.ctx.world.player.start_attack():
                 self.ctx.audio.play_attack(self.ctx.world.player.equips)
+        # 按住跳跃键：落地即续跳（追怪走位不用高频点按）
+        if (self.keys.jump and not self.keys.down
+                and not self.ctx.ui.dialog_visible
+                and self.ctx.world.player.on_ground
+                and not self.ctx.world.player.climbing):
+            self.ctx.audio.play("Jump", 0.5)
+            self.ctx.world.player.jump()
 
     def _try_pickup(self) -> bool:
         """Z 键手动拾取人物周边掉落物；有收获则播放音效。"""
@@ -368,6 +395,18 @@ class Game:
             self.ctx.audio.play("PickUpItem", 0.5)
             return True
         return False
+
+    def _use_bound_item(self, item_id: str) -> None:
+        """快捷键喝药：失败也说明原因（没货 / HP满），不再当死键。"""
+        player = self.ctx.world.player
+        err = player.try_use_consume(item_id)
+        if err is None:
+            self.ctx.audio.play("PickUpItem", 0.4)
+            return
+        item = player.inventory.consumes.get(item_id)
+        name = (item.name if item is not None and item.name
+                else self.assets.item_name(item_id) or f"物品{item_id}")
+        self.ctx.windows.flash(f"{name}：{err}")
 
     def _chat_send(self) -> None:
         """发送当前输入：/指令 → 执行，其余作为发言；发送后收起（同原版）。"""
@@ -422,17 +461,26 @@ class Game:
         self._try_cast(hotkey)
 
     def _try_cast(self, hotkey: int) -> None:
-        """尝试施放技能槽 hotkey 对应的技能；失败（CD/MP/锁）静默放弃。"""
+        """尝试施放技能槽 hotkey 对应的技能；失败（CD/MP）给出明确提示。"""
         player = self.ctx.world.player
         sid = player.skills.hotkeys.get(hotkey)
         if sid is None:
             return
+        cd = player.skills.cooldowns.get(sid, 0.0)
+        d = player.skills.defs.get(sid)
+        name = d.name if d is not None else f"技能{hotkey}"
+        if cd > 0.0:
+            self.ctx.windows.flash(f"{name}：冷却中 {cd:.1f}s")
+            return
         data = player.skills.cast(sid, player.level)
         if data is None:
             return
+        if player.mp < data["mp_con"]:
+            self.ctx.windows.flash(f"{name}：MP 不足（需 {data['mp_con']}）")
+            return
         if not player.start_attack(data):
             return
-        player.skills.start_cooldown(sid)
+        player.skills.start_cooldown(sid, data.get("cooldown_ms", 0))
         self.ctx.audio.play_skill_cast(sid, player.equips)
         eff = self.assets.skill_effect_frames(sid)
         if eff:
@@ -609,6 +657,15 @@ class Game:
         # 技能输入缓冲：攻击槽一空闲就补放锁定期内按下的技能
         self._tick_skill_buffer(dt)
 
+        # 普攻输入缓冲：后摇期间的单点在槽空闲瞬间补上
+        if self._attack_buffer > 0.0:
+            self._attack_buffer -= dt
+            if (self._attack_buffer <= 0.0
+                    and self.ctx.world.player.attack_slot_free()):
+                if self.ctx.world.player.start_attack():
+                    self.ctx.audio.play_attack(
+                        self.ctx.world.player.equips)
+
         # 出生保护计时
         if self.spawn_grace > 0:
             self.spawn_grace -= dt
@@ -643,7 +700,8 @@ class Game:
         mouse = pygame.mouse.get_pos()
         self.ctx.ui.draw_hud(self.canvas, self.ctx.world.player, self.ctx.world.combat,
                              mouse=to_view_pos(mouse),
-                             left_down=bool(pygame.mouse.get_pressed(num_buttons=3)[0]))
+                             left_down=bool(pygame.mouse.get_pressed(num_buttons=3)[0]),
+                             bindings=self.keybindings)
         self.ctx.world.minimap.draw(self.canvas, self.ctx.world.player.x, self.ctx.world.player.y,
                           self.ctx.world.player.facing_right, self.ctx.world.monsters, self.ctx.world.npcs)
         # 地图名名牌：小地图可见时下移避让，否则右上角 8px

@@ -142,14 +142,19 @@ def test_normal_detail_body_excludes_rewards():
 
 # ── 放弃 ───────────────────────────────────────────────────────────
 def test_abandon_button_removes_quest():
-    """进行中任务点放弃：调 QuestLog.abandon、清选中、列表移除。"""
+    """进行中任务点放弃：先弹确认框，确认后才调 abandon、清选中。"""
+    import pygame
+    from tests.windows_harness import key_press
     defs = {"q1": make_def("任务一")}
     player = make_player(["q1"], defs)
     win, mgr = open_log(player)
     assert press(mgr, win.giveup_rect.center)
+    assert player.quests.abandoned == []        # 未确认 → 不误弃
+    assert key_press(mgr, pygame.K_RETURN)
     assert player.quests.abandoned == ["q1"]
     assert win.selected is None
     assert win.quests_for_tab("active") == []
+    assert "放弃" in (mgr.last_toast() or "")   # 成功有提示
 
 
 def test_abandon_button_hidden_for_non_accepted():

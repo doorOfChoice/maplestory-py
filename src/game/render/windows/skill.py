@@ -106,6 +106,7 @@ class SkillWindow(Window):
     def _draw_wz(self, surface, book, tabs, active, sids,
                  learn_set, sp_group: int) -> None:
         f, ft = self.svc.ui.font, self.svc.ui.font_tiny
+        player_level = self.svc.player().level
         x, y = self.place(surface, (SKL_W, SKL_H))
         surface.blit(widgets.wz_surface(self.svc, SKL_BG), (x, y))
         self.add_chrome(surface, x, y, SKL_W, 44)
@@ -128,7 +129,7 @@ class SkillWindow(Window):
         row_w = SKL_W - 12
         row_x = x + 6
         row_img_h = 38
-        mouse = pygame.mouse.get_pos()
+        mouse = self.svc.mouse()
         self._scroll.clamp(len(sids), vis_rows)
         start = self._scroll.offset
         for i, sid in enumerate(sids[start:start + vis_rows]):
@@ -164,8 +165,8 @@ class SkillWindow(Window):
             if lv > 0 and sid in learn_set:
                 self._drag_rects.append(
                     (pygame.Rect(row_x, ry, row_w - 34, row_img_h), sid))
-            # 升级按钮（原版 BtSpUp）：仅可手学的主动技能、本转有 SP 且未满级
-            if sp_group > 0 and lv < d.max_level and sid in learn_set:
+            # 升级按钮（原版 BtSpUp）：门控与 learn() 同源，绝不误显示
+            if book.can_learn(sid, player_level):
                 btn = pygame.Rect(row_x + row_w - 20, ry + 3,
                                   sp_btn.get_width() if sp_btn else 12,
                                   sp_btn.get_height() if sp_btn else 12)
@@ -180,6 +181,7 @@ class SkillWindow(Window):
     def _draw_fallback(self, surface, book, tabs, active, sids,
                        learn_set, sp_group: int) -> None:
         f, fs = self.svc.ui.font, self.svc.ui.font_small
+        player_level = self.svc.player().level
         vh = surface.get_height()
         multi = len(tabs) > 1
         tab_band = SKL_TAB_H if multi else 0
@@ -198,7 +200,7 @@ class SkillWindow(Window):
         if multi:
             self._draw_tabs(surface, x, y + 28, w, tabs, active)
         list_top = y + 40 + tab_band
-        mouse = pygame.mouse.get_pos()
+        mouse = self.svc.mouse()
         self._scroll.clamp(len(sids), vis_rows)
         start = self._scroll.offset
         for i, sid in enumerate(sids[start:start + vis_rows]):
@@ -232,12 +234,15 @@ class SkillWindow(Window):
             if lv > 0 and sid in learn_set:
                 self._drag_rects.append(
                     (pygame.Rect(row.x, row.y, row.w - 34, row.h), sid))
-            if sp_group > 0 and lv < d.max_level and sid in learn_set:
+            if book.can_learn(sid, player_level):
                 btn = pygame.Rect(row.right - 26, ry + 4, 22, 22)
                 pygame.draw.rect(surface, (70, 130, 90), btn, border_radius=4)
                 surface.blit(f.render("+", True, (255, 255, 255)),
                              (btn.x + 7, btn.y + 1))
                 self._row_rects.append((btn, sid))
+        widgets.draw_page_indicator(
+            surface, pygame.Rect(x + w - 6, list_top, 4, vis_rows * sp_h),
+            start, len(sids), vis_rows)
 
     def _draw_tabs(self, surface, x: int, strip_y: int, w: int,
                    tabs: List[Tuple[int, str]], active: int) -> None:
@@ -279,7 +284,13 @@ class SkillWindow(Window):
         player = self.svc.player()
         for rect, sid in self._row_rects:
             if rect.collidepoint(pos):
-                player.skills.learn(sid, player.level)
+                book = player.skills
+                d = book.defs.get(sid)
+                if book.learn(sid, player.level):
+                    if d is not None and sid not in book.hotkeys.values():
+                        self.svc.flash("快捷键已满，可在按键设置(O)中拖放绑定")
+                elif d is not None:
+                    self.svc.flash(f"无法学习 {d.name}：SP 不足或条件未达成")
                 return True
         return self.rect.collidepoint(pos)
 

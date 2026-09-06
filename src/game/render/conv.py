@@ -170,6 +170,7 @@ class ConvPanel:
         self.button_keys: List[str] = []                    # yes/no 子集
         self.terminal = False                               # 终态画 BtOK
         self.npc_id: Optional[str] = None                   # 锚定 NPC（右侧立绘）
+        self.focus = -1                                     # 键盘焦点（链接+按钮序列）
         self.rect: Optional[pygame.Rect] = None
         # 正文滚动：scroll 为像素偏移，body_rect 为上一帧登记的视口
         self.scroll = 0
@@ -183,8 +184,12 @@ class ConvPanel:
     # ── 状态装载 ────────────────────────────────────────────────────
     def show(self, title: str, lines: List[str],
              links: List[Tuple[str, int]], buttons: List[str],
-             terminal: bool, npc_id: Optional[str] = None) -> None:
-        """buttons 为 ["yes","no"] 子集；terminal 时画 BtOK；npc_id 锚定右侧立绘。"""
+             terminal: bool, npc_id: Optional[str] = None,
+             focus: int = -1) -> None:
+        """buttons 为 ["yes","no"] 子集；terminal 时画 BtOK；npc_id 锚定右侧立绘。
+
+        focus = 键盘焦点下标（链接在前、按钮在后；-1 = 无，画金色标记）。
+        """
         self.visible = True
         self.title = title
         self.lines = list(lines)
@@ -192,6 +197,7 @@ class ConvPanel:
         self.button_keys = [b for b in buttons if b in ("yes", "no")]
         self.terminal = terminal
         self.npc_id = npc_id
+        self.focus = focus
         self.buttons = []
         self.entry_rects = []
         self.scroll = 0
@@ -383,13 +389,19 @@ class ConvPanel:
                     continue
                 self.entry_rects.append((vis, i))
                 hovered = vis.collidepoint(hx, hy)
+                focused = i == self.focus
                 lx = rx - x          # scratch 为面板局部坐标，须剥掉面板绝对偏移
-                if hovered:
+                if hovered or focused:
                     hl = pygame.Surface((rw, rh), pygame.SRCALPHA)
-                    pygame.draw.rect(hl, (150, 190, 250, 70), (0, 0, rw, rh),
-                                     border_radius=6)
+                    pygame.draw.rect(hl, (255, 220, 110, 80) if focused
+                                     else (150, 190, 250, 70),
+                                     (0, 0, rw, rh), border_radius=6)
                     scratch.blit(hl, (lx, cy))
-                base = QUEST_LIST_BLUE_HOVER if hovered else QUEST_LIST_BLUE
+                if focused:
+                    scratch.blit(self.font.render("▶", True, (190, 140, 30)),
+                                 (lx + 1, cy + (rh - self.font.get_height()) // 2))
+                base = (QUEST_LIST_BLUE_HOVER if (hovered or focused)
+                        else QUEST_LIST_BLUE)
                 tx = lx + 6
                 for seg, color in split_colors(label):
                     t = self.font.render(seg, True, color or base)
@@ -433,4 +445,11 @@ class ConvPanel:
             surface.blit(img, (bx, by))
             btns.append((pygame.Rect(bx, by, bw_, bh_), key))
             right -= bw_ + 10
+        # 键盘焦点落在 yes/no 按钮上：金色描边提示「再按 Enter 生效」
+        if len(self.links) <= self.focus < len(self.links) + len(self.button_keys):
+            fk = self.button_keys[self.focus - len(self.links)]
+            for rect, key in btns:
+                if key == fk:
+                    pygame.draw.rect(surface, (255, 220, 110), rect, 2,
+                                     border_radius=4)
         self.buttons = btns

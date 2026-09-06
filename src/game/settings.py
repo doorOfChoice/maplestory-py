@@ -123,7 +123,7 @@ SPAWN_GRACE = 3.0                # 出生/重生后怪物不追击不攻击的�
 MOB_RESPAWN_DELAY = 5.0          # 怪物死亡后原地重生延迟秒数
 
 # ── 掉落 / 场景 ──────────────────────────────────────────────────────
-DROP_LIFETIME = 20.0             # 掉落物存活秒数
+DROP_LIFETIME = 30.0             # 掉落物存活秒数（20s 太紧张，来不及回身捡）
 DROP_PLAYER_LIFETIME = 120.0     # 玩家扔出物品的存活秒数（防误扔瞬间消失）
 DROP_THROW_SPEED = -340.0        # 玩家扔出物品的上抛初速度（竖直向上）
 # 金币图标按面额分档（对应 Item/Special/0900 的 09000000~09000003：单枚→单枚→小堆→大堆）。
@@ -149,7 +149,7 @@ DROP_RARE_BONUS = (1, 5)
 # 可被随机的主属性池（力量/敏捷/智力/运气/最大HP/最大MP/攻击力/魔法力）
 DROP_RARE_STATS = ("incSTR", "incDEX", "incINT", "incLUK",
                    "incMHP", "incMMP", "incPAD", "incMAD")
-PICKUP_RANGE = 30.0             # Z 键拾取水平半径（一次只捡其中最近的一件）
+PICKUP_RANGE = 40.0             # Z 键拾取水平半径（一次只捡其中最近的一件）
 PICKUP_ATTRACT_TIME = 0.22       # 拾取吸附动画时长（秒）
 PICKUP_HOLD_INTERVAL = 0.1       # 按住 Z 连捡时两次拾取的最小间隔（秒）
 FALL_OUT_DAMAGE = 30             # 掉出地图底部回出生点时的扣血
@@ -171,6 +171,7 @@ SKILL_COOLDOWN: dict = {}        # 施放冷却覆盖表（秒）；缺省回退
 SKILL_MAX_LEVEL = 20             # 技能最高等级（裁剪 WZ level 表）
 ATTACK_CANCEL_DELAY = 0.25       # 攻击起手后允许被下一击取消后摇的最短秒数
 SKILL_INPUT_BUFFER = 0.4         # 技能键在攻击锁定期内按下时的输入缓冲时长（秒）
+ATTACK_INPUT_BUFFER = 0.2        # 普攻键在后摇期间单点时的输入缓冲时长（秒）
 
 # ── Buff / 状态异常（game/buffs.py）──────────────────────────────────
 CRIT_MULT = 1.5                  # 暴击伤害倍率

@@ -111,7 +111,7 @@ class ItemSourceWindow(SourceWindow):
             return DragPickup(source=("cell",), item=object(), home=self.row)
         return None
 
-    def take_for_drop(self, pk):
+    def take_for_drop(self, pk, qty=None):
         self.taken += 1
         return pk.item
 
@@ -139,10 +139,13 @@ def test_item_released_on_accepting_target_skips_ground():
 
 def test_item_released_unaccepted_still_drops_to_ground():
     """没人接住的物品拖拽：照旧走扔地链路。"""
+    from tests.windows_harness import key_press
     mgr, src, dst = build_item()
     assert press(mgr, src.row.center)
     assert motion(mgr, (10, 400))
     assert release(mgr, (10, 400))
     assert dst.drops == []
+    assert src.taken == 0                   # 先弹确认框
+    assert key_press(mgr, pygame.K_RETURN)  # Enter 确认后才取出扔地
     assert src.taken == 1
     assert mgr.take_dropped() is not None

@@ -158,6 +158,7 @@ class SkillBook:
         self.levels: Dict[str, int] = {}
         self.sp_by_job: Dict[int, int] = {}       # SP 职业组（300/310/311）→ 结余
         self.cooldowns: Dict[str, float] = {}
+        self.cooldown_totals: Dict[str, float] = {}   # 本次冷却总时长（HUD 遮罩）
         self.hotkeys: Dict[int, str] = {}          # 数字键 → 技能 id
         self._passive_ids: set = set()
 
@@ -208,8 +209,11 @@ class SkillBook:
         return job_sp_group(best.code) if best is not None else None
 
     # ── 学习 / 升级 ────────────────────────────────────────────────
-    def learn(self, skill_id: str, player_level: int) -> bool:
-        """消耗该转 1 SP 学习或升级。四重门控：SP / 前置 req / CharLevel / 未满级。"""
+    def can_learn(self, skill_id: str, player_level: int) -> bool:
+        """是否此刻可学 / 升 1 级：SP / 前置 req / CharLevel / 未满级全过。
+
+        技能窗「+」按钮显隐与 learn() 共用本判定，杜绝「按钮在、点了没反应」。
+        """
         if skill_id in self._passive_ids:
             return False
         group = sp_group_of_skill(skill_id)
@@ -226,6 +230,14 @@ class SkillBook:
         for rid, rlv in d.req.items():
             if self.levels.get(rid, 0) < rlv:
                 return False
+        return True
+
+    def learn(self, skill_id: str, player_level: int) -> bool:
+        """消耗该转 1 SP 学习或升级。四重门控见 can_learn（单一事实来源）。"""
+        if not self.can_learn(skill_id, player_level):
+            return False
+        group = sp_group_of_skill(skill_id)
+        cur = self.levels.get(skill_id, 0)
         self.sp_by_job[group] -= 1
         self.levels[skill_id] = cur + 1
         self._assign_hotkey(skill_id)
@@ -331,6 +343,7 @@ class SkillBook:
             "range": d.stat(lv, "range", 0),          # 0 = 默认普攻范围
             "mob_count": d.stat(lv, "mobCount", 1),
             "bullet_count": max(1, d.stat(lv, "bulletCount", 1)),
+            "cooldown_ms": d.stat(lv, "cooldown", 0),  # WZ 官方冷却（毫秒）
         }
         if skill_id == settings.SNAIL_THROW_SKILL_ID:
             data["projectile"] = True                  # 弹道技：不进近战命中框
@@ -338,15 +351,24 @@ class SkillBook:
             data["life"] = settings.SNAIL_THROW_LIFETIME
         return data
 
-    def start_cooldown(self, skill_id: str) -> None:
-        """确认出手后写入施放冷却（cast 本身无副作用）。"""
-        self.cooldowns[skill_id] = settings.SKILL_COOLDOWN.get(skill_id, 0.8)
+    def start_cooldown(self, skill_id: str, cooldown_ms: int = 0) -> None:
+        """确认出手后写入施放冷却：WZ 官方 cooldown（毫秒）优先，缺省回退配置。
+
+        同时记录总时长，供 HUD 冷却遮罩算比例（cooldown_totals 不入档）。
+        """
+        if cooldown_ms and cooldown_ms > 0:
+            seconds = max(1.0, cooldown_ms / 1000.0)
+        else:
+            seconds = settings.SKILL_COOLDOWN.get(skill_id, 0.8)
+        self.cooldowns[skill_id] = seconds
+        self.cooldown_totals[skill_id] = seconds
 
     def tick(self, dt: float) -> None:
         for sid in list(self.cooldowns):
             self.cooldowns[sid] -= dt
             if self.cooldowns[sid] <= 0:
                 del self.cooldowns[sid]
+                self.cooldown_totals.pop(sid, None)
 
     # ── 序列化 ───────────────────────────────────────────────────
     def to_dict(self) -> dict:
@@ -372,6 +394,7 @@ class SkillBook:
         self.hotkeys = {int(k): str(v)
                         for k, v in data.get("hotkeys", {}).items()}
         self.cooldowns.clear()
+        self.cooldown_totals.clear()
 
 
 def assign_skill_to_key(book: SkillBook, bindings, skill_id: str,

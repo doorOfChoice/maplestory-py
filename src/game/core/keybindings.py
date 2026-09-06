@@ -47,7 +47,10 @@ ACTIONS: List[ActionDef] = [
     ActionDef("pickup", "拾取", GROUP_ACT, pygame.K_z),
     ActionDef("talk", "对话", GROUP_ACT, pygame.K_e),
     ActionDef("chat", "聊天", GROUP_ACT, pygame.K_RETURN),
-    ActionDef("respawn", "原地复活", GROUP_ACT, pygame.K_r),
+    ActionDef("respawn", "回村重生", GROUP_ACT, pygame.K_r),
+    # 默认药水键：绑定最常见的入门消耗品 id（喝完换别的药水可去按键窗改绑）
+    ActionDef("item_2000000", "快捷药水（红）", GROUP_ACT, pygame.K_w),
+    ActionDef("item_2000003", "快捷药水（蓝）", GROUP_ACT, pygame.K_v),
     ActionDef("window_inventory", "背包窗口", GROUP_UI, pygame.K_i),
     ActionDef("window_skill", "技能窗口", GROUP_UI, pygame.K_k),
     ActionDef("window_stat", "状态窗口", GROUP_UI, pygame.K_b),
@@ -55,6 +58,8 @@ ACTIONS: List[ActionDef] = [
     ActionDef("minimap", "小地图开关", GROUP_UI, pygame.K_m),
     ActionDef("quest_tracker", "任务追踪", GROUP_UI, pygame.K_t),
     ActionDef("window_keyconfig", "按键设置", GROUP_UI, pygame.K_o),
+    ActionDef("help", "帮助说明", GROUP_UI, pygame.K_h),
+    ActionDef("save_game", "手动存档", GROUP_UI, pygame.K_F5),
 ] + [
     ActionDef(f"skill_{i + 1}", f"技能 {i + 1}", GROUP_SKILL, key)
     for i, key in enumerate(_SKILL_DEFAULTS)
@@ -163,6 +168,10 @@ class KeyBindings:
         if holder is not None:
             self.keys[holder] = old
         return True
+
+    def reset_all(self) -> None:
+        """一键还原整表默认键（清空动态 item_ 绑定）。"""
+        self.keys = {a.id: a.default for a in ACTIONS}
 
     def reset(self, action: str, _seen: Optional[set] = None) -> None:
         """恢复默认键：默认键若被别的动作占用，递归把占用者也送回各自默认。

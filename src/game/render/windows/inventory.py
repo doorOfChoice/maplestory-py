@@ -150,6 +150,30 @@ def _item_tip(item: Item, desc: str = "") -> str:
     return "\n".join(lines)
 
 
+_EQUIP_COMPARE_LABELS = {
+    "incPAD": "物攻", "incMAD": "魔攻", "incPDD": "物防", "incMDD": "魔防",
+    "incSTR": "力量", "incDEX": "敏捷", "incINT": "智力", "incLUK": "运气",
+    "incMHP": "HP", "incMMP": "MP", "incACC": "命中", "incEVA": "回避",
+    "incSpeed": "速度", "incJump": "跳跃",
+}
+
+
+def _equip_diff_note(svc: WindowServices, item: Item) -> str:
+    """背包装备与身上同槽位装备的词条差摘要（换装不靠记忆）。"""
+    player = svc.player()
+    old = player.inventory.equipped.get(item.slot) if item.slot else None
+    if old is None:
+        return ""
+    diffs = []
+    for key, label in _EQUIP_COMPARE_LABELS.items():
+        delta = item.stat(key) - old.stat(key)
+        if delta:
+            diffs.append(f"{label}{delta:+d}")
+    if not diffs:
+        return f"与身上「{old.name}」持平"
+    return f"对比[{old.name}]：" + "  ".join(diffs[:8])
+
+
 def _tip_payload(svc: WindowServices, item: Item):
     """悬停内容：装备走原版结构化行，其余保持纯文本 tip。"""
     desc = _asset_desc(svc, item.id)
@@ -157,8 +181,12 @@ def _tip_payload(svc: WindowServices, item: Item):
         player = svc.player()
         tip = build_item_tip(item, player.level, player.total_stats(),
                              player.job, desc=desc)
-        hint = "点击穿上" if item.slot else "（此 WZ 资源缺少外观，无法穿戴）"
-        return tip_with_note(tip, hint)
+        lines = ["双击穿上 / 拖到装备窗穿上" if item.slot
+                 else "（此 WZ 资源缺少外观，无法穿戴）"]
+        diff = _equip_diff_note(svc, item)
+        if diff:
+            lines.append(diff)
+        return tip_with_note(tip, "\n".join(lines))
     return _item_tip(item, desc)
 
 
@@ -177,6 +205,7 @@ class InventoryWindow(Window):
     """道具栏：页签 + 24 格物品 + 滚动 + 拖扔 / 双击使用（manager 驱动）。"""
 
     key = "inv"
+    also_close = "equip"       # × 关背包联动纸娃娃（与 I 键同开同关对称）
 
     def __init__(self, svc: WindowServices) -> None:
         super().__init__(svc)
@@ -184,6 +213,7 @@ class InventoryWindow(Window):
         self._scrolls: Dict[str, widgets.ScrollList] = {}
         self._cell_rects: List[Tuple[pygame.Rect, str, int]] = []
         self._tab_rects: List[Tuple[pygame.Rect, str]] = []
+        self._sort_rect: Optional[pygame.Rect] = None     # 「整理」按钮热区
         self._fallback = False
         self._size: Tuple[int, int] = (INV_W, INV_H)
 
@@ -200,12 +230,16 @@ class InventoryWindow(Window):
             self._scrolls[tab] = sl
         return sl
 
-    # ── 事件：页签切换 + 窗内点击吞掉；滚轮按行 ────────────────────
+    # ── 事件：页签切换 + 整理 + 窗内点击吞掉；滚轮按行 ──────────────
     def handle_mouse_down(self, pos: Tuple[int, int]) -> bool:
         for rect, key in self._tab_rects:
             if rect.collidepoint(pos):
                 self.tab = key
                 return True
+        if self._sort_rect is not None and self._sort_rect.collidepoint(pos):
+            moved = self.svc.player().inventory.sort_tab(self.tab)
+            self.svc.flash("已整理背包" if moved else "背包已是整齐状态")
+            return True
         return self.rect.collidepoint(pos)
 
     def handle_wheel(self, pos: Tuple[int, int], amount: int) -> bool:
@@ -232,12 +266,35 @@ class InventoryWindow(Window):
         if src[0] == "cell":
             self._click_cell(src[1], src[2])
 
-    def take_for_drop(self, pk: DragPickup) -> Optional[Item]:
+    def take_for_drop(self, pk: DragPickup,
+                      qty: Optional[int] = None) -> Optional[Item]:
         src, item = pk.source, pk.item
         inv = self.svc.player().inventory
         if src[1] == "equip":
-            return inv.pop_equip(src[2])
+            # 确认框弹出期间索引可能已失效：仍是同一件才取出
+            if 0 <= src[2] < len(inv.equips) and inv.equips[src[2]] is item:
+                return inv.pop_equip(src[2])
+            return None
+        if qty is not None and qty < item.count:
+            return inv.take_units(item.id, qty)
         return inv.take_stack(item.id)
+
+    def handle_drop(self, pk: DragPickup, pos) -> bool:
+        """从纸娃娃拖装备到背包 = 脱下回包（免双击，扔错窗口的安全出口）。"""
+        if pk.kind != "item" or not self.rect.collidepoint(pos):
+            return False
+        src = pk.source
+        if src and src[0] == "slot":
+            player = self.svc.player()
+            if player.inventory.unequip(src[1]):
+                player.refresh_equips()
+                self.svc.flash(f"已脱下 {pk.item.name}")
+            else:
+                self.svc.flash("装备栏已满，脱下失败（装备仍在身上）")
+            return True
+        if self._sort_rect is not None and self._sort_rect.collidepoint(pos):
+            return True
+        return False
 
     # ── 双击：使用消耗品 / 穿戴装备（含门控与卷轴流程）─────────────
     def _click_cell(self, tab: str, idx: int) -> None:
@@ -368,12 +425,30 @@ class InventoryWindow(Window):
                     self.svc.tooltip(_tip_payload(self.svc, item))
             self._cell_rects.append((cell, self.tab, idx))
 
-        # 底部页脚：金币图标 + 持有数（白底板 → 深棕字）
+        # 右侧缘滚动指示（内容超一屏才画）
+        widgets.draw_page_indicator(
+            surface, pygame.Rect(x + INV_W - 6, y + 50, 4, 204),
+            base, len(items), INV_SLOTS)
+
+        # 底部页脚：金币图标 + 持有数 + 「整理」钮（白底板 → 深棕字）
         coin = widgets.wz_surface(self.svc, "Item/BtCoin/normal/0")
         if coin is not None:
             surface.blit(coin, (x + 10, y + 266))
         surface.blit(fs.render(f"{_meso_of(self.svc):,}", True, (110, 68, 18)),
                      (x + 28, y + 268))
+        self._sort_rect = pygame.Rect(x + INV_W - 52, y + 266, 44, 18)
+        self._draw_sort_button(surface, self._sort_rect)
+
+    def _draw_sort_button(self, surface, rect: pygame.Rect) -> None:
+        fs = self.svc.ui.font_small
+        hover = rect.collidepoint(self.svc.mouse())
+        pygame.draw.rect(surface, (232, 222, 200) if hover else (214, 204, 182),
+                         rect, border_radius=3)
+        pygame.draw.rect(surface, (140, 120, 80), rect, 1, border_radius=3)
+        label = "整理"
+        surface.blit(fs.render(label, True, (80, 60, 30)),
+                     (rect.centerx - fs.size(label)[0] // 2,
+                      rect.centery - fs.size(label)[1] // 2))
 
     def _draw_fallback(self, surface, items: List[Item]) -> None:
         """素材缺失 → 旧自绘背包（布局逐行对齐 panels._draw_inventory_fallback）。"""
@@ -385,6 +460,8 @@ class InventoryWindow(Window):
         meso_txt = f.render(f"{_meso_of(self.svc)} 枫币", True, (255, 220, 90))
         surface.blit(meso_txt, (x + w - PAD - 34 - meso_txt.get_width(), y + 8))
         self.add_chrome(surface, x, y, w, 24)
+        self._sort_rect = pygame.Rect(x + w - 56, y + 28, 44, 18)
+        self._draw_sort_button(surface, self._sort_rect)
         for i, key in enumerate(("consume", "equip", "etc")):
             tr = pygame.Rect(x + PAD + i * 58, y + 28, 54, 18)
             on = key == self.tab
@@ -427,6 +504,7 @@ class EquipWindow(Window):
     """装备栏：21 格凹槽纸娃娃；拖出 / 双击 = 脱下（回背包或扔出）。"""
 
     key = "equip"
+    also_close = "inv"         # × 关纸娃娃联动背包（与 I 键语义对称）
 
     def __init__(self, svc: WindowServices) -> None:
         super().__init__(svc)
@@ -464,13 +542,47 @@ class EquipWindow(Window):
         else:
             self.svc.flash("装备栏已满")
 
-    def take_for_drop(self, pk: DragPickup) -> Optional[Item]:
-        """拖出扔地：直接从装备栏取下（不占背包），并刷新外观。"""
+    def take_for_drop(self, pk: DragPickup,
+                      qty: Optional[int] = None) -> Optional[Item]:
+        """拖出扔地（经确认框）：从装备栏取下（不占背包），并刷新外观。"""
         player = self.svc.player()
-        got = player.inventory.pop_equipped(pk.source[1])
+        slot = pk.source[1]
+        if player.inventory.equipped.get(slot) is not pk.item:
+            return None                    # 确认期间已换位 → 放弃
+        got = player.inventory.pop_equipped(slot)
         if got is not None:
             player.refresh_equips()
         return got
+
+    def handle_drop(self, pk: DragPickup, pos) -> bool:
+        """把背包散件装备拖到纸娃娃 = 穿戴（门控与双击一致，含属性对比提示）。"""
+        if pk.kind != "item" or not self.rect.collidepoint(pos):
+            return False
+        item = pk.item
+        if getattr(item, "kind", "") != "equip":
+            self.svc.flash("只有装备能拖到装备栏")
+            return True
+        src = pk.source
+        if not (src and src[0] == "cell" and src[1] == "equip"):
+            self.svc.flash("只能从背包的装备页签拖入")
+            return True
+        player = self.svc.player()
+        inv = player.inventory
+        idx = src[2]
+        if not (0 <= idx < len(inv.equips)) or inv.equips[idx] is not item:
+            return True                    # 拖拽期间列表已变 → 保守放弃
+        block = wear_block(item.info, player.level, player.total_stats(),
+                           job=player.job)
+        if item.slot is None:
+            self.svc.flash(f"无法穿戴 {item.name}")
+        elif block is not None:
+            self.svc.flash(f"无法穿戴：{block}")
+        elif inv.equip(idx):
+            player.refresh_equips()
+            self.svc.flash(f"已穿上 {item.name}")
+        else:
+            self.svc.flash("装备栏已满")
+        return True
 
     # ── 绘制 ───────────────────────────────────────────────────────
     def draw(self, surface) -> None:

@@ -33,5 +33,7 @@ class WindowServices:
     quest_goal_lines: Optional[Callable[[str], List[str]]] = None
     flash: Callable[..., None] = _noop
     tooltip: Callable[..., None] = _noop
+    # 弹出全局模态框（core.dialogs.Modal），由 WindowManager 接线
+    modal: Callable[..., None] = _noop
     # 最近一次鼠标位置（VIEW 坐标，由 WindowManager 随事件更新；未接线时视为无悬停）
     mouse: Callable[[], "Tuple[int, int]"] = lambda: (-1, -1)

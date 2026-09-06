@@ -1,8 +1,8 @@
 """虚拟键盘布局：键盘式按键设置窗的键格数据。
 
-覆盖常用可绑定键：数字行 + 字母主区 + Space/Enter/Tab + 方向键。
+覆盖常用可绑定键：F 功能行 + 数字行 + 字母主区 + Space/Enter/Tab + 方向键。
 Esc 入列只为显示「固定取消」，由窗口层排除出绑定落点。
-width 以键帽为单位（1 = 标准单键），首行最宽决定窗体尺寸；
+width 以键帽为单位（1 = 标准单键），全行最大宽度决定窗体尺寸；
 键面文字用 keybindings.display_key 现算，布局不重复存名字。
 """
 
@@ -28,7 +28,12 @@ def _letters(word: str) -> List[KeySpec]:
     return [KeySpec(getattr(pygame, f"K_{ch}")) for ch in word]
 
 
+def _fkeys() -> List[KeySpec]:
+    return [KeySpec(getattr(pygame, f"K_F{i}")) for i in range(1, 13)]
+
+
 KEY_ROWS: List[List[KeySpec]] = [
+    _fkeys(),
     [KeySpec(pygame.K_ESCAPE), KeySpec(pygame.K_BACKQUOTE), *_digits(),
      KeySpec(pygame.K_MINUS), KeySpec(pygame.K_EQUALS),
      KeySpec(pygame.K_BACKSPACE, 2.0)],
@@ -48,5 +53,10 @@ KEY_ROWS: List[List[KeySpec]] = [
 
 
 def key_units_total(row: List[KeySpec]) -> float:
-    """一行的单位宽合计（首行 = 全宽基准）。"""
+    """一行的单位宽合计。"""
     return sum(spec.width for spec in row)
+
+
+def keyboard_width_units() -> float:
+    """全宽基准：所有键行中最宽一行（F 行窄于数字行时不缩窗）。"""
+    return max(key_units_total(row) for row in KEY_ROWS)

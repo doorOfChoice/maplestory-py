@@ -94,12 +94,15 @@ def test_terminal_step_reports_terminal():
 
 
 def test_press_confirm_fires_yes_button():
-    """confirm（回车/空格/BtYes 命中）触发 buttons 里的 yes。"""
+    """confirm 两步制防误触：第一按只落焦点，再按才触发 yes。"""
     steps = {"a": Step(text=["问"], buttons={"yes": "b", "no": "c"}),
              "b": Step(text=["好"]), "c": Step(text=["拒"])}
     conv = Conversation(ConversationDef("T", "a", steps))
     snap = conv.current()
     assert snap.buttons == ["yes", "no"]
+    conv.press("confirm")
+    assert conv.current().lines == ["问"]    # 第一按：仅聚焦不触发
+    assert conv.current().focus == 0
     conv.press("confirm")
     assert conv.current().lines == ["好"]
 

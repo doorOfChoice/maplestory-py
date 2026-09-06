@@ -129,6 +129,20 @@ def panel_frame(surface, rect: pygame.Rect,
     pygame.draw.rect(surface, border, rect, 1, border_radius=8)
 
 
+def draw_page_indicator(surface, track: pygame.Rect, offset: int, total: int,
+                        visible: int) -> None:
+    """无拖拽需求的迷你滚动指示：内容超一屏时在细长轨道上画拇指位置。"""
+    if total <= visible or track.height <= 0:
+        return
+    frac = offset / max(1, total - visible)
+    n = max(10, min(track.height, track.height * visible // total))
+    thumb = pygame.Rect(track.x,
+                        track.y + int(frac * (track.height - n)),
+                        track.width, n)
+    pygame.draw.rect(surface, (0, 0, 0, 0), track)          # 透明占位不画底
+    pygame.draw.rect(surface, (120, 110, 90), thumb, border_radius=2)
+
+
 # ── Tooltip / Toast ────────────────────────────────────────────────
 TOOLTIP_MAX_W = 320    # Tooltip 最大宽度，超出则正文折行
 TOOLTIP_BODY_COLOR = (215, 220, 230)
@@ -400,8 +414,8 @@ def draw_tooltip(surface, svc: WindowServices, mouse_pos: Tuple[int, int],
         ty += rh
 
 
-def draw_toast(surface, svc: WindowServices, text: str) -> None:
-    """顶部居中短暂提示（如无法穿戴 / 背包已满）。"""
+def draw_toast(surface, svc: WindowServices, text: str, y: int = 34) -> None:
+    """顶部居中短暂提示（如无法穿戴 / 背包已满）；y 供多条堆叠。"""
     f = svc.ui.font
     txt = f.render(text, True, (255, 230, 150))
     w, h = txt.get_width() + 20, 24
@@ -410,7 +424,7 @@ def draw_toast(surface, svc: WindowServices, text: str) -> None:
     pygame.draw.rect(plate, (20, 16, 10, 200), (0, 0, w, h), border_radius=6)
     pygame.draw.rect(plate, (150, 130, 90), (0, 0, w, h), 1, border_radius=6)
     plate.blit(txt, (10, (h - txt.get_height()) // 2))
-    surface.blit(plate, (x, 34))
+    surface.blit(plate, (x, y))
 
 
 # ── 原版像素数字（StatusBar/number，白字染色）──────────────────────

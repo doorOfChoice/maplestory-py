@@ -308,6 +308,7 @@ class Arrow:
                     combat.effects.append(Effect(
                         self.hit_frames, mob.x,
                         mob.cy - mob.sprite_h * 0.45))
+                combat.preferred_mob = mob
                 died = mob.take_hit(dmg, from_x=self.x)
                 if died and player is not None:
                     combat._on_kill(player, mob)
@@ -364,6 +365,7 @@ class Combat:
         self.total_kills = 0
         self.pending_exp: List[int] = []
         self.combat_log = CombatLog()        # 右下角战斗明细（击杀/拾取）
+        self.preferred_mob = None            # 集火目标：上一只被打到的怪（防误引）
 
     def _surface_y(self, x: float, ref_y: float) -> Optional[float]:
         """x 处与 ref_y 最接近的 foothold 表面 y（dict 数据，无 Foothold 对象）。"""
@@ -427,35 +429,51 @@ class Combat:
             if hit_frames:
                 self.effects.append(Effect(
                     hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45))
+            self.preferred_mob = mob
             died = mob.take_hit(dmg, from_x=player.x)
             if died:
                 self._on_kill(player, mob)
 
     # ── 远程弹道 ───────────────────────────────────────────────────
+    def _in_aim_cone(self, player, facing, mob, ref_y, tan_half, r2):
+        """怪是否处于瞄准扇形（半径 × 朝向 ±半顶角）内；是则返回 (点, 距离²)。"""
+        if getattr(mob, "dead", False):
+            return None
+        adx = (mob.x - player.x) * facing        # 朝向前分量
+        if adx <= 0:
+            return None
+        cy = mob.cy - mob.sprite_h / 2.0
+        dy = cy - ref_y
+        if abs(dy) > adx * tan_half:             # 夹角超出扇形半顶角
+            return None
+        d2 = adx * adx + dy * dy
+        if d2 > r2:
+            return None
+        return (mob.x, cy), d2
+
     def _aim_point(self, player: Combatant, facing: int,
                    monsters) -> Optional[Tuple[float, float]]:
-        """原版式瞄准：瞄准扇形（半径 × 朝向 ±半顶角）内最近的怪 → 其身体中心；无则 None（直射）。"""
+        """原版式瞄准 + 集火：优先「刚打到的那只」（圈内时），否则扇形内最近。
+
+        防止任务怪在后面、路过残血杂兵被自动瞄走反手拉怪。
+        """
         if not monsters:
             return None
         ref_y = player.y - 8.0
-        best: Optional[Tuple[float, float]] = None
-        best_d = float("inf")
         r2 = settings.ARROW_AIM_RADIUS ** 2
         tan_half = math.tan(math.radians(settings.ARROW_AIM_HALF_ANGLE_DEG))
+        best: Optional[Tuple[float, float]] = None
+        best_d = float("inf")
+        preferred = self.preferred_mob
         for mob in monsters:
-            if getattr(mob, "dead", False):
+            hit = self._in_aim_cone(player, facing, mob, ref_y, tan_half, r2)
+            if hit is None:
                 continue
-            adx = (mob.x - player.x) * facing        # 朝向前分量
-            if adx <= 0:
-                continue
-            cy = mob.cy - mob.sprite_h / 2.0
-            dy = cy - ref_y
-            if abs(dy) > adx * tan_half:             # 夹角超出扇形半顶角
-                continue
-            d2 = adx * adx + dy * dy
-            if d2 > r2 or d2 >= best_d:
-                continue
-            best, best_d = (mob.x, cy), d2
+            point, d2 = hit
+            if mob is preferred:                 # 集火目标：一票通过
+                return point
+            if d2 < best_d:
+                best, best_d = point, d2
         return best
 
     def spawn_arrows(self, player: Combatant, skill_data: Optional[dict],

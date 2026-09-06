@@ -104,7 +104,8 @@ def test_dispatch_key_goes_to_visible_windows_top_down():
     assert typer.keys_seen == [pygame.K_5] and plain.keys_seen == []
 
 
-def test_escape_closes_topmost_only_if_flagged():
+def test_escape_closes_flagged_first_then_layers_down():
+    """Esc 逐层关窗：先关声明 escape_closes 的，再自顶向下关普通窗。"""
     inv = BoxWindow(make_services(), key="inv", at=(10, 10))
     kc = BoxWindow(make_services(), key="kc", at=(300, 10))
     kc.escape_closes = True
@@ -112,7 +113,9 @@ def test_escape_closes_topmost_only_if_flagged():
     mgr = make_manager(inv, kc)
     assert mgr.handle_escape()
     assert kc.visible is False and inv.visible is True
-    assert not mgr.handle_escape()      # 无可关窗口 → 不消费
+    assert mgr.handle_escape()          # 普通窗也能被 Esc 关掉
+    assert inv.visible is False
+    assert not mgr.handle_escape()      # 全部关完 → 不消费
 
 
 # ── 物品拖拽 / 双击 / 扔出 ─────────────────────────────────────────
@@ -136,19 +139,38 @@ def test_double_click_on_pickup_activates_window():
     assert taken == [("cell", "consume", 0)]
 
 
-def test_drag_out_of_home_takes_item_for_drop():
+def test_drag_out_of_home_confirms_then_takes_item_for_drop():
+    """拖出界松手先弹确认框；确认（Enter）才真正取出扔地。"""
     win = BoxWindow(make_services())
     win.visible = True
     item = _item()
     win.drag = (("cell", "consume", 0), item)
-    win.take_for_drop = lambda pk: item
+    win.take_for_drop = lambda pk, qty=None: item
     mgr = make_manager(win)
     draw_once(mgr)
     press(mgr, (50, 40))
     motion(mgr, (500, 400))     # 超过拖拽阈值 → 激活
     release(mgr, (500, 400))
+    assert mgr.take_dropped() is None       # 未确认 → 不扣件
+    assert key_press(mgr, pygame.K_RETURN)  # 模态框 Enter = 确认
     assert mgr.take_dropped() is item
-    assert mgr.take_dropped() is None   # 一次取走
+    assert mgr.take_dropped() is None       # 一次取走
+
+
+def test_drag_out_of_home_escape_cancels_drop():
+    """确认框 Esc 取消：物品纹丝不动。"""
+    win = BoxWindow(make_services())
+    win.visible = True
+    item = _item()
+    win.drag = (("cell", "consume", 0), item)
+    win.take_for_drop = lambda pk, qty=None: item
+    mgr = make_manager(win)
+    draw_once(mgr)
+    press(mgr, (50, 40))
+    motion(mgr, (500, 400))
+    release(mgr, (500, 400))
+    assert key_press(mgr, pygame.K_ESCAPE)
+    assert mgr.take_dropped() is None
 
 
 def test_drag_back_into_home_cancels_drop():
@@ -236,7 +258,7 @@ def test_flash_is_rendered_frame_and_decays():
     draw_once(mgr)              # 有 toast 时绘制不抛错
     for _ in range(200):        # 衰减结束后清空
         draw_once(mgr)
-    assert mgr._toast is None
+    assert mgr.last_toast() is None
 
 
 

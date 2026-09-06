@@ -10,7 +10,7 @@ def build(quests=(), dests=(), accepted=(), has_shop=False):
     conv = build_menu_conversation(
         "托德", "100000000", list(quests), list(dests), list(accepted), has_shop,
         on_quest=lambda q: hit["quest"].append(q.qid),
-        on_teleport=lambda m, fare: hit["teleport"].append((m, fare)),
+        on_teleport=lambda m, fare, lab="": hit["teleport"].append((m, fare)),
         on_shop=lambda: hit["shop"].append(1),
     )
     return conv, hit

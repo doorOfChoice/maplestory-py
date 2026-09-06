@@ -71,21 +71,21 @@ def test_bind_new_item_action_registers():
 
 
 def test_item_action_displaces_holder_to_unbound():
-    """新物品宏顶掉 A 键上的攻击：攻击解绑为 -1 而不是抢别的键。"""
+    """新注册物品宏顶掉 A 键上的攻击：攻击解绑为 -1 而不是抢别的键。"""
     kb = KeyBindings()
-    kb.set("item_2000000", pygame.K_a)
-    assert kb.key_of("item_2000000") == pygame.K_a
+    kb.set("item_2000006", pygame.K_a)
+    assert kb.key_of("item_2000006") == pygame.K_a
     assert kb.key_of("attack") == -1
 
 
 def test_item_action_roundtrip_and_reset():
     """物品宏随配置持久化；reset 即删除绑定（右键键位恢复默认）。"""
     kb = KeyBindings()
-    kb.set("item_2000000", pygame.K_q)
+    kb.set("item_2000006", pygame.K_q)
     kb2 = KeyBindings.from_dict(kb.to_dict())
-    assert kb2.key_of("item_2000000") == pygame.K_q
-    kb2.reset("item_2000000")
-    assert "item_2000000" not in kb2.keys
+    assert kb2.key_of("item_2000006") == pygame.K_q
+    kb2.reset("item_2000006")
+    assert "item_2000006" not in kb2.keys
 
 
 def test_rebind_same_key_is_noop():

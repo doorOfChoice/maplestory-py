@@ -15,7 +15,8 @@ import pygame
 from game.core.keybindings import (ACTION_BY_ID, ACTIONS, GROUP_SKILL,
                                    display_key, item_action,
                                    item_id_of_action)
-from game.core.keylayout import KEY_ROWS, key_units_total
+from game.core.keylayout import (KEY_ROWS, key_units_total,
+                           keyboard_width_units)
 from game.render.windows.core import widgets
 from game.render.windows.core.services import WindowServices
 from game.render.windows.core.window import DragPickup, Window
@@ -39,6 +40,8 @@ SHORT_LABELS = {
     "move_up": "上爬", "move_down": "下跳",
     "jump": "跳跃", "attack": "攻击", "pickup": "拾取",
     "talk": "对话", "chat": "聊天", "respawn": "复活",
+    "help": "帮助", "save_game": "存档",
+    "item_2000000": "红药", "item_2000003": "蓝药",
     "window_inventory": "背包", "window_skill": "技能",
     "window_stat": "状态", "window_quest": "任务",
     "minimap": "地图", "window_keyconfig": "按键",
@@ -72,6 +75,7 @@ class KeyConfigWindow(Window):
         # 本帧登记热区（契约同 title_rect：绘制重建、事件帧命中）
         self.key_cells: List[Tuple[pygame.Rect, int]] = []
         self.rows: List[Tuple[pygame.Rect, str]] = []
+        self._reset_rect: Optional[pygame.Rect] = None
 
     # ── 定位 ───────────────────────────────────────────────────────
     def anchor(self, vw: int, vh: int) -> Tuple[int, int]:
@@ -80,7 +84,7 @@ class KeyConfigWindow(Window):
 
     @staticmethod
     def _size() -> Tuple[int, int]:
-        w = int(KC_PAD * 2 + key_units_total(KEY_ROWS[0]) * UNIT)
+        w = int(KC_PAD * 2 + keyboard_width_units() * UNIT)
         return w, (CHROME_H + len(KEY_ROWS) * (KEY_H + KEY_GAP)
                    + 8 + KeyConfigWindow._palette_height(w) + 16)
 
@@ -145,6 +149,13 @@ class KeyConfigWindow(Window):
         return True
 
     def handle_mouse_down(self, pos: Tuple[int, int]) -> bool:
+        if self._reset_rect is not None and self._reset_rect.collidepoint(pos):
+            bindings = self.svc.bindings
+            if bindings is not None:
+                bindings.reset_all()
+                bindings.save()
+                self.svc.flash("全部键位已恢复默认")
+            return True
         return self.rect.collidepoint(pos)
 
     def handle_right_click(self, pos: Tuple[int, int]) -> bool:
@@ -204,8 +215,8 @@ class KeyConfigWindow(Window):
         self.add_chrome(surface, x, y, w, CHROME_H)
         self.key_cells = []
         self.rows = []
-        full = key_units_total(KEY_ROWS[0]) * UNIT
-        mouse = pygame.mouse.get_pos()
+        full = keyboard_width_units() * UNIT
+        mouse = self.svc.mouse()
         ry = y + CHROME_H
         for row in KEY_ROWS:
             cx = x + KC_PAD + (full - key_units_total(row) * UNIT) / 2
@@ -272,6 +283,13 @@ class KeyConfigWindow(Window):
         surface.blit(fs.render("右键键位恢复默认 · 技能可从技能窗拖入", True,
                                (140, 140, 130)),
                      (x + KC_PAD + 2, self.rect.bottom - 15))
+        self._reset_rect = pygame.Rect(x + w - KC_PAD - 96,
+                                       self.rect.bottom - 20, 92, 16)
+        hover = self._reset_rect.collidepoint(self.svc.mouse())
+        pygame.draw.rect(surface, (84, 68, 40) if hover else (60, 52, 36),
+                         self._reset_rect, border_radius=3)
+        surface.blit(ft.render("全部恢复默认", True, (255, 224, 140)),
+                     (self._reset_rect.x + 6, self._reset_rect.y + 2))
 
     def _draw_tile(self, surface, tile: pygame.Rect, action: str, bindings,
                    ft, mouse: Tuple[int, int]) -> None:

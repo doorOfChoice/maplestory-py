@@ -7,13 +7,16 @@ fallback 自绘路径，与官方底板行为等价）。
 
 from __future__ import annotations
 
+import pygame
+
 from types import SimpleNamespace
 
 from game.systems.inventory import Inventory, Item
 from game.render.windows.inventory import (EquipWindow, InventoryWindow,
                                            toggle_inventory_pair)
-from tests.windows_harness import (draw_once, make_manager, make_services,
-                                   motion, press, release, wheel)
+from tests.windows_harness import (draw_once, key_press, make_manager,
+                                   make_services, motion, press, release,
+                                   wheel)
 
 
 # ── 测试装配助手 ───────────────────────────────────────────────────
@@ -70,6 +73,8 @@ def test_drag_out_of_inventory_home_drops_whole_stack():
     assert press(mgr, cell.center)
     assert motion(mgr, (720, 80))
     assert release(mgr, (720, 80))
+    assert mgr.take_dropped() is None       # 先弹数量确认框，未确认不扣件
+    assert key_press(mgr, pygame.K_RETURN)  # Enter = 按整堆数量确认
     got = mgr.take_dropped()
     assert got is not None and got.id == "2000000" and got.count == 12
     assert player.inventory.consumes == {}
@@ -130,7 +135,7 @@ def test_double_click_equip_below_req_level_flashes_block():
     for _ in range(2):
         press(mgr, cell.center)
         release(mgr, cell.center)
-    assert mgr._toast is not None and "无法穿戴" in mgr._toast[0]
+    assert mgr.last_toast() is not None and "无法穿戴" in mgr.last_toast()
     assert player.inventory.equipped == {}
 
 
@@ -145,6 +150,8 @@ def test_drag_equipped_off_paperdoll_returns_item_and_unequips():
     assert press(mgr, slot_rect.center)
     assert motion(mgr, (720, 80))
     assert release(mgr, (720, 80))
+    assert mgr.take_dropped() is None       # 扔装备也要先确认
+    assert key_press(mgr, pygame.K_RETURN)
     assert mgr.take_dropped() is cap
     assert player.inventory.equipped == {}
     assert len(player.refresh_calls) == 1   # 扔出路径也刷新外观
@@ -212,6 +219,7 @@ def test_second_press_during_pick_does_not_repickup():
     assert press(mgr, cell_b.center)        # 拖拽中被吞，不改为拾 B
     motion(mgr, (720, 80))
     release(mgr, (720, 80))
+    key_press(mgr, pygame.K_RETURN)         # 确认扔出
     got = mgr.take_dropped()
     assert got is not None and got.id == "2000000"
     assert player.inventory.consumes["2000001"].count == 7
@@ -250,7 +258,7 @@ def test_double_click_scroll_charges_meso_and_burns_tuc():
         release(mgr, cell.center)
     assert player.inventory.consumes["02340000"].count == 1
     assert weapon.tuc == 2                      # 成功/失败都扣一次次数
-    assert mgr._toast is not None and "强化" in mgr._toast[0]
+    assert mgr.last_toast() is not None and "强化" in mgr.last_toast()
     combat = mgr.svc.combat
     assert combat.meso == 100000 - (500 + 200 * player.level)   # 强化费结算
     assert len(player.refresh_calls) == 1
@@ -269,7 +277,7 @@ def test_double_click_unusable_consume_not_consumed():
         press(mgr, cell.center)
         release(mgr, cell.center)
     assert player.inventory.consumes["02060000"].count == 5
-    assert mgr._toast is not None and "无法使用" in mgr._toast[0]
+    assert mgr.last_toast() is not None and "无法使用" in mgr.last_toast()
 
 
 # ── 双击门控：满血拒用 / 回程卷轴走 on_warp ─────────────────────────
@@ -283,7 +291,7 @@ def test_double_click_full_hp_potion_flashes_and_keeps_stack():
     for _ in range(2):
         press(mgr, cell.center)
         release(mgr, cell.center)
-    assert mgr._toast is not None and "HP/MP 已满" in mgr._toast[0]
+    assert mgr.last_toast() is not None and "HP/MP 已满" in mgr.last_toast()
     assert player.inventory.consumes["2000000"].count == 12
 
 

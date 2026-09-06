@@ -20,6 +20,7 @@ from game.core.jobs import JOBS
 from game.render.conv import (DLG_TEXT_BASE, IconSeg, resolve_item_icons,
                               wrap_segments)
 from game.render.windows.core import widgets
+from game.render.windows.core.dialogs import Modal
 from game.render.windows.core.services import WindowServices
 from game.render.windows.core.window import Window
 from game.systems.quests import render_markup, split_item_icons
@@ -120,7 +121,7 @@ class QuestLogWindow(Window):
             self.detail_offset = 0
             return True
         if self.giveup_rect is not None and self.giveup_rect.collidepoint(pos):
-            self._abandon()
+            self._ask_abandon()
             return True
         for rect, qid in self.row_rects:
             if rect.collidepoint(pos):
@@ -149,13 +150,28 @@ class QuestLogWindow(Window):
                                       self.list_offset + amount))
         return True
 
+    def _ask_abandon(self) -> None:
+        """放弃不可逆且连进度一起清：先弹确认框，确认才动手。"""
+        qid = self.selected
+        if qid is None:
+            return
+        d = self.svc.player().quests.defs.get(qid)
+        name = self._clean(d.name) if d is not None else qid
+        self.svc.modal(Modal(
+            title=f"放弃任务「{name}」？",
+            hint="进行中的击杀/收集进度将全部清空，且可能无法再接取。",
+            ok_label="放弃", on_ok=lambda _q: self._abandon()))
+
     def _abandon(self) -> None:
         qid = self.selected
         if qid is None:
             return
+        d = self.svc.player().quests.defs.get(qid)
         abandon = getattr(self.svc.player().quests, "abandon", None)
         if abandon is not None:
             abandon(qid)
+            if d is not None:
+                self.svc.flash(f"已放弃任务「{self._clean(d.name)}」")
         self.selected = None
         self.show_reward = False
         self.detail_offset = 0
@@ -235,7 +251,7 @@ class QuestLogWindow(Window):
             surface.blit(bg, (x, y))
         else:
             widgets.panel_frame(surface, pygame.Rect(x, y, LIST_W, LIST_H))
-        self.add_chrome(surface, x, y, LIST_W, 12)
+        self.add_chrome(surface, x, y, LIST_W, 22)
 
         ids = self.quests_for_tab(self.tab)
         self._ensure_selection(ids)
@@ -446,7 +462,26 @@ class QuestLogWindow(Window):
             dup = bool(d.kills or d.end_items)
             chunks.append(strip_static_goal_lines(desc) if (goals and dup) else desc)
         chunks.extend(goals)
+        loc = self._location_text(d)
+        if loc:
+            chunks.append(loc)
         return chunks
+
+    def _location_text(self, d) -> str:
+        """目标指引行：任务地图（area）+ 该找的 NPC（可接找给予、进行中找交付）。"""
+        if self.tab == "done":
+            return ""
+        a = self.svc.assets
+        parts: List[str] = []
+        area = getattr(d, "area", 0) or 0
+        if area:
+            map_name = a.map_name_of(str(area)) or ""
+            parts.append(f"目标地图：{map_name or area}")
+        npc_id = d.start_npc if self.tab == "ready" else d.end_npc
+        if npc_id is not None:
+            parts.append(f"{'接取' if self.tab == 'ready' else '交付'} NPC："
+                         f"{a.npc_name(str(npc_id)) or npc_id}")
+        return "  ".join(parts)
 
     def _draw_detail_body(self, surface, dx: int, y: int, qid: str,
                           fs) -> None:
@@ -477,7 +512,11 @@ class QuestLogWindow(Window):
         by = y + DET_H - 26
         gx = dx + DET_W - 8 - BTN_W
         self.giveup_rect = None
-        img = widgets.wz_surface(self.svc, "Quest/BtDetail/normal/0")
+        mouse = self.svc.mouse()
+        img = widgets.ui_button_surface(self.svc, "Quest/BtDetail",
+                                        pygame.Rect(gx - 6 - BTN_W, by,
+                                                    BTN_W, BTN_H), mouse) \
+            or widgets.wz_surface(self.svc, "Quest/BtDetail/normal/0")
         rect = pygame.Rect(gx - 6 - BTN_W, by, BTN_W, BTN_H)
         if img is not None:
             surface.blit(img, rect.topleft)
@@ -489,8 +528,10 @@ class QuestLogWindow(Window):
                           rect.y + 2))
         self.info_rect = rect
         if self.tab == "active":
-            img = widgets.wz_surface(self.svc, "Quest/BtGiveup/normal/0")
             rect = pygame.Rect(gx, by, BTN_W, BTN_H)
+            img = widgets.ui_button_surface(self.svc, "Quest/BtGiveup",
+                                            rect, mouse) \
+                or widgets.wz_surface(self.svc, "Quest/BtGiveup/normal/0")
             if img is not None:
                 surface.blit(img, rect.topleft)
             else:

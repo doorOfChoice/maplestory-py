@@ -9,7 +9,8 @@ from __future__ import annotations
 import pygame
 
 from game.core.keybindings import ACTIONS
-from game.core.keylayout import KEY_ROWS, key_units_total
+from game.core.keylayout import (KEY_ROWS, key_units_total,
+                                 keyboard_width_units)
 
 
 def _all_codes() -> list:
@@ -28,10 +29,13 @@ def test_layout_has_no_duplicate_cells():
     assert len(codes) == len(set(codes))
 
 
-def test_first_row_is_the_widest():
-    """首行（Esc + 数字行）是最宽行，其余行按单位宽缩进对齐。"""
+def test_width_basis_is_widest_row():
+    """窗宽基准 = 全行最大单位宽（F 功能行比数字行窄也不能把窗缩掉）。"""
     totals = [key_units_total(row) for row in KEY_ROWS]
-    assert all(t <= totals[0] for t in totals)
+    assert keyboard_width_units() == max(totals)
+    # F1~F12 功能行已入列（手动存档默认 F5 可显示 / 可改绑）
+    codes = set(_all_codes())
+    assert {pygame.K_F1, pygame.K_F5, pygame.K_F12} <= codes
 
 
 def test_arrow_cluster_present():

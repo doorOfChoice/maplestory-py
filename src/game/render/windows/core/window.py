@@ -43,9 +43,11 @@ class Window:
     escape_closes: bool = False        # Esc 优先关闭（按键设置 / 商店 / 仓库）
     closes_on_map_change: bool = False  # 切图自动关闭（NPC 绑定窗口）
     interactive: bool = True           # 常驻装饰类面板置 False：不置顶、不拦事件
+    also_close: Optional[str] = None   # 本窗关闭时联动的伙伴窗 key（背包↔纸娃娃）
 
     def __init__(self, svc: WindowServices) -> None:
         self.svc = svc
+        self._mgr = None               # 所属 WindowManager（add() 时注入，可为 None）
         self.visible = False
         self.rect = pygame.Rect(0, 0, 0, 0)      # 当前帧外框
         self.title_rect: Optional[pygame.Rect] = None   # 本帧标题热区（无 chrome 则 None）
@@ -56,6 +58,8 @@ class Window:
     # ── 开合 ───────────────────────────────────────────────────────
     def open(self) -> None:
         self.visible = True
+        if self._mgr is not None:           # 快捷键/HUD 新开窗必须置顶，
+            self._mgr.raise_to_top(self)    # 否则会被旧窗口压住"按了没反应"
 
     def close(self) -> None:
         self.visible = False
@@ -102,7 +106,7 @@ class Window:
         self.title_rect = pygame.Rect(x, y, w, title_h)
         rect = pygame.Rect(x + w - 34, y + 3, 32, 15)
         img = widgets.ui_button_surface(self.svc, "BtUIClose", rect,
-                                        pygame.mouse.get_pos())
+                                        self.svc.mouse())
         if img is not None:
             surface.blit(img, rect.topleft)
         else:                       # 素材缺失 → 自绘红 × 小钮
@@ -145,8 +149,11 @@ class Window:
     def activate(self, pk: DragPickup) -> None:
         """双击来源格子：使用 / 穿戴 / 脱下。"""
 
-    def take_for_drop(self, pk: DragPickup):
-        """拖出来源窗口后松手：从容器取出该物品并返回。"""
+    def take_for_drop(self, pk: DragPickup, qty: Optional[int] = None):
+        """拖出来源窗口后松手（经确认弹框）：从容器取出该物品并返回。
+
+        qty 为堆叠物品的取出个数（None = 整堆）；取出失败返回 None。
+        """
         return None
 
     # ── 绘制 ───────────────────────────────────────────────────────

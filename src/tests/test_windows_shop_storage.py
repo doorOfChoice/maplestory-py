@@ -124,13 +124,13 @@ def test_shop_select_row_then_buy_adds_item_and_charges():
     assert key_press(mgr, pygame.K_RETURN)
     assert combat.meso < 10000
     assert any(it.name for it in player.inventory.consumes.values())
-    assert mgr._toast is not None and mgr._toast[0].startswith("购入")
+    assert mgr.last_toast() is not None and mgr.last_toast().startswith("购入")
 
 
 def test_shop_buy_without_selection_flashes_hint():
     win, mgr, _player, _combat = _shop_window()
     _click(mgr, win.buy_rect.center)
-    assert mgr._toast[0] == "请先点选要购买的物品"
+    assert mgr.last_toast() == "请先点选要购买的物品"
 
 
 def test_shop_sell_selected_bag_stack_credits_meso():
@@ -144,7 +144,7 @@ def test_shop_sell_selected_bag_stack_credits_meso():
     assert key_press(mgr, pygame.K_RETURN)
     assert combat.meso > 10000
     assert sold_id not in player.inventory.consumes
-    assert mgr._toast[0].startswith("卖出")
+    assert mgr.last_toast().startswith("卖出")
 
 
 # ── 商店：数量输入框（原版弹框买卖）────────────────────────────────
@@ -233,7 +233,7 @@ def test_shop_buy_unaffordable_quantity_fails_with_flash():
     assert key_press(mgr, pygame.K_RETURN)
     assert combat.meso == 250
     assert win.qty_mode is None
-    assert mgr._toast is not None
+    assert mgr.last_toast() is not None
 
 
 def test_shop_sell_dialog_prefills_owned_count():
@@ -279,8 +279,8 @@ def test_shop_delete_key_sells_selected_stack():
     assert win.qty_mode == "sell"
 
 
-def test_shop_delete_key_sells_equip_immediately():
-    """散件装备选中后按 Delete：整件直接卖出，不弹数量框。"""
+def test_shop_delete_key_sells_equip_after_confirm():
+    """散件装备按 Delete：弹确认框，确认后才卖出（误触不再一步成交）。"""
     win, mgr, player, combat = _shop_window()
     register_shop_profile("wheelshop", "杂货",
                           [("01452000", 5000)] + [(i, 100)
@@ -291,9 +291,27 @@ def test_shop_delete_key_sells_equip_immediately():
     draw_once(mgr)
     _click(mgr, win.bag_rects[0][0].center)
     assert key_press(mgr, pygame.K_DELETE)
-    assert win.qty_mode is None
+    assert player.inventory.equips != []        # 未确认 → 装备还在
+    assert key_press(mgr, pygame.K_RETURN)      # 模态框 Enter = 确认卖出
     assert player.inventory.equips == []
     assert combat.meso == 10000 + 2500
+
+
+def test_shop_delete_key_equip_confirm_cancel_keeps_item():
+    """确认框 Esc 取消：装备纹丝不动。"""
+    win, mgr, player, combat = _shop_window()
+    register_shop_profile("wheelshop", "杂货",
+                          [("01452000", 5000)] + [(i, 100)
+                                                  for i in win._shelf_items()[1:]])
+    player.inventory.consumes.clear()
+    player.inventory.equips.append(Item(id="01452000", name="铁剑",
+                                        count=1, kind="equip"))
+    draw_once(mgr)
+    _click(mgr, win.bag_rects[0][0].center)
+    key_press(mgr, pygame.K_DELETE)
+    assert key_press(mgr, pygame.K_ESCAPE)
+    assert player.inventory.equips != []
+    assert combat.meso == 10000
 
 
 def test_shop_delete_without_selection_not_consumed():
@@ -544,7 +562,7 @@ def test_storage_full_rejects_with_flash():
                                 for _ in range(settings.STORAGE_CAP)]
     draw_once(mgr)
     _click(mgr, win.bag_rects[0][0].center)
-    assert mgr._toast[0] == "仓库已满"
+    assert mgr.last_toast() == "仓库已满"
     assert len(player.inventory.consumes) == 1     # 存入失败须回滚
 
 

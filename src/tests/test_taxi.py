@@ -102,7 +102,8 @@ class FakeConvPanel:
         self.shown = []
         self._hit_index = None
 
-    def show(self, title, lines, links, buttons, terminal, npc_id=None):
+    def show(self, title, lines, links, buttons, terminal, npc_id=None,
+             focus=-1):
         self.shown.append(links)
 
     def hide(self):
@@ -146,9 +147,17 @@ class FakeUI:
 class FakeWindows:
     def __init__(self) -> None:
         self.flashed = []
+        self.modals = []
 
     def flash(self, msg):
         self.flashed.append(msg)
+
+    def request_modal(self, modal):
+        self.modals.append(modal.open())
+
+    def confirm_modal(self):
+        """模拟点弹框「出发」：确认最新一个模态框。"""
+        self.modals.pop().confirm()
 
     def get(self, name):
         raise KeyError(name)
@@ -182,11 +191,14 @@ def test_taxi_label_shows_fare():
 
 
 def test_taxi_click_pays_and_warps():
-    """余额足够：点击扣票价并登记切图。"""
+    """余额足够：链接点击先弹确认框，确认后才扣票价并登记切图。"""
     ctrl, ctx, warps = _taxi_controller(1500)
     ctrl.try_talk()
     ctx.ui.conv.set_hit(0)
     ctrl.consume_click((0, 0))
+    assert ctx.world.combat.meso == 1500        # 未确认：分文不扣
+    assert warps == []
+    ctx.windows.confirm_modal()
     assert ctx.world.combat.meso == 500
     assert warps == ["103000000"]
 
@@ -197,6 +209,7 @@ def test_taxi_click_without_money_refuses():
     ctrl.try_talk()
     ctx.ui.conv.set_hit(0)
     ctrl.consume_click((0, 0))
+    ctx.windows.confirm_modal()
     assert ctx.world.combat.meso == 999
     assert warps == []
     assert ctx.windows.flashed == ["金币不足"]
@@ -213,6 +226,7 @@ def test_taxi_click_free_destination():
     ctrl.try_talk()
     ctx.ui.conv.set_hit(0)
     ctrl.consume_click((0, 0))
+    ctx.windows.confirm_modal()
     assert ctx.world.combat.meso == 0
     assert warps == ["103000000"]
 

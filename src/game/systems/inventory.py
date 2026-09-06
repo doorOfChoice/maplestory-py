@@ -255,6 +255,30 @@ class Inventory:
         """从装备栏直接取下某栏位（不占背包，扔出用）。"""
         return self.equipped.pop(slot, None)
 
+    # ── 整理 ───────────────────────────────────────────────────────
+    def sort_tab(self, tab: str) -> bool:
+        """整理某页签：可堆叠按 id 升序，装备按槽位顺序 → id；发生变动返回 True。"""
+        if tab == "consume":
+            ordered = sorted(self.consumes.items())
+            if ordered != list(self.consumes.items()):
+                self.consumes = dict(ordered)
+                return True
+        elif tab == "etc":
+            ordered = sorted(self.etcs.items())
+            if ordered != list(self.etcs.items()):
+                self.etcs = dict(ordered)
+                return True
+        elif tab == "equip":
+            def key(item: Item):
+                return (SLOT_ORDER.index(item.slot)
+                        if item.slot in SLOT_ORDER else len(SLOT_ORDER),
+                        item.id)
+            ordered = sorted(self.equips, key=key)
+            if ordered != self.equips:
+                self.equips = ordered
+                return True
+        return False
+
     # ── 穿脱 ───────────────────────────────────────────────────────
     def equip(self, index: int) -> bool:
         """装备 equips[index]；同栏位旧装备自动脱下换回。

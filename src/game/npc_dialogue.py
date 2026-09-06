@@ -36,6 +36,7 @@ from game.systems.quest_flow import build_quest_conversation
 from game.systems.quests import NpcQuest, collect_npc_quests, render_markup
 from game.systems.script_api import make_globals
 from game.systems.shop import STORAGE_NPC, shops_of
+from game.render.windows.core.dialogs import Modal
 from game.core import travel
 from game.core.jobs import JOBS, job_for_trainer
 
@@ -77,7 +78,8 @@ def build_menu_conversation(npc_name: str, map_id: str,
             continue
         text = f"{label}  {fare}金币" if fare else label
         links.append(Link(text,
-                          click=lambda m=mid, f=fare: _intent(on_teleport, m, f)))
+                          click=lambda m=mid, f=fare, lab=label:
+                          _intent(on_teleport, m, f, lab)))
     if has_shop:
         links.append(Link("商店", click=lambda: _intent(on_shop)))
     title = npc_name if quests or accepted else f"{npc_name} · 要去哪里？"
@@ -106,6 +108,8 @@ class NpcDialogueController:
         self._conv_qid: Optional[str] = None           # 脚本会话所属任务（转职善后）
         self._next_warp: Optional[str] = None          # 会话登记的传送意图
         self._next_shop: bool = False                  # 会话登记的开店意图
+        self._menu_npc: Optional[object] = None        # 当前显示默认菜单的 NPC
+        self._parent_menu_npc: Optional[object] = None  # 子会话结束后要重开菜单的 NPC
         # warp 由 Game 注入（map_id → 切图），本控制器不感知加载细节。
         self.warp: Optional[Callable[[str], None]] = None
 
@@ -123,10 +127,15 @@ class NpcDialogueController:
         """鼠标点中世界坐标 (wx, wy) 处的 NPC 即对话（不限玩家距离）。
 
         从最上层（绘制序反向）命中第一个 NPC 并路由；无 NPC 返回 False。
+        远处点开时解除「走远收起」锚点，否则会话当帧就会被距离逻辑销毁。
         """
         for npc in reversed(self.ctx.world.npcs):
             if npc.rect().collidepoint(int(wx), int(wy)):
                 self._talk_to(npc)
+                if self._conv_npc is npc and abs(
+                        self.ctx.world.player.x
+                        - npc.rect().centerx) > TALK_RANGE:
+                    self._conv_npc = None
                 return True
         return False
 
@@ -135,22 +144,12 @@ class NpcDialogueController:
         if self._open_npc_talk(npc):
             return
         self._talk_npc = npc
-        qlist = collect_npc_quests(
-            self.quest_defs, self.ctx.world.player.quests,
-            str(npc.npc_id), self.ctx.world.player)
-        dests = travel.teleports_of(npc.npc_id, self.ctx.assets.map_id)
-        in_progress = self._accepted_at(npc)
-        has_shop = bool(shops_of(npc.npc_id))
-        if qlist or dests or in_progress:
-            conv = build_menu_conversation(
-                npc.name, str(self.ctx.assets.map_id), qlist, dests,
-                in_progress, has_shop,
-                on_quest=lambda it: self._open_quest_conv(npc, it),
-                on_teleport=self._request_warp,
-                on_shop=self._request_shop)
+        conv = self._build_menu_conv(npc)
+        if conv is not None:
+            self._menu_npc = npc
             self._set_conv(conv, npc)
             return
-        if has_shop:
+        if bool(shops_of(npc.npc_id)):
             # 有商店且无任务/传送 → 直接开店，不再经气泡按钮
             self.ctx.windows.get("storage").close()
             self.ctx.windows.get("shop").open(npc.npc_id)
@@ -162,6 +161,22 @@ class NpcDialogueController:
                             dialogues.get_dialog(npc.npc_id, npc.name),
                             anchor=npc, buttons=buttons or None)
         return
+
+    def _build_menu_conv(self, npc) -> Optional[Conversation]:
+        """合成默认会话（任务/传送/商店蓝字菜单）；无内容返回 None。"""
+        qlist = collect_npc_quests(
+            self.quest_defs, self.ctx.world.player.quests,
+            str(npc.npc_id), self.ctx.world.player)
+        dests = travel.teleports_of(npc.npc_id, self.ctx.assets.map_id)
+        in_progress = self._accepted_at(npc)
+        if not (qlist or dests or in_progress):
+            return None
+        return build_menu_conversation(
+            npc.name, str(self.ctx.assets.map_id), qlist, dests,
+            in_progress, bool(shops_of(npc.npc_id)),
+            on_quest=lambda it: self._open_quest_conv(npc, it),
+            on_teleport=self._request_warp,
+            on_shop=self._request_shop)
 
     # ── 输入路由 ─────────────────────────────────────────────────────
     def consume_click(self, pos: Tuple[int, int]) -> bool:
@@ -199,12 +214,20 @@ class NpcDialogueController:
         return False
 
     def consume_keydown(self, key: int) -> bool:
-        """回车/空格/Esc 是否被对话层消费；否则交回 game.py（移动/商店等）。"""
+        """回车/空格/Esc/方向键/数字 是否被对话层消费；其余交回 game.py。"""
         if self._conv is not None:
             if key == pygame.K_ESCAPE:
                 self._conv.press("close")
             elif key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                 self._conv.press("confirm")
+            elif key in (pygame.K_UP, pygame.K_TAB):
+                self._conv.press("up")
+            elif key == pygame.K_DOWN:
+                self._conv.press("down")
+            elif pygame.K_1 <= key <= pygame.K_9 and self._conv.click_link_by_number(
+                    key - pygame.K_1):
+                self._after_turn()
+                return True
             else:
                 return True                 # 会话打开时吃掉其它键
             self._after_turn()
@@ -266,6 +289,9 @@ class NpcDialogueController:
             player=self.ctx.world.player, combat=self.ctx.world.combat,
             assets=self.assets, audio=self.ctx.audio,
             notify=self.ctx.windows.flash, qmark=self._qmark)
+        # 从默认菜单点进来的：子会话看完可一键回菜单（免重新对话）
+        if self._menu_npc is npc and self._conv_host is None:
+            self._parent_menu_npc = npc
         self._set_conv(conv, npc)
 
     def _set_conv(self, conv: Conversation, npc, host: Optional[Any] = None,
@@ -291,7 +317,8 @@ class NpcDialogueController:
                               [(self._qmark(label), note)
                                for label, note in snap.links],
                               snap.buttons, snap.terminal,
-                              npc_id=str(npc.npc_id) if npc is not None else None)
+                              npc_id=str(npc.npc_id) if npc is not None else None,
+                              focus=snap.focus)
 
     def _close_conv(self) -> None:
         self.ctx.ui.conv.hide()
@@ -299,16 +326,28 @@ class NpcDialogueController:
         self._conv_npc = None
         self._conv_host = None
         self._conv_qid = None
+        self._menu_npc = None
+        self._parent_menu_npc = None
 
-    def _request_warp(self, map_id: str, fare: int = 0) -> Optional[str]:
-        """出租车链接点击：先扣票价再登记切图；钱不够则提示并留在当前菜单步。"""
-        after = travel.pay_fare(self.ctx.world.combat.meso, fare)
-        if after is None:
-            self.ctx.windows.flash("金币不足")
-            return "menu"
-        self.ctx.world.combat.meso = after
-        self._next_warp = map_id
-        return None
+    def _request_warp(self, map_id: str, fare: int = 0,
+                      label: str = "") -> Optional[str]:
+        """出租车链接点击：先弹确认框，确认才扣票切图（误点不损失票价）。"""
+        meso = self.ctx.world.combat.meso
+
+        def go(_qty) -> None:
+            after = travel.pay_fare(self.ctx.world.combat.meso, fare)
+            if after is None:
+                self.ctx.windows.flash("金币不足")
+                return
+            self.ctx.world.combat.meso = after
+            self._next_warp = map_id
+            self._after_turn()
+
+        self.ctx.windows.request_modal(Modal(
+            title=f"乘车前往「{label or map_id}」？",
+            hint=f"票价 {fare} 金币 · 持有 {meso}",
+            ok_label="出发", on_ok=go))
+        return "menu"    # 留在菜单等确认；确认回调里再走切图意图
 
     def _request_shop(self) -> None:
         self._next_shop = True
@@ -346,7 +385,7 @@ class NpcDialogueController:
             self._show_conv()
 
     def _finish_conv(self) -> None:
-        """会话正常结束（done）时的善后：转职音效/灯泡/force_complete。"""
+        """会话正常结束（done）时的善后：转职结算；任务子会话自动回菜单。"""
         if (self._conv_qid is not None and self._conv_host is not None
                 and self._conv_host.advanced):
             self.ctx.audio.play("LevelUp", 0.6)
@@ -354,7 +393,13 @@ class NpcDialogueController:
                 f"转职成功：{JOBS[self.ctx.world.player.job].name}")
             # 转职任务完成：置为已完成，不再出现在可接列表
             self.ctx.world.player.quests.force_complete(self._conv_qid)
+        back = self._parent_menu_npc
         self._close_conv()
+        if back is not None and back in self.ctx.world.npcs:
+            menu = self._build_menu_conv(back)
+            if menu is not None:
+                self._menu_npc = back
+                self._set_conv(menu, back)
 
     def _dialog_button(self, key: str) -> None:
         """NPC 对话按钮回调：打开仓库面板。"""

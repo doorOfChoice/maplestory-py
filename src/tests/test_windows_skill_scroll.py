@@ -44,8 +44,14 @@ class FakeSkills:
     def learnable(self, owner_group=None) -> list:
         return sorted(self.defs)
 
+    def can_learn(self, skill_id: str, player_level: int) -> bool:
+        d = self.defs.get(skill_id)
+        return (self.sp > 0 and d is not None
+                and self.levels.get(skill_id, 0) < d.max_level)
+
     def learn(self, skill_id: str, player_level: int) -> bool:
         self.learned.append((skill_id, player_level))
+        self.levels[skill_id] = self.levels.get(skill_id, 0) + 1
         return True
 
 

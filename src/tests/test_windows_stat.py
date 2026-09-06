@@ -76,7 +76,7 @@ def test_zero_ap_plus_click_flashes_no_point_message():
     assert press(mgr, rect.center)
     release(mgr, rect.center)
     assert player.calls == [st]
-    assert mgr._toast is not None and mgr._toast[0] == "没有可分配的属性点"
+    assert mgr.last_toast() is not None and mgr.last_toast() == "没有可分配的属性点"
 
 
 def test_positive_ap_clicks_each_stat_row():
@@ -88,7 +88,7 @@ def test_positive_ap_clicks_each_stat_row():
         assert press(mgr, rect.center)
         release(mgr, rect.center)
     assert player.calls == ["str", "dex", "int", "luk"]
-    assert mgr._toast is None
+    assert mgr.last_toast() is None
 
 
 def test_auto_button_triggers_auto_allocate():
@@ -99,7 +99,7 @@ def test_auto_button_triggers_auto_allocate():
     assert press(mgr, win._auto_rect.center)
     release(mgr, win._auto_rect.center)
     assert player.calls == ["auto"]
-    assert mgr._toast is None
+    assert mgr.last_toast() is None
 
 
 def test_auto_button_without_ap_flashes_no_point_message():
@@ -108,7 +108,7 @@ def test_auto_button_without_ap_flashes_no_point_message():
     win, mgr = open_stat(player)
     assert press(mgr, win._auto_rect.center)
     assert player.calls == ["auto"]
-    assert mgr._toast[0] == "没有可分配的属性点"
+    assert mgr.last_toast() == "没有可分配的属性点"
 
 
 def test_detail_button_toggles_popup_open_close():

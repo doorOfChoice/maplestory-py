@@ -19,8 +19,11 @@ import pygame
 from game.core.item_tip import build_item_tip, tip_with_note
 from game.render.conv import ui_image
 from game.render.windows.inventory import _asset_desc
-from game.render.windows.core.widgets import ellipsize, draw_menu_bg, scroll_icon
-from game.render.windows.core.window import DOUBLE_CLICK_TIME, Window
+from game.render.windows.core.dialogs import Modal
+from game.render.windows.core.transfer import take_from_source
+from game.render.windows.core.widgets import (ellipsize, draw_menu_bg,
+                                              scroll_icon, ui_button_surface)
+from game.render.windows.core.window import DOUBLE_CLICK_TIME, DragPickup, Window
 from game.systems import shop as shop_mod
 from game.systems.inventory import Item, item_kind, make_item
 from game.systems.scrolls import SCROLLS, is_scroll_id
@@ -85,6 +88,9 @@ class ShopWindow(Window):
         self.qty_box_rect = pygame.Rect(0, 0, 0, 0)
         self.qty_ok_rect = pygame.Rect(0, 0, 0, 0)
         self.qty_cancel_rect = pygame.Rect(0, 0, 0, 0)
+        self.qty_max_rect = pygame.Rect(0, 0, 0, 0)
+        self._qty_unit_price = 0        # 合计演算用单价（买价 / 单件卖价）
+        self._qty_cap = 9999            # 当前数量上限（买=买得起 / 卖=拥有量）
         # 双击快捷入口：(栏别, 行号, 时刻)
         self._last_row_click: Optional[Tuple[str, int, float]] = None
         self._shelf_bar = pygame.Rect(0, 0, 0, 0)
@@ -104,7 +110,7 @@ class ShopWindow(Window):
         self.shop_ids = shop_mod.shops_of(npc_id)
         if not self.shop_ids:
             return
-        self.visible = True
+        super().open()                        # 置顶 + 可见（基类语义）
         self.tab = 0
         self.sel_shelf = None
         self.sel_bag = None
@@ -218,6 +224,9 @@ class ShopWindow(Window):
         if self.qty_mode is not None:
             if self.qty_ok_rect.collidepoint(pos):
                 self._qty_confirm(player, combat)
+            elif self.qty_max_rect.collidepoint(pos):
+                self.qty_text = str(self._qty_cap)
+                self._qty_prefilled = True
             elif self.qty_cancel_rect.collidepoint(pos):
                 self._qty_cancel()
             return True
@@ -247,7 +256,7 @@ class ShopWindow(Window):
                 self.sel_shelf, self.sel_bag = idx, None
                 if (self._is_double_click("shelf", idx)
                         and item_kind(self._shelf_items()[idx]) != "equip"):
-                    self._open_qty("buy")
+                    self._open_qty_buy(idx)
                 return True
         if self.buy_rect.collidepoint(pos) and combat is not None:
             self._do_buy(player, combat)
@@ -260,7 +269,7 @@ class ShopWindow(Window):
                 self.sel_bag, self.sel_shelf = idx, None
                 if (self._is_double_click("bag", idx)
                         and self._bag_entries(player)[idx][0][0] == "stack"):
-                    self._open_qty("sell", self._bag_entries(player)[idx][1].count)
+                    self._open_qty_sell(idx)
                 return True
         return True
 
@@ -295,10 +304,37 @@ class ShopWindow(Window):
             self._qty_cancel()
         return True
 
-    def _open_qty(self, mode: str, default: int = 0) -> None:
-        """打开数量框；default>0 时预填（如卖出=拥有量），首个数字键会替换预填值。"""
+    def _open_qty_buy(self, idx: int) -> None:
+        """买入数量框：带单价合计演算，上限 = 买得起的件数（至少 1）。"""
+        items = self._shelf_items()
+        if idx is None or idx >= len(items):
+            return
+        price = self._shop_price(items[idx])
+        meso = self._combat.meso if self._combat is not None else 0
+        self._open_qty("buy", 0, unit_price=price,
+                       cap=max(1, meso // price) if price else 1)
+
+    def _open_qty_sell(self, idx: int) -> None:
+        """卖出数量框：预填拥有量，带单件卖价合计，上限 = 拥有量。"""
+        entries = self._bag_entries(self._player)
+        if idx is None or idx >= len(entries):
+            return
+        _src, item = entries[idx]
+        base = shop_mod.buy_price(self._shop_id(), item.id, self.svc.assets) or 0
+        self._open_qty("sell", item.count, unit_price=shop_mod.sell_price(base),
+                       cap=item.count)
+
+    def _open_qty(self, mode: str, default: int = 0, unit_price: int = 0,
+                  cap: int = 0) -> None:
+        """打开数量框；default>0 时预填（如卖出=拥有量），首个数字键会替换预填值。
+
+        unit_price 用于实时合计；cap 为可选上限（买入=买得起件数 / 卖出=拥有量），
+        「最大」按钮一步填到上限。
+        """
         self.qty_mode = mode
-        self.qty_text = str(min(default, 10 ** QTY_MAX_DIGITS - 1)) if default else ""
+        self._qty_unit_price = unit_price
+        self._qty_cap = max(1, cap) if cap > 0 else 10 ** QTY_MAX_DIGITS - 1
+        self.qty_text = str(min(default, self._qty_cap)) if default else ""
         self._qty_prefilled = bool(self.qty_text)
 
     def _qty_type(self, digit: str) -> None:
@@ -339,6 +375,39 @@ class ShopWindow(Window):
             self._sell_got(combat, got)
         self._qty_cancel()
 
+    # ── 拖放到商店 = 卖出（堆叠先问数量）────────────────────────────
+    def handle_drop(self, pk: DragPickup, pos) -> bool:
+        if pk.kind != "item" or not self.rect.collidepoint(pos):
+            return False
+        combat = self._combat
+        item = pk.item
+        if combat is None or item is None:
+            return True
+        if getattr(item, "kind", "") in ("consume", "etc") and item.count > 1:
+            unit = shop_mod.sell_price(self._shop_price(item.id))
+
+            def sell_qty(qty):
+                self._sell_dropped(pk, qty)
+
+            self.svc.modal(Modal(
+                title=f"卖出「{item.name}」", numeric=True,
+                max_value=item.count,
+                hint=f"拥有 {item.count} 个 · 单件卖价 {unit} 金币",
+                ok_label="卖出",
+                note=lambda q: f"合计 {unit * q} 金币",
+                on_ok=sell_qty))
+            return True
+        self._sell_dropped(pk, None)
+        return True
+
+    def _sell_dropped(self, pk: DragPickup, qty) -> None:
+        combat = self._combat
+        got = take_from_source(self._player, pk, qty)
+        if got is None:
+            self.svc.flash("该物品已不在背包，卖出取消")
+            return
+        self._sell_got(combat, got)
+
     def handle_mouse_motion(self, pos: Tuple[int, int]) -> bool:
         """拖动拇指时连续滚动（按下拇指起拖，松开结束）。"""
         if self._drag_bar is None:
@@ -366,6 +435,8 @@ class ShopWindow(Window):
         return True
 
     def handle_wheel(self, pos: Tuple[int, int], amount: int) -> bool:
+        if self.qty_mode is not None:
+            return True        # 数量框打开时吞掉滚轮，防止底下选中行滚出视野
         player = self._player
         rows = self._rows()
         # 光标在左半 → 滚货架；右半 → 滚背包
@@ -390,13 +461,17 @@ class ShopWindow(Window):
         if item_kind(item_id) == "equip":     # 不可堆叠：直接按 1 件成交
             self._buy_n(player, combat, item_id, self._shop_price(item_id), 1)
         else:
-            self._open_qty("buy")
+            self._open_qty_buy(self.sel_shelf)
 
     def _buy_n(self, player, combat, item_id: str, price: int, count: int) -> None:
         def make_fn(iid: str, n: int) -> Item:
             name = SCROLLS.get(iid, {}).get("name") if is_scroll_id(iid) else None
             return make_item(iid, self.svc.assets, n, name=name)
 
+        cost = price * count
+        if combat.meso < cost:        # 失败原因拆分：赚钱 vs 清包，处置完全不同
+            self.svc.flash(f"金币不足：需 {cost}，持有 {combat.meso}")
+            return
         ok, meso = shop_mod.buy(self._shop_id(), item_id, combat.meso,
                                 player.inventory, price=price, count=count,
                                 make_fn=make_fn)
@@ -405,7 +480,7 @@ class ShopWindow(Window):
             suffix = f" ×{count}" if count > 1 else ""
             self.svc.flash(f"购入 {self._item_name(item_id)}{suffix}")
         else:
-            self.svc.flash("金币不足或背包已满")
+            self.svc.flash("背包放不下，先整理一下再买")
 
     def _do_sell(self, player, combat) -> None:
         if self.sel_bag is None:
@@ -413,12 +488,26 @@ class ShopWindow(Window):
             return
         entries = self._bag_entries(player)
         if self.sel_bag >= len(entries):
+            self.sel_bag = None
             return
         src, item = entries[self.sel_bag]
-        if src[0] == "equip":                 # 散件装备：整件直接卖
-            self._sell_got(combat, player.inventory.pop_equip(src[1]))
+        if src[0] == "equip":                 # 散件装备：误点即卖太狠，先确认
+            idx = src[1]
+
+            def do_sell(_q):
+                inv = player.inventory
+                if 0 <= idx < len(inv.equips) and inv.equips[idx] is item:
+                    self._sell_got(combat, inv.pop_equip(idx))
+                else:
+                    self.svc.flash("该装备已移动，出售取消")
+
+            unit = shop_mod.sell_price(self._shop_price(item.id))
+            self.svc.modal(Modal(
+                title=f"卖出「{item.name}」？",
+                hint=f"散件装备一步成交，可得 {unit} 金币",
+                ok_label="卖出", on_ok=do_sell))
         else:
-            self._open_qty("sell", item.count)   # 预填拥有量，直接确认即全卖
+            self._open_qty_sell(self.sel_bag)    # 预填拥有量，直接确认即全卖
 
     def _sell_got(self, combat, got: Optional[Item]) -> None:
         if got is None:
@@ -547,6 +636,9 @@ class ShopWindow(Window):
                                (130, 118, 100)),
                      (x + 18, y + 54))
 
+        # ── 标题带：整条可拖（关闭钮由 manager 顶窗优先命中，不怕重叠）──
+        self.title_rect = pygame.Rect(x, y, BG_PANEL_W - 4, 22)
+
         # ── 头区右框：离开商店按钮 + 关闭 ─────────────────────────
         exit_img = self._wz("BtExit/normal/0")
         if exit_img is not None:
@@ -605,18 +697,23 @@ class ShopWindow(Window):
 
         # ── 头区右框：买/卖按钮放在金币金额下方空隙，不叠物品行 ───────
         by = y + BG_BTN_Y
-        buy_img = self._wz("BtBuy/normal/0")
-        sell_img = self._wz("BtSell/normal/0")
         bx = x + BG_PANEL_W - 18 - (BTN_W * 2 + 8)
-        if buy_img is not None and sell_img is not None:
-            surface.blit(sell_img, (bx, by))
-            surface.blit(buy_img, (bx + BTN_W + 8, by))
         self.buy_rect = pygame.Rect(bx + BTN_W + 8, by, BTN_W, BTN_H)
         self.sell_rect = pygame.Rect(bx, by, BTN_W, BTN_H)
+        mouse = self.svc.mouse()
+        buy_img = ui_button_surface(self.svc, "Shop/BtBuy", self.buy_rect, mouse)
+        sell_img = ui_button_surface(self.svc, "Shop/BtSell", self.sell_rect,
+                                     mouse)
+        if buy_img is not None:
+            surface.blit(buy_img, self.buy_rect.topleft)
+        if sell_img is not None:
+            surface.blit(sell_img, self.sell_rect.topleft)
         if buy_img is None or sell_img is None:
             for rect, label, color in ((self.buy_rect, "购买", (52, 110, 78)),
                                        (self.sell_rect, "出售", (110, 84, 52))):
-                pygame.draw.rect(surface, color, rect, border_radius=4)
+                hover = rect.collidepoint(mouse)
+                base = tuple(min(255, c + 24) for c in color) if hover else color
+                pygame.draw.rect(surface, base, rect, border_radius=4)
                 surface.blit(fs.render(label, True, (240, 240, 245)),
                              (rect.x + (rect.w - fs.size(label)[0]) // 2, rect.y + 4))
 
@@ -630,7 +727,7 @@ class ShopWindow(Window):
         pygame.draw.rect(surface, (120, 132, 148), thumb, 1, border_radius=3)
 
     def _draw_qty_dialog(self, surface, f, fs) -> None:
-        """白底数量输入框：居中模态叠在商店面板上（确认/取消）。"""
+        """白底数量输入框：居中模态叠在商店面板上（最大/确认/取消 + 合计）。"""
         title = "购买数量" if self.qty_mode == "buy" else "出售数量"
         hint = ""
         if self.qty_mode == "buy":
@@ -642,11 +739,8 @@ class ShopWindow(Window):
             entries = self._bag_entries(self._player)
             if self.sel_bag is not None and self.sel_bag < len(entries):
                 _src, item = entries[self.sel_bag]
-                base = shop_mod.buy_price(self._shop_id(), item.id,
-                                          self.svc.assets) or 0
-                hint = (f"{item.name} · 单件卖价 {shop_mod.sell_price(base)}"
-                        f" · 拥有 {item.count}")
-        w, h = 250, 112
+                hint = f"{item.name} · 拥有 {item.count}"
+        w, h = 262, 128
         x = max(self.rect.x, min(self.rect.right - w, self.rect.centerx - w // 2))
         y = max(self.rect.y, min(self.rect.bottom - h, self.rect.centery - h // 2))
         panel = pygame.Surface((w, h), pygame.SRCALPHA)
@@ -657,23 +751,37 @@ class ShopWindow(Window):
         if hint:
             surface.blit(fs.render(ellipsize(hint, fs, w - 28), True,
                                    (205, 210, 220)), (x + 14, y + 30))
-        box = pygame.Rect(x + 14, y + 50, w - 140, 24)
+        box = pygame.Rect(x + 14, y + 50, 120, 24)
         pygame.draw.rect(surface, (252, 252, 250), box, border_radius=3)
         pygame.draw.rect(surface, (110, 118, 134), box, 1, border_radius=3)
         caret = "▌" if int(pygame.time.get_ticks() / 500) % 2 == 0 else ""
         surface.blit(fs.render(self.qty_text + caret, True, (30, 32, 38)),
                      (box.x + 6, box.y + 4))
         self.qty_box_rect = box
+        self.qty_max_rect = pygame.Rect(box.right + 6, box.y, 44, 24)
         ok = pygame.Rect(x + w - 116, y + 50, 52, 24)
         cancel = pygame.Rect(x + w - 58, y + 50, 52, 24)
-        for rect, label, color in ((ok, "确认", (52, 110, 78)),
+        mouse = self.svc.mouse()
+        for rect, label, color in ((self.qty_max_rect, "最大", (96, 84, 52)),
+                                   (ok, "确认", (52, 110, 78)),
                                    (cancel, "取消", (84, 70, 66))):
-            pygame.draw.rect(surface, color, rect, border_radius=4)
+            hover = rect.collidepoint(mouse)
+            base = tuple(min(255, c + 26) for c in color) if hover else color
+            pygame.draw.rect(surface, base, rect, border_radius=4)
             surface.blit(fs.render(label, True, (240, 240, 245)),
                          (rect.centerx - fs.size(label)[0] // 2, rect.y + 4))
         self.qty_ok_rect, self.qty_cancel_rect = ok, cancel
-        surface.blit(fs.render("数字键输入数量 · Enter 确认 · Esc 取消", True,
-                               (140, 146, 160)), (x + 14, y + h - 20))
+        try:
+            n = int(self.qty_text)
+        except ValueError:
+            n = 0
+        if self._qty_unit_price and n > 0:
+            total = self._qty_unit_price * n
+            verb = "合计" if self.qty_mode == "buy" else "可得"
+            surface.blit(fs.render(f"{verb} {total:,} 金币", True,
+                                   (150, 210, 160)), (x + 14, y + 82))
+        surface.blit(fs.render("数字键输入 · 最大=一步到上限 · Enter 确认 · Esc 取消",
+                               True, (140, 146, 160)), (x + 14, y + h - 20))
 
     def _blit_row_content(self, surface, rect: pygame.Rect, icon, fs,
                           name_txt: str, name_c, price_txt, price_c,
@@ -754,10 +862,11 @@ class ShopWindow(Window):
             pygame.draw.rect(surface, (18, 22, 30, 216), self.rect, border_radius=8)
             pygame.draw.rect(surface, (90, 96, 110), self.rect, 1, border_radius=8)
 
-        # 标题 + 关闭
+        # 标题 + 关闭（标题带可拖）
         surface.blit(f.render("商店", True, (255, 216, 96)), (x + 14, y + 5))
         self.close_rect = pygame.Rect(x + PANEL_W - 40, y + 4, 32, 18)
         surface.blit(fs.render("×", True, (235, 235, 240)), self.close_rect.topleft)
+        self.title_rect = pygame.Rect(x, y, PANEL_W - 46, TITLE_H)
 
         # 页签
         tx = x + 14

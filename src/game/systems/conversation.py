@@ -69,12 +69,16 @@ class ConversationDef:
 
 @dataclass(frozen=True)
 class Snapshot:
-    """当前该显示什么（纯数据，UI 层消费）。links 为 (label, note) 元组。"""
+    """当前该显示什么（纯数据，UI 层消费）。links 为 (label, note) 元组。
+
+    focus = 键盘焦点在「蓝字链接 + yes/no 按钮」合成序列上的下标（-1 = 无）。
+    """
     title: str
     lines: List[str]
     links: List[Tuple[str, int]]
     buttons: List[str]
     terminal: bool
+    focus: int = -1
 
 
 class Conversation:
@@ -85,6 +89,7 @@ class Conversation:
         self._step = defn.start
         self._done = False
         self._visible: List[Link] = []
+        self._focus = -1          # 键盘焦点：链接+按钮合成序列下标，-1=无
 
     @classmethod
     def from_source(cls, lua_src: str, env: Dict[str, Callable],
@@ -135,9 +140,13 @@ class Conversation:
         lines = step.text_fn() if step.text_fn is not None else list(step.text)
         self._visible = [l for l in step.links if _safe_show(l.show)]
         keys = [k for k in ("yes", "no") if k in step.buttons]
+        n_elements = len(self._visible) + len(keys)
+        if self._focus >= n_elements:
+            self._focus = -1
         return Snapshot(self._def.title, lines,
                         [(l.label, l.note) for l in self._visible], keys,
-                        terminal=not step.links and not step.buttons)
+                        terminal=not step.links and not step.buttons,
+                        focus=self._focus)
 
     def click_link(self, index: int) -> None:
         if self._done:
@@ -145,19 +154,59 @@ class Conversation:
         self.current()  # 可见链接按「此刻」条件重新求值
         if index >= len(self._visible):
             return
+        self._focus = -1
         self._fire(self._visible[index].click)
 
+    def click_link_by_number(self, index: int) -> bool:
+        """数字键直选第 index 条可见链接；越界返回 False（不消费）。"""
+        self.current()
+        if index >= len(self._visible):
+            return False
+        self.click_link(index)
+        return True
+
+    def _move_focus(self, delta: int) -> None:
+        """方向键/Tab：焦点在「可见链接 + yes/no」合成序列上循环。"""
+        self.current()
+        step = self._def.steps[self._step]
+        n = len(self._visible) + len(
+            [k for k in ("yes", "no") if k in step.buttons])
+        if n <= 0:
+            return
+        self._focus = -1 if self._focus < 0 else self._focus + delta
+        self._focus %= n
+
     def press(self, key: str) -> None:
-        """键盘/按钮路由：confirm(回车=确认) / close(Esc) / yes / no / ok。"""
+        """键盘/按钮路由。
+
+        confirm（回车/空格）两步制防误触：序列有可选项且未聚焦时先落焦，
+        再按一次才真正触发；终态步（无链接无按钮）一步即确认。
+        up/down/tab 移动焦点；数字选项由宿主直接调 click_link。
+        """
         if self._done:
             return
         step = self._def.steps[self._step]
+        if key in ("up", "down"):
+            self._move_focus(-1 if key == "up" else 1)
+            return
         if key == "confirm":
-            if "yes" in step.buttons:
-                self._fire(step.buttons["yes"])
-            elif not step.links and not step.buttons:
-                self._confirm_terminal()
+            self.current()
+            keys = [k for k in ("yes", "no") if k in step.buttons]
+            n = len(self._visible) + len(keys)
+            if n > 0:
+                if self._focus < 0:
+                    self._focus = 0           # 第一步：只是高亮，不误触
+                    return
+                if self._focus < len(self._visible):
+                    click = self._visible[self._focus].click
+                else:
+                    click = step.buttons[keys[self._focus - len(self._visible)]]
+                self._focus = -1
+                self._fire(click)
+                return
+            self._confirm_terminal()
         elif key == "close":
+            self._focus = -1
             if "no" in step.buttons:
                 self._fire(step.buttons["no"])
             else:
@@ -169,6 +218,7 @@ class Conversation:
 
     # ── 内部 ─────────────────────────────────────────────
     def _confirm_terminal(self) -> None:
+        self._focus = -1
         nxt = self._def.steps[self._step].next
         if nxt is not None and nxt in self._def.steps:
             self._step = nxt
@@ -190,6 +240,7 @@ class Conversation:
             self._done = True
         elif ret in self._def.steps:
             self._step = ret
+            self._focus = -1
         else:
             logging.warning("对话跳转到未知步骤: %s", ret)
             self._done = True

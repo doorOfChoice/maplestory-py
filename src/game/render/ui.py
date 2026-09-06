@@ -85,6 +85,7 @@ class UI:
         self.dialog_visible = False
         self.dialog_anchor = None
         self.death_visible = False
+        self.death_button_rect: Optional[pygame.Rect] = None
         # 上一帧对话框（气泡）占位矩形，供鼠标点击命中判断
         self.dialog_rect: Optional[pygame.Rect] = None
         # ── 对话框按钮（商店/仓库入口）────────────────────────────
@@ -203,6 +204,12 @@ class UI:
 
     def hide_death(self) -> None:
         self.death_visible = False
+        self.death_button_rect = None
+
+    def death_click_hit(self, pos) -> bool:
+        """死亡界面按钮命中（本帧登记的热区）。"""
+        return (self.death_visible and self.death_button_rect is not None
+                and self.death_button_rect.collidepoint(pos))
 
     # ── number 像素数字 ────────────────────────────────────────────
     def draw_wz_number(self, surface, text: str, x: int, y: int) -> int:
@@ -230,7 +237,7 @@ class UI:
 
     # ── HUD 绘制 ───────────────────────────────────────────────────
     def draw_hud(self, surface, player, combat, mouse=None,
-                 left_down: bool = False) -> None:
+                 left_down: bool = False, bindings=None) -> None:
         vw, vh = surface.get_width(), surface.get_height()
         bar = self._img("StatusBar.img", "base/backgrnd")
         dark = self._img("StatusBar.img", "base/backgrnd2")
@@ -281,8 +288,61 @@ class UI:
         # 血条上方：生效中的 buff 技能图标 + 状态异常色块（带剩余秒数）
         self._draw_effect_icons(surface, player, bx, by)
 
+        # 状态栏右上：技能 / 药水快捷栏（图标 + 键位 + 冷却遮罩 + 余量）
+        self._draw_hotbar(surface, player, bindings, bx, by, bar.get_width())
+
         # 地图名：由 game 层按小地图面板位置调用 draw_map_name（右上避让）
 
+
+    # ── 技能 / 药水快捷栏（状态栏右上方，常驻冷却与余量）────────────
+    def _draw_hotbar(self, surface, player, bindings, bx: int, by: int,
+                     bar_w: int) -> None:
+        if bindings is None:
+            return
+        from game.core.hotbar import build_hotbar
+        slots = build_hotbar(player, bindings)
+        if not slots:
+            return
+        cell, gap = 30, 3
+        total_w = len(slots) * (cell + gap) - gap
+        x0 = bx + bar_w - total_w - 4
+        y0 = by - cell - 4
+        for s in slots:
+            rect = pygame.Rect(x0, y0, cell, cell)
+            pygame.draw.rect(surface, (16, 14, 10, 220), rect, border_radius=4)
+            pygame.draw.rect(surface, (120, 108, 80) if s.cooling
+                             else (180, 168, 120), rect, 1, border_radius=4)
+            icon = (self.assets.skill_icon(s.ref_id) if s.kind == "skill"
+                    else self.assets.item_icon(s.ref_id))
+            if icon is not None:
+                if icon.get_width() > cell - 4:
+                    icon = pygame.transform.scale(icon, (cell - 4, cell - 4))
+                surface.blit(icon, (rect.centerx - icon.get_width() // 2,
+                                    rect.centery - icon.get_height() // 2))
+            else:
+                glyph = self.font_small.render(
+                    (s.name or s.label)[:1], True, (235, 230, 210))
+                surface.blit(glyph, (rect.centerx - glyph.get_width() // 2,
+                                     rect.centery - glyph.get_height() // 2))
+            kt = self.font_tiny.render(s.label, True, (255, 233, 120))
+            surface.blit(kt, (rect.x + 2, rect.y - 11 if rect.y > 12 else rect.bottom + 1))
+            if s.kind == "item" and s.count is not None:
+                ct = self.font_tiny.render(str(s.count),
+                                           True,
+                                           (255, 120, 110) if s.count == 0
+                                           else (235, 235, 235))
+                surface.blit(ct, (rect.right - ct.get_width() - 2,
+                                  rect.bottom - ct.get_height()))
+            if s.cooling and s.cd_total > 0:
+                mask_h = int(cell * min(1.0, s.cd_remain / s.cd_total))
+                veil = pygame.Surface((cell, mask_h), pygame.SRCALPHA)
+                veil.fill((10, 10, 14, 190))
+                surface.blit(veil, (rect.x, rect.y))
+                secs = self.font_tiny.render(
+                    f"{s.cd_remain:.1f}", True, (255, 240, 200))
+                surface.blit(secs, (rect.centerx - secs.get_width() // 2,
+                                    rect.centery - secs.get_height() // 2))
+            x0 += cell + gap
 
     # ── buff / 状态异常图标条（血条上方）──────────────────────────
     def _draw_effect_icons(self, surface, player, bx: int, by: int) -> None:
@@ -298,8 +358,16 @@ class UI:
         if statuses is not None:
             colors = {"poison": (120, 230, 120), "stun": (255, 220, 90),
                       "slow": (120, 180, 255)}
+            labels = {"poison": "毒", "stun": "晕", "slow": "慢"}
             for s in statuses.active():
-                rows.append((s, None, colors.get(s.kind, (200, 200, 200))))
+                icon = pygame.Surface((28, 28), pygame.SRCALPHA)
+                color = colors.get(s.kind, (200, 200, 200))
+                pygame.draw.rect(icon, color, (2, 2, 24, 24), border_radius=4)
+                tag = self.font_small.render(labels.get(s.kind, "?"),
+                                             True, (20, 16, 10))
+                icon.blit(tag, (14 - tag.get_width() // 2,
+                                14 - tag.get_height() // 2))
+                rows.append((s, icon, color))
         if not rows:
             return
         x = bx
@@ -509,5 +577,19 @@ class UI:
 
         txt = self.font_big.render("你 已 死 亡", True, (185, 45, 45))
         surface.blit(txt, (x + (374 - txt.get_width()) / 2, y + DLG_TOP_H + 14))
-        sub = self.font.render("按 R 返回村口重生", True, DLG_TEXT_BASE)
+        sub = self.font.render("点击按钮或按 R 返回村口重生", True, DLG_TEXT_BASE)
         surface.blit(sub, (x + (374 - sub.get_width()) / 2, y + DLG_TOP_H + 44))
+        # 可点重生按钮（官方 BtOK 素材，缺失自绘）：死亡不再纯键盘
+        btn = self._img("UIWindow.img", "UtilDlgEx/BtOK/normal/0")
+        bw, bh = (btn.get_width(), btn.get_height()) if btn else (120, 26)
+        br = pygame.Rect(int(x + (374 - bw) / 2),
+                         int(y + h - bh - 30), bw, bh)
+        if btn is not None:
+            surface.blit(btn, br.topleft)
+        else:
+            pygame.draw.rect(surface, (120, 60, 52), br, border_radius=5)
+            pygame.draw.rect(surface, (230, 200, 160), br, 1, border_radius=5)
+            t = self.font.render("回村重生", True, (255, 245, 235))
+            surface.blit(t, (br.centerx - t.get_width() // 2,
+                             br.centery - t.get_height() // 2))
+        self.death_button_rect = br
