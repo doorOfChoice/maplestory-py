@@ -83,7 +83,7 @@ def _table(chance=1_000_000):
 
 def test_kill_with_official_table_drops_scripted_meso_and_item():
     """官方表命中的怪：金币按官方区间、物品带官方 id 与数量。"""
-    c = Combat(_Assets(), drop_table=_table())
+    c = Combat(_Assets(), rng=random.Random(1), drop_table=_table())
     _kill(c, _Mob())
     meso_drops = [d for d in c.drops if d.is_meso]
     item_drops = [d for d in c.drops if not d.is_meso]
@@ -95,14 +95,14 @@ def test_kill_with_official_table_drops_scripted_meso_and_item():
 
 def test_kill_with_official_table_rolls_each_drop_per_chance():
     """官方表下掉率 0 的行不生成掉落：全 0 时一堆都不出。"""
-    c = Combat(_Assets(), drop_table=_table(chance=0))
+    c = Combat(_Assets(), rng=random.Random(1), drop_table=_table(chance=0))
     _kill(c, _Mob())
     assert c.drops == []
 
 
 def test_kill_without_official_data_falls_back_to_legacy():
     """表里没有的怪：金币仍按经验启发式必掉，物品走旧 WZ 掉落池。"""
-    c = Combat(_Assets(), drop_table=OfficialDropTable.from_dict({}))
+    c = Combat(_Assets(), rng=random.Random(1), drop_table=OfficialDropTable.from_dict({}))
     mob = _Mob(roll_result={"id": "4000004", "name": "绿液球"})
     mob.mob_id = "9999999"
     _kill(c, mob)
@@ -114,7 +114,7 @@ def test_kill_without_official_data_falls_back_to_legacy():
 
 def test_mob_id_with_leading_zero_matches_official_table():
     """WZ 怪 id 带前导零（0210100）：与 SQL 数字 id 归一后同表命中。"""
-    c = Combat(_Assets(), drop_table=_table())
+    c = Combat(_Assets(), rng=random.Random(1), drop_table=_table())
     mob = _Mob()
     mob.mob_id = "0210100"
     _kill(c, mob)
@@ -143,12 +143,12 @@ def test_quest_row_drops_only_with_active_quest():
 
     player = _Player()
     player.quests = _Quests({"2104"})
-    c = Combat(_Assets(), drop_table=table)
+    c = Combat(_Assets(), rng=random.Random(1), drop_table=table)
     c.player_attack(player, [_Mob()])
     assert [d.item["id"] for d in c.drops if not d.is_meso] == \
         ["2000000", "4031273"]
 
-    c2 = Combat(_Assets(), drop_table=table)
+    c2 = Combat(_Assets(), rng=random.Random(1), drop_table=table)
     player2 = _Player()
     player2.quests = _Quests(set())
     c2.player_attack(player2, [_Mob()])
@@ -164,7 +164,7 @@ def test_item_row_without_icon_is_not_spawned():
         def equip_icon(self, item_id):
             return None
 
-    c = Combat(_NoIconAssets(), drop_table=_table())
+    c = Combat(_NoIconAssets(), rng=random.Random(1), drop_table=_table())
     _kill(c, _Mob())
     assert [d for d in c.drops if d.is_meso] and \
         not [d for d in c.drops if not d.is_meso]

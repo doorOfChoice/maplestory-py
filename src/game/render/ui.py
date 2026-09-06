@@ -292,8 +292,9 @@ class UI:
         rows: List[Tuple[object, Optional[pygame.Surface], Tuple[int, int, int]]] = []
         if buffs is not None:
             for b in buffs.active():
-                rows.append((b, self.assets.skill_icon(b.skill_id),
-                             (120, 200, 255)))
+                icon = self.assets.skill_icon(b.skill_id) \
+                    or self.assets.item_icon(b.skill_id)
+                rows.append((b, icon, (120, 200, 255)))
         if statuses is not None:
             colors = {"poison": (120, 230, 120), "stun": (255, 220, 90),
                       "slow": (120, 180, 255)}

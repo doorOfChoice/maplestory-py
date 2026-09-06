@@ -2,7 +2,9 @@
 
 WZ Consume spec 只取本项目实现的键：hp/mp（固定恢复）、hpR/mpR（按上限
 百分比恢复）、moveTo（回程卷轴目标地图，999999999 为「当前图 returnMap」
-哨兵，由 warp 回调方解析）。其余键（buff time / morph / 弹药等）不可用。
+哨兵，由 warp 回调方解析）、time + pad/mad/pdd/mdd/acc/eva/speed/jump
+（特效药：time 毫秒，属性值为面板百分比加成，上 BuffList 持续修正）。
+其余键（morph / 弹药 / expBuff 等）不可用。
 
 warp 回调契约：Callable[[int], Optional[str]] —— 入参为 moveTo 原始值；
 成功（已开始切图）返回 None，被拒返回简体中文原因。调用方只在回调
@@ -29,6 +31,21 @@ def is_healing(spec: Dict) -> bool:
 
 def is_return_scroll(spec: Dict) -> bool:
     return spec_int(spec, "moveTo") > 0
+
+
+# ── 特效药（time + 百分比属性键）────────────────────────────────────
+
+ELIXIR_KEYS = ("pad", "mad", "pdd", "mdd", "acc", "eva", "speed", "jump")
+
+
+def is_elixir(spec: Dict) -> bool:
+    return spec_int(spec, "time") > 0 and any(spec_int(spec, k)
+                                              for k in ELIXIR_KEYS)
+
+
+def elixir_mods(spec: Dict) -> Dict[str, int]:
+    """spec → buff mods：保留已实现键的百分比值（含负面值）。"""
+    return {k: spec_int(spec, k) for k in ELIXIR_KEYS if spec_int(spec, k)}
 
 
 def heal_amounts(spec: Dict, max_hp: int, max_mp: int) -> Tuple[int, int]:
@@ -76,12 +93,20 @@ def use(player: Any, item_id: str) -> Optional[str]:
             return err
         inv.use_consume(item_id)
         return None
-    if not is_healing(spec):
+    elixir = is_elixir(spec)
+    if not is_healing(spec) and not elixir:
         return "无法使用该物品"
-    block = heal_block_reason(spec, player.hp, player.max_hp,
-                              player.mp, player.max_mp)
-    if block is not None:
-        return block
+    if is_healing(spec) and not elixir:
+        # 纯治疗药：满值拒用；特效药附带回血不因回血无效而整体拒用
+        block = heal_block_reason(spec, player.hp, player.max_hp,
+                                  player.mp, player.max_mp)
+        if block is not None:
+            return block
+    name = inv.consumes[item_id].name if elixir else ""
     inv.use_consume(item_id)
-    apply_heal(spec, player)
+    if is_healing(spec):
+        apply_heal(spec, player)
+    if elixir:
+        player.buffs.apply(item_id, name,
+                           spec_int(spec, "time") / 1000.0, elixir_mods(spec))
     return None

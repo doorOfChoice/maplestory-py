@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+
 import pygame
 
 from game import settings
@@ -68,7 +70,7 @@ class _Assets:
 
 def test_kill_pushes_exp_entry_with_mob_name():
     """击杀成功：明细出一条 exp 条目，怪名与经验取自怪对象。"""
-    c = Combat(_Assets())
+    c = Combat(_Assets(), rng=random.Random(1))
     c.player_attack(_Player(), [_Mob()])
     assert [(e.kind, e.name, e.amount) for e in c.combat_log.entries] == \
         [("exp", "蓝蜗牛", 10)]
@@ -76,7 +78,7 @@ def test_kill_pushes_exp_entry_with_mob_name():
 
 def test_zero_exp_kill_pushes_no_entry():
     """0 经验的怪不出条目。"""
-    c = Combat(_Assets())
+    c = Combat(_Assets(), rng=random.Random(1))
     mob = _Mob()
     mob.exp = 0
     c.player_attack(_Player(), [mob])
@@ -85,7 +87,7 @@ def test_zero_exp_kill_pushes_no_entry():
 
 def test_pickup_meso_pushes_meso_entry():
     """金币吸附成交：明细出一条 meso 条目，金额为拾取数。"""
-    c = Combat(_Assets())
+    c = Combat(_Assets(), rng=random.Random(1))
     p = _Player()
     d = DropItem(10.0, p.y, meso=12, ground_y=p.y)
     d._age = 99.0
@@ -97,7 +99,7 @@ def test_pickup_meso_pushes_meso_entry():
 
 def test_pickup_item_pushes_item_entry():
     """物品吸附成交：明细出一条 item 条目，键为归一化物品 id、数量为件数。"""
-    c = Combat(_Assets())
+    c = Combat(_Assets(), rng=random.Random(1))
     p = _Player()
     d = DropItem(10.0, p.y, item={"id": "4000000", "name": "蓝螺壳", "count": 2},
                  ground_y=p.y)

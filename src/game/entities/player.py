@@ -181,19 +181,25 @@ class Player:
         self.recalc_vitals()
         self._load_anim(POSE_IDLE if self.on_ground else POSE_JUMP)
 
+    def _buff_rate(self, key: str) -> float:
+        """特效药百分比修正倍率：buff mods 的 pad/mad/... 之和 ÷100。"""
+        return 1.0 + self.buffs.mod_sum(key) / 100.0
+
     def attack_value(self) -> int:
-        """物理攻击力（面板上限端）：武器面板 × 主属性权重 + 被动/buff 加值。"""
+        """物理攻击力（面板上限端）：(武器面板 × 主属性权重 + 被动/buff 加值) × 力藥%。"""
         pad = self.inventory.attack() or settings.BASE_WEAPON_PAD
         base = stats_mod.attack(self.total_stats(), pad, self.is_ranged())
-        return base + self.skills.passive_mods().get("atk", 0) \
+        flat = base + self.skills.passive_mods().get("atk", 0) \
             + self.buffs.mod_sum("atk")
+        return int(flat * self._buff_rate("pad"))
 
     def attack_range(self) -> Tuple[int, int]:
         """物理攻击区间 (min, max)：供战斗按 AyumiLove 公式结算。"""
         pad = self.inventory.attack() or settings.BASE_WEAPON_PAD
         lo, hi = stats_mod.attack_range(self.total_stats(), pad, self.is_ranged())
         bonus = self.skills.passive_mods().get("atk", 0) + self.buffs.mod_sum("atk")
-        return max(1, lo + bonus), max(1, hi + bonus)
+        rate = self._buff_rate("pad")
+        return max(1, int((lo + bonus) * rate)), max(1, int((hi + bonus) * rate))
 
     def crit_rate(self) -> float:
         """暴击率（%）：被动技能 + buff 的 crit 词条之和。"""
@@ -243,32 +249,36 @@ class Player:
         return True
 
     def defense_value(self) -> int:
-        """物理防御力：装备 PDD 总和 + DEX//10 + 被动/buff 加值。"""
-        return stats_mod.defense(self.total_stats(), self.inventory.defense()) \
+        """物理防御力：(装备 PDD + DEX//10 + 被动/buff 加值) × 護甲藥%。"""
+        flat = stats_mod.defense(self.total_stats(), self.inventory.defense()) \
             + self.skills.passive_mods().get("def", 0) \
             + self.buffs.mod_sum("def")
+        return int(flat * self._buff_rate("pdd"))
 
     def magic_attack_value(self) -> int:
-        """魔法力（面板）：武器 MAD × (2×INT + LUK) / 100。"""
-        return stats_mod.magic_attack(self.total_stats(),
-                                      self.inventory.stat_sum("incMAD"))
+        """魔法力（面板）：武器 MAD × (2×INT + LUK) / 100 × 魔法藥%。"""
+        return int(stats_mod.magic_attack(self.total_stats(),
+                                          self.inventory.stat_sum("incMAD"))
+                   * self._buff_rate("mad"))
 
     def magic_defense_value(self) -> int:
-        """魔法防御：装备 MDD 总和 + INT//10。"""
-        return stats_mod.magic_defense(self.total_stats(),
-                                       self.inventory.stat_sum("incMDD"))
+        """魔法防御：(装备 MDD 总和 + INT//10) × 護甲藥%。"""
+        return int(stats_mod.magic_defense(self.total_stats(),
+                                           self.inventory.stat_sum("incMDD"))
+                   * self._buff_rate("mdd"))
 
     def accuracy_value(self) -> int:
-        """命中率：基础 20 + DEX//2 + 装备 ACC + 被动/buff 加值。"""
-        extra = self.skills.passive_mods().get("acc", 0) \
-            + self.buffs.mod_sum("acc")
-        return stats_mod.accuracy(self.total_stats(),
-                                  self.inventory.stat_sum("incACC"), extra)
+        """命中率：(基础 20 + DEX//2 + 装备 ACC + 被动/buff 加值) × 命藥%。"""
+        extra = self.skills.passive_mods().get("acc", 0)
+        return int(stats_mod.accuracy(self.total_stats(),
+                                      self.inventory.stat_sum("incACC"), extra)
+                   * self._buff_rate("acc"))
 
     def evasion_value(self) -> int:
-        """回避率：LUK//2 + 装备 EVA。"""
-        return stats_mod.evasion(self.total_stats(),
-                                 self.inventory.stat_sum("incEVA"))
+        """回避率：(LUK//2 + 装备 EVA) × 回避藥%。"""
+        return int(stats_mod.evasion(self.total_stats(),
+                                     self.inventory.stat_sum("incEVA"))
+                   * self._buff_rate("eva"))
 
     def attack_speed_value(self) -> int:
         """攻击速度：武器 WZ speed 值（0 最快、越大越慢）；空手为 0。"""
@@ -328,12 +338,14 @@ class Player:
         return min(units / 1000.0, settings.EQUIP_SPEED_BONUS_CAP)
 
     def move_speed(self) -> float:
-        """地面水平速度：基础 × (1 + ΣincSpeed 加成)。"""
-        return settings.MOVE_SPEED * (1.0 + self._equip_speed_bonus("incSpeed"))
+        """地面水平速度：基础 × (1 + ΣincSpeed 加成 + 速度藥%)。"""
+        return settings.MOVE_SPEED * (1.0 + self._equip_speed_bonus("incSpeed")
+                                      + self.buffs.mod_sum("speed") / 100.0)
 
     def jump_velocity(self) -> float:
-        """起跳初速度（负值）：基础 × (1 + ΣincJump 加成)。"""
-        return settings.JUMP_VELOCITY * (1.0 + self._equip_speed_bonus("incJump"))
+        """起跳初速度（负值）：基础 × (1 + ΣincJump 加成 + 跳跃藥%)。"""
+        return settings.JUMP_VELOCITY * (1.0 + self._equip_speed_bonus("incJump")
+                                         + self.buffs.mod_sum("jump") / 100.0)
 
     def recalc_vitals(self) -> None:
         """按 等级/职业/装备词条 重算 HP/MP 上限，并把当前值钳进上限。"""

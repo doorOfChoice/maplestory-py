@@ -1,8 +1,10 @@
 """Buff 与状态异常：玩家侧的持续增益/减益（纯数据，不触碰 pygame）。
 
-· BuffList：技能施加的属性修正 buff，mods 键约定为
-  str/dex/int/luk（四维）、atk/def（攻防加值）、crit（暴击率 %）。
-  同 skill_id 重复施加 = 刷新持续时间（数值不叠加）。
+· BuffList：技能/特效药施加的属性修正 buff。技能 mods 键约定为
+  str/dex/int/luk（四维）、atk/def（攻防加值）、crit（暴击率 %）；
+  特效药（consumables.py）以物品 id 为键、pad/mad/pdd/mdd/acc/eva/
+  speed/jump 为面板百分比加成。同 skill_id 重复施加 = 刷新持续时间
+  （数值不叠加）。
 · StatusList：怪物技能造成的异常状态 —— poison（每秒按强度扣血）、
   stun（锁移动/跳跃/攻击）、slow（移速倍率）。同种重复上取更长
   剩余与更高强度。

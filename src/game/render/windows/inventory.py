@@ -106,6 +106,20 @@ def _asset_desc(svc: WindowServices, item_id: str) -> str:
         return ""
 
 
+_ELIXIR_LABELS = {"pad": "物攻", "mad": "魔攻", "pdd": "物防", "mdd": "魔防",
+                  "acc": "命中", "eva": "回避", "speed": "移速", "jump": "跳跃"}
+
+
+def _elixir_tip(spec: dict) -> str:
+    """特效药效果行：各词条百分比 + 持续时长（如「命中+5% 持续5分」）。"""
+    parts = [f"{_ELIXIR_LABELS[k]}{v:+d}%"
+             for k, v in consumables.elixir_mods(spec).items()]
+    secs = consumables.spec_int(spec, "time") // 1000
+    span = f" 持续{secs // 60}分" if secs >= 60 and secs % 60 == 0 \
+        else f" 持续{secs}秒"
+    return " ".join(parts) + span
+
+
 def _item_tip(item: Item, desc: str = "") -> str:
     """消耗品 / 其他物品悬停提示文本；desc 为 String.wz 介绍。"""
     lines = [item.name]
@@ -126,6 +140,9 @@ def _item_tip(item: Item, desc: str = "") -> str:
             lines.append("双击对当前武器强化")
         elif consumables.is_return_scroll(spec):
             lines.append("双击返回城镇")
+        elif consumables.is_elixir(spec):
+            lines.append(_elixir_tip(spec))
+            lines.append("双击使用")
         elif consumables.is_healing(spec):
             lines.append("双击使用")
     if desc:

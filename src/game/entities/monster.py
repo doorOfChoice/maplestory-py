@@ -115,7 +115,11 @@ class Monster:
         self.remove_after = 0.0
         self._death_sound_played = False
 
-        self._load_action("move" if self._has("move") else "stand")
+        # 动作降级：部分怪（如蝙蝠）WZ 里只有 fly、没有 stand/move，
+        # 硬套空动作会整只不可见却仍带接触伤害，故按可用性择动作。
+        self.act_walk = self._first_action(("move", "fly", "stand"))
+        self.act_idle = "stand" if self._has("stand") else self.act_walk
+        self._load_action(self.act_walk)
 
         # 巡逻/追击边界：钳到出生段可步行平台两端，并按贴图半宽内缩
         # （身体边缘贴平台边折返，不半身悬出边缝；边缝处没有贴图可遮）
@@ -133,6 +137,13 @@ class Monster:
         if not self.anim.frames:
             return 6.0
         return max(f[0].get_width() for f in self.anim.frames) / 2.0
+
+    def _first_action(self, candidates: Tuple[str, ...]) -> str:
+        """按优先级返回第一个有帧的动作；全都没有则回退最后一个。"""
+        for a in candidates:
+            if self._has(a):
+                return a
+        return candidates[-1]
 
     def _has(self, action: str) -> bool:
         try:
@@ -241,15 +252,15 @@ class Monster:
             # 不追出自己的巡逻平台（否则会悬空在平台外）
             self.x = min(max(self.x, self.rx0), self.rx1)
             self._step_move()
-            self._load_action("move" if self._has("move") else "stand")
+            self._load_action(self.act_walk)
         elif chasing and dist <= settings.MOB_ATTACK_RANGE:
             self.state = "attack"
-            self._load_action("stand")
+            self._load_action(self.act_idle)
             self._step_move()
         else:
             self.state = "patrol"
             if self.boss:
-                self._load_action("stand")   # boss 守位站桩，原版排面
+                self._load_action(self.act_idle)   # boss 守位站桩，原版排面
             else:
                 self._update_wander(dt)
 
@@ -286,14 +297,14 @@ class Monster:
             if abs(self.x - self.wander_target) < 0.5:
                 self._wander_walking = False
                 self._wander_timer = random.uniform(*settings.MOB_WANDER_PAUSE)
-            self._load_action("move" if self._has("move") else "stand")
+            self._load_action(self.act_walk)
         else:
             self._wander_timer -= dt
             if self._wander_timer <= 0:
                 self.wander_target = random.choice(
                     (self.rx0, self.rx1, random.uniform(self.rx0, self.rx1)))
                 self._wander_walking = True
-            self._load_action("stand")
+            self._load_action(self.act_idle)
         self._step_move()
 
     def _step_move(self) -> None:
