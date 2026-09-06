@@ -1,25 +1,11 @@
-"""运动辅助：速度渐近（approach）与跳跃缓冲 / 土狼时间（JumpFeather）。
+"""运动辅助：摩擦衰减（friction）与跳跃缓冲 / 土狼时间（JumpFeather）。
 
 纯状态、不依赖任何资源，便于针对公开接口写单元测试：
-  · approach：把当前值朝目标值移动最多 max_delta，用于水平速度缓动。
   · JumpFeather：记录「已按下跳跃」与「离开地面」两个窗口，
     can_jump 只在 缓冲内 +（在地面 或 离开地面尚在土狼窗口内） 时为真。
 """
 
 from __future__ import annotations
-
-
-def approach(value: float, target: float, max_delta: float) -> float:
-    """把 value 朝 target 移动，每步最多移动 max_delta。
-
-    不是直接跳到 target，而是渐近逼近——这是「丝滑」的来源：
-    起落都有缓动，不会瞬间从 0 跳到全速或从全速骤停。
-    """
-    if value < target:
-        return min(value + max_delta, target)
-    if value > target:
-        return max(value - max_delta, target)
-    return target
 
 
 def friction(value: float, dt: float, coeff: float) -> float:

@@ -23,7 +23,7 @@ from game.core.jobs import JOBS, is_ranged_weapon
 from game.systems.skills import SkillBook
 from game.core.stats import base_stats
 from game.systems.quests import QuestLog
-from game.core.motion import approach, friction, JumpFeather
+from game.core.motion import friction, JumpFeather
 
 POSE_IDLE = "stand1"
 POSE_RUN = "walk1"
@@ -574,7 +574,7 @@ class Player:
         elif push_back_to_wall:
             pass    # 蹬墙跳失控期：保持弹开速度，方向输入先不抵消
         else:
-            # 水平缓动：地面快、空中按 AIR_ACCEL 打折扣 → 柔化起停（丝滑的关键）。
+            # 原版行为：按方向当帧满速、松手立停、空中转向不打折。
             target_vx = 0.0
             if keys.left and not keys.right:
                 target_vx = -self.move_speed()
@@ -583,10 +583,11 @@ class Player:
                 target_vx = self.move_speed()
                 self.facing_right = True
             target_vx *= self.statuses.speed_mult()
-            accel = settings.MOVE_ACCEL
-            if not self.on_ground:
-                accel *= settings.AIR_ACCEL
-            self.vx = approach(self.vx, target_vx, accel * dt)
+            # 同向且已有更高动量（蹬墙弹开等）时保留，不被打回基础走速
+            if target_vx * self.vx > 0 and abs(self.vx) > abs(target_vx):
+                pass
+            else:
+                self.vx = target_vx
 
         # 爬梯/爬绳（含细绳）
         ladder = physics.rope_at(self.x, self.y)

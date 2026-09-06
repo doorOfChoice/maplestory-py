@@ -1,6 +1,6 @@
-"""运动辅助：速度渐近（approach）、摩擦衰减（friction）与跳跃缓冲 / 土狼时间。"""
+"""运动辅助：摩擦衰减（friction）与跳跃缓冲 / 土狼时间。"""
 
-from game.core.motion import approach, friction, JumpFeather
+from game.core.motion import friction, JumpFeather
 
 
 def test_friction_decays_preserving_inertia():
@@ -21,25 +21,6 @@ def test_friction_eventually_stops():
 def test_friction_zero_stays_zero():
     """速度为 0 时保持 0。"""
     assert friction(0.0, 1 / 60.0, 8.0) == 0.0
-
-
-def test_approach_ramps_up_by_max_delta():
-    """approach 朝目标移动最多 max_delta：向大方向每步递增，绝不瞬跳。"""
-    assert approach(0.0, 150.0, 26.0) == 26.0
-    assert approach(130.0, 150.0, 26.0) == 150.0
-    assert approach(150.0, 150.0, 26.0) == 150.0
-
-
-def test_approach_ramps_down_by_max_delta():
-    """approach 朝小方向同样受 max_delta 约束：减速柔化，不骤停。"""
-    assert approach(150.0, 0.0, 26.0) == 124.0
-    assert approach(10.0, 0.0, 26.0) == 0.0
-
-
-def test_approach_never_overshoots():
-    """approach 越过目标时吸附到目标值，不振荡。"""
-    assert approach(140.0, 150.0, 26.0) == 150.0
-    assert approach(10.0, 0.0, 26.0) == 0.0
 
 
 def test_jump_press_buffers():

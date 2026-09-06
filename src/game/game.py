@@ -60,8 +60,14 @@ class Game:
         # 要点两下才响应）。打开 SDL 该 hint 后，点击聚焦与点击响应合一。
         os.environ.setdefault("SDL_MOUSE_FOCUS_CLICKTHROUGH", "1")
         pygame.init()
-        self.screen = pygame.display.set_mode(
-            (settings.WINDOW_W, settings.WINDOW_H))
+        # vsync 锁帧到显示器刷新：不锁时 clock.tick(60) 与屏幕不同相，
+        # 画面有肉眼可感的小抖动；驱动不支持（如 dummy）时回退无 vsync。
+        try:
+            self.screen = pygame.display.set_mode(
+                (settings.WINDOW_W, settings.WINDOW_H), vsync=1)
+        except pygame.error:
+            self.screen = pygame.display.set_mode(
+                (settings.WINDOW_W, settings.WINDOW_H))
         pygame.display.set_caption(
             f"Maplestory 113 · {settings.MAP_ID} · pygame")
         self.canvas = pygame.Surface((settings.VIEW_W, settings.VIEW_H))

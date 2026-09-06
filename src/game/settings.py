@@ -39,9 +39,7 @@ FADE_TIME = 0.4                 # 地图切换 / 重生后的黑场淡入秒数
 
 # ── 角色物理（世界坐标，y 向下）────────────────────────────────────
 GRAVITY = 2200.0                 # px/s^2
-MOVE_SPEED = 300.0               # 地面水平速度 px/s
-MOVE_ACCEL = 2600.0              # 地面水平加速度 px/s^2（速度缓动，避免瞬起瞬停）
-AIR_ACCEL = 0.55                 # 空中水平加速度倍率（对 MOVE_ACCEL 打折扣）
+MOVE_SPEED = 300.0               # 地面水平速度 px/s（原版式：当帧起速/立停，无缓动）
 JUMP_VELOCITY = -900.0           # 起跳初速度（向上为负）
 EQUIP_SPEED_BONUS_CAP = 0.5      # 装备 incSpeed/incJump 加成封顶（+50%）
 COYOTE_TIME = 0.08               # 离开地面后仍可起跳的窗口（秒）
