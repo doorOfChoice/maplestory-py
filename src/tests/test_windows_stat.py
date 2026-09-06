@@ -7,8 +7,8 @@ from typing import List
 
 from game.core.jobs import JOBS
 from game.render.windows.stat import DETAIL_ROWS, StatWindow
-from tests.windows_harness import (close_button_pos, draw_once, make_manager,
-                                   make_services, press, release)
+from tests.windows_harness import (draw_once, make_manager, make_services,
+                                   press, release)
 
 
 # ── 测试数据助手 ───────────────────────────────────────────────────
@@ -59,11 +59,10 @@ def test_default_invisible_and_toggle_shows():
     assert win.visible
 
 
-def test_close_button_click_closes_stat_window():
-    """有 chrome：draw 后点关闭钮即关窗（经 manager 全链路）。"""
+def test_escape_closes_stat_window():
+    """官方底板窗无自绘 CLOSE：Esc 经 manager 逐层关窗。"""
     win, mgr = open_stat(make_player())
-    assert win.close_rect is not None
-    assert press(mgr, close_button_pos(win))
+    assert mgr.handle_escape()
     assert not win.visible
 
 

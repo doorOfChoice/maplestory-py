@@ -1,7 +1,7 @@
-"""聊天框渲染：左下角半透明日志区 + 聚焦时的输入行。
+"""聊天框渲染：左下角无底日志（白字黑描边）+ 聚焦时的输入行。
 
-原版布局的自制替身：日志贴左下、压在状态栏上方，输入行在最底（贴栏），
-新消息永远可见；输入过长时只显示能贴进宽度的词尾（光标跟字符走）。
+原版风格：日志不加黑底、直接叠在场景上；输入行用官方 StatusBar/base/chat
+细线做底衬，过长时只显示能贴进宽度的词尾（光标跟字符走）。
 纯逻辑（聊天状态）在 core/chat.py，这里只读不写。
 """
 
@@ -48,8 +48,8 @@ class ChatView:
     def __init__(self) -> None:
         self.font = load_cjk_font(12)
 
-    def draw(self, surface, chat: Chat, bar_h: int) -> None:
-        """绘制日志区（有内容才画底）与输入行（聚焦时画底）。"""
+    def draw(self, surface, chat: Chat, bar_h: int, assets=None) -> None:
+        """绘制日志区（原版无底、描边字）与输入行（官方 chat 细线做底衬）。"""
         vw, vh = surface.get_width(), surface.get_height()
         shown = chat.lines[-CHAT_VISIBLE_LINES:]
         if not shown and not chat.focused:
@@ -57,23 +57,33 @@ class ChatView:
         if shown:
             height = len(shown) * CHAT_LINE_H + 6
             rect = compute_chat_rect(vw, vh, bar_h, height)
-            bg = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-            bg.fill((0, 0, 0, 110))
-            surface.blit(bg, rect.topleft)
             y = rect.y + 3
             for line in shown:
                 color = LINE_COLORS.get(line.kind, LINE_COLORS["player"])
-                surface.blit(render_text(self.font, line.text, color),
-                             (rect.x + 4, y))
+                self._blit_outlined(surface, line.text, rect.x + 4, y, color)
                 y += CHAT_LINE_H
         if chat.focused:
             ir = pygame.Rect(CHAT_MARGIN, vh - bar_h - CHAT_MARGIN - INPUT_H,
                              CHAT_W, INPUT_H)
-            bg = pygame.Surface((ir.width, ir.height), pygame.SRCALPHA)
-            bg.fill((0, 0, 0, 150))
-            surface.blit(bg, ir.topleft)
-            pygame.draw.rect(surface, (150, 160, 178), ir, 1)
             caret = "▌" if int(pygame.time.get_ticks() / 500) % 2 == 0 else ""
             text = visible_tail(chat.text + caret, self.font, CHAT_W - 12)
-            surface.blit(render_text(self.font, text, (255, 255, 255)),
-                         (ir.x + 5, ir.y + 3))
+            self._blit_outlined(surface, text, ir.x + 4, ir.y, (255, 255, 255))
+            line = None
+            if assets is not None:
+                from game.render.conv import ui_image
+                line = ui_image(assets, "StatusBar.img", "base/chat")
+            if line is not None:
+                line = pygame.transform.scale(line, (CHAT_W, line.get_height()))
+                surface.blit(line, (ir.x, ir.bottom - line.get_height()))
+            else:
+                pygame.draw.line(surface, (150, 160, 178),
+                                 (ir.x, ir.bottom - 1), (ir.right, ir.bottom - 1))
+
+    def _blit_outlined(self, surface, text: str, x: int, y: int,
+                       color: Tuple[int, int, int]) -> None:
+        """白字黑描边（1px 八向）：原版聊天/名字的通用画法。"""
+        shadow = render_text(self.font, text, (0, 0, 0))
+        main = render_text(self.font, text, color)
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            surface.blit(shadow, (x + dx, y + dy))
+        surface.blit(main, (x, y))

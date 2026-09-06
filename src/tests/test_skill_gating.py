@@ -84,7 +84,7 @@ def test_learnable_excludes_invisible_and_passives():
 
 
 def test_on_advance_grants_passives_and_hotkeys():
-    """转职：被动直接满级、主动技能填入快捷键、被动不占键位。"""
+    """转职：被动直接满级；未学主动不占键位，学会后才上键。"""
     book = book_with(
         make_def("3000000", max_level=16),
         make_def("3000001", max_level=20),
@@ -97,7 +97,10 @@ def test_on_advance_grants_passives_and_hotkeys():
     assert book.levels["3000000"] == 16
     assert book.levels["3000001"] == 20
     assert book.levels["3000002"] == 8
-    assert set(book.hotkeys.values()) == {"3001003", "3001004", "3001005"}
+    assert book.hotkeys == {}               # 没学过 → 快捷栏保持空
+    book.add_sp(300, 5)
+    book.learn("3001004", player_level=10)
+    assert book.hotkeys == {1: "3001004"}   # 学会才自动补最小空键
 
 
 def test_cast_returns_bullet_count():

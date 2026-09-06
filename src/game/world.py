@@ -71,7 +71,8 @@ class World:
             assets.map_width, assets.map_height,
             mag=(assets.map_desc.get("minimap") or {}).get("mag"),
             canvas=assets.minimap_surface(),
-            map_surface=assets.minimap_base)
+            map_surface=assets.minimap_base,
+            assets=assets)
 
         spawn = self._find_spawn()
         self.spawn_x, self.spawn_y = spawn[0], spawn[1]

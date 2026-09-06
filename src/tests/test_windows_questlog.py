@@ -8,8 +8,8 @@ from typing import Callable, List, Optional
 from game.render.windows.questlog import (BAR_RESERVE, GAP, LIST_W,
                                           QUEST_WIN_W, QuestLogWindow,
                                           strip_static_goal_lines)
-from tests.windows_harness import (close_button_pos, draw_once, make_manager,
-                                   make_services, motion, press, wheel)
+from tests.windows_harness import (draw_once, make_manager, make_services,
+                                   motion, press, wheel)
 
 
 # ── 测试数据助手 ───────────────────────────────────────────────────
@@ -293,11 +293,10 @@ def test_active_detail_keeps_static_goals_without_dynamic_rows():
 
 
 # ── chrome / 事件 / 锚点 ───────────────────────────────────────────
-def test_close_button_click_closes_questlog():
-    """点列表窗标题区关闭钮即关窗（经 manager 全链路）。"""
+def test_escape_closes_questlog():
+    """官方底板列表窗无自绘 CLOSE：Esc 经 manager 逐层关窗。"""
     win, mgr = open_log(make_player([], {}))
-    assert win.close_rect is not None
-    assert press(mgr, close_button_pos(win))
+    assert mgr.handle_escape()
     assert not win.visible
 
 

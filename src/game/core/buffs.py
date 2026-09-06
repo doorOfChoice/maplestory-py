@@ -62,6 +62,7 @@ class Status:
     kind: str
     remaining: float
     potency: float
+    total: float = 0.0
 
 
 class StatusList:
@@ -77,9 +78,10 @@ class StatusList:
             return
         cur = self._st.get(kind)
         if cur is None:
-            self._st[kind] = Status(kind, duration, potency)
+            self._st[kind] = Status(kind, duration, potency, duration)
         else:
             cur.remaining = max(cur.remaining, duration)
+            cur.total = max(cur.total, cur.remaining)
             cur.potency = max(cur.potency, potency)
 
     def tick(self, dt: float) -> int:

@@ -8,7 +8,31 @@ from __future__ import annotations
 import pygame
 
 from game.core.animation import Animation
+from game.core.fonts import load_cjk_font
 from game.render.assets import Assets
+
+_npc_font = None
+_name_cache: dict = {}
+
+
+def _npc_name_surface(name: str) -> pygame.Surface:
+    """白字黑边名牌（缓存）：原版 NPC 脚下名称画法。"""
+    global _npc_font
+    hit = _name_cache.get(name)
+    if hit is None:
+        if _npc_font is None:
+            _npc_font = load_cjk_font(12)
+        txt = _npc_font.render(name, True, (255, 255, 255))
+        shd = _npc_font.render(name, True, (0, 0, 0))
+        pad = 2
+        out = pygame.Surface((txt.get_width() + pad * 2,
+                              txt.get_height() + pad * 2), pygame.SRCALPHA)
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            out.blit(shd, (pad + dx, pad + dy))
+        out.blit(txt, (pad, pad))
+        hit = out
+        _name_cache[name] = hit
+    return hit
 
 
 class NPC:
@@ -51,6 +75,10 @@ class NPC:
         sx, sy = camera.to_screen(self.x, self.cy)
         top_left = (sx - self.origin[0], sy - self.origin[1])
         surface.blit(img, (int(top_left[0]), int(top_left[1])))
+        if self.name:
+            plate = _npc_name_surface(self.name)
+            surface.blit(plate, (int(sx - plate.get_width() / 2),
+                                 int(sy - plate.get_height() / 2)))
         if marker >= 0:
             self._draw_marker(surface, camera, marker)
 

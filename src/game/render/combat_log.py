@@ -75,12 +75,17 @@ class CombatLogView:
         return f"获得 {entry.name} ×{entry.amount}"
 
     # ── 绘制 ─────────────────────────────────────────────────────────
-    def draw(self, surface, log: CombatLog, assets, bar_h: int) -> None:
-        """右下角自下向上堆叠绘制；每条按剩余寿命整体淡出。"""
+    def draw(self, surface, log: CombatLog, assets, bar_h: int,
+             bottom: Optional[int] = None) -> None:
+        """右下角自下向上堆叠绘制；每条按剩余寿命整体淡出。
+
+        bottom 给出时（快捷栏顶边 y）以其为堆叠起点，避免与快捷栏重合。
+        """
         if not log.entries:
             return
         vw, vh = surface.get_width(), surface.get_height()
-        y = vh - bar_h - ROW_MARGIN - LINE_H
+        y = (min(vh - bar_h - ROW_MARGIN - LINE_H, bottom - LINE_H - 2)
+             if bottom is not None else vh - bar_h - ROW_MARGIN - LINE_H)
         for entry in reversed(log.entries):
             row = self._render_row(entry, assets)
             fade = entry.alpha

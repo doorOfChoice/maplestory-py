@@ -115,7 +115,7 @@ class StatWindow(Window):
             return
         x, y = self.place(surface, (STAT_W, STAT_H))
         surface.blit(bg, (x, y))
-        self.add_chrome(surface, x, y, STAT_W, 20)
+        self.add_chrome(surface, x, y, STAT_W, 20, button=False)
         mouse = self.svc.mouse()
         total = player.total_stats()
         jobdef = JOBS.get(player.job) or JOBS[0]

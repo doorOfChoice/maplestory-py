@@ -182,6 +182,22 @@ def _blit_text(surface, font, txt: str, color, x: int, y: int) -> None:
     surface.blit(font.render(txt, True, color), (x, y))
 
 
+def _blit_req_number(surface, svc: WindowServices, value: str, x: int, y: int,
+                     can: bool, font: pygame.font.Font) -> int:
+    """REQ 数值：官方 ToolTip/Equip/Can(绿)/Cannot(红) 像素数字，缺失回退文本。"""
+    path = "ToolTip/Equip/Can" if can else "ToolTip/Equip/Cannot"
+    end = x
+    for ch in value:
+        s = wz_surface(svc, f"{path}/{ch}") if ch.isdigit() else None
+        if s is None:
+            _blit_text(surface, font, value,
+                       item_tip.GREEN if can else item_tip.RED, x, y)
+            return x + font.size(value)[0]
+        surface.blit(s, (end, y + (font.get_height() - s.get_height()) // 2))
+        end += s.get_width() + 1
+    return end - x
+
+
 def _draw_equip_tip(surface, svc: WindowServices, mouse_pos: Tuple[int, int],
                     tip: item_tip.EquipTip) -> None:
     """原版装备 tooltip：名称条 + 图标/英雄大数字 + REQ + 职业 + 分类/词条 + 介绍。"""
@@ -262,20 +278,17 @@ def _draw_equip_tip(surface, svc: WindowServices, mouse_pos: Tuple[int, int],
     if has_req:
         if tip.req_level is not None:
             label = "REQ LEV  : "
-            val = str(tip.req_level)
             _blit_text(surface, fs, label, item_tip.BLUE, x + pad, cy)
-            val_color = item_tip.WHITE if tip.req_level_ok else item_tip.RED
-            _blit_text(surface, fs, val, val_color,
-                       x + pad + fs.size(label)[0], cy)
+            _blit_req_number(surface, svc, str(tip.req_level),
+                             x + pad + fs.size(label)[0], cy,
+                             tip.req_level_ok, fs)
             cy += lh
         rx = x + pad + (inner // 2) + 4
         for rs in tip.req_stats:
             label = f"REQ {rs.key}  :"
-            val = str(rs.need)
             _blit_text(surface, fs, label, item_tip.BLUE, rx, cy)
-            val_color = item_tip.WHITE if rs.ok else item_tip.RED
-            _blit_text(surface, fs, val, val_color,
-                       rx + fs.size(label)[0], cy)
+            _blit_req_number(surface, svc, str(rs.need),
+                             rx + fs.size(label)[0], cy, rs.ok, fs)
             cy += lh
         cy += 4
 

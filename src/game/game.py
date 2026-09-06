@@ -710,10 +710,15 @@ class Game:
                              bindings=self.keybindings)
         self.ctx.world.minimap.draw(self.canvas, self.ctx.world.player.x, self.ctx.world.player.y,
                           self.ctx.world.player.facing_right, self.ctx.world.monsters, self.ctx.world.npcs)
-        # 地图名名牌：小地图可见时下移避让，否则右上角 8px
-        name_y = (settings.MINIMAP_MARGIN + settings.MINIMAP_H + 8
-                  if self.ctx.world.minimap.visible else 8)
-        self.ctx.ui.draw_map_name(self.canvas, self.assets.map_name(), name_y)
+        # 地图名：小地图可见时画进官方顶带，否则右上角名牌
+        mm = self.ctx.world.minimap
+        if mm.visible:
+            band = pygame.Rect(mm.panel_rect.x, mm.panel_rect.y,
+                               mm.panel_rect.width, 29)
+            self.ctx.ui.draw_map_name(self.canvas, self.assets.map_name(), 8,
+                                      band=band)
+        else:
+            self.ctx.ui.draw_map_name(self.canvas, self.assets.map_name(), 8)
         # 任务追踪框：贴在小地图 / 名牌下方（T 键开关，无进行中任务时不绘制）
         if self.quest_tracker.visible and self._world_ready:
             self.quest_tracker.draw(
@@ -722,9 +727,11 @@ class Game:
         self.ctx.windows.draw(self.canvas)
         self.ctx.ui.draw_dialog(self.canvas, self.ctx.world.camera)
         self.ctx.ui.conv.draw(self.canvas)
-        self.chat_view.draw(self.canvas, self.chat, self.ctx.ui.status_bar_height())
+        self.chat_view.draw(self.canvas, self.chat, self.ctx.ui.status_bar_height(),
+                            assets=self.assets)
         self.combat_log_view.draw(self.canvas, self.ctx.world.combat.combat_log,
-                                  self.assets, self.ctx.ui.status_bar_height())
+                                  self.assets, self.ctx.ui.status_bar_height(),
+                                  bottom=self.ctx.ui.hotbar_top)
         self.ctx.ui.draw_death(self.canvas)
         self.ctx.windows.draw_modal(self.canvas)   # 模态框永远盖过对话/聊天/死亡
 

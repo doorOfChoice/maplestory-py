@@ -23,7 +23,6 @@ import pygame
 from game.core import consumables
 from game.core import item_tip
 from game.core.item_tip import SLOT_NAMES, build_item_tip, tip_with_note
-from game.core.jobs import JOBS
 from game.core.stats import wear_block
 from game.render.windows.core import widgets
 from game.render.windows.core.manager import WindowManager
@@ -373,7 +372,7 @@ class InventoryWindow(Window):
 
         fs = self.svc.ui.font_small
         surface.blit(bg, (x, y))
-        self.add_chrome(surface, x, y, INV_W, 23)
+        self.add_chrome(surface, x, y, INV_W, 23, button=False)
 
         # 页签条（底图 y23~42 空带；原版汉字烤死在图内）：选中=enabled
         tx = x + 4
@@ -394,10 +393,6 @@ class InventoryWindow(Window):
                              (tr.x + 2, tr.y + 2))
                 self._tab_rects.append((tr, key))
                 tx += 31
-
-        # 标题行右侧：当前页数量（浅色标题条 → 深字）
-        cap_txt = fs.render(str(len(items)) + "项", True, (70, 72, 86))
-        surface.blit(cap_txt, (x + INV_W - cap_txt.get_width() - 40, y + 6))
 
         # 物品格（底图已含格子，只叠图标 + 数量 + 悬停 tooltip）
         sl = self._scroll_for(self.tab)
@@ -587,7 +582,6 @@ class EquipWindow(Window):
     # ── 绘制 ───────────────────────────────────────────────────────
     def draw(self, surface) -> None:
         inv = self.svc.player().inventory
-        fs = self.svc.ui.font_small
         bg = widgets.wz_surface(self.svc, EQP_BG)
         self._fallback = bg is None
         self._size = (158, _inv_last_rect.height) if self._fallback else (EQP_W, EQP_H)
@@ -599,7 +593,7 @@ class EquipWindow(Window):
             return
 
         surface.blit(bg, (x, y))
-        self.add_chrome(surface, x, y, EQP_W, 30)
+        self.add_chrome(surface, x, y, EQP_W, 30, button=False)
         for slot in SLOT_ORDER:
             pos = EQP_SLOT_POS.get(slot)
             if pos is None:
@@ -616,13 +610,6 @@ class EquipWindow(Window):
                     self.svc.tooltip(_tip_payload(self.svc, item))
             self._slot_rects.append((cell, slot))
 
-        # 标题条右侧：职业 + 攻/防摘要（浅色条 → 深字）
-        player = self.svc.player()
-        job_name = JOBS.get(player.job).name if player.job in JOBS else ""
-        stat = fs.render(
-            f"{job_name}  攻 {player.attack_value()} 防 {player.defense_value()}",
-            True, (70, 72, 86))
-        surface.blit(stat, (x + EQP_W - stat.get_width() - 40, y + 6))
 
     def _draw_fallback(self, surface, inv: Inventory,
                        mouse: Tuple[int, int]) -> None:

@@ -311,11 +311,13 @@ class SkillBook:
         self._passive_ids = set(old._passive_ids)
 
     def rebuild_hotkeys(self) -> None:
-        """为全部可学主动技能（含旧转已学）重排最小空闲数字键。"""
+        """只为已学的主动技能重排最小空闲数字键（没学过的不上键）。"""
         self.hotkeys = {}
         for sid in sorted(self.defs):
             d = self.defs[sid]
             if sid in self._passive_ids or d.invisible:
+                continue
+            if not self.levels.get(sid, 0):
                 continue
             self._assign_hotkey(sid)
 

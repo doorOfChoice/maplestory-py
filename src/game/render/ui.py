@@ -96,6 +96,7 @@ class UI:
         self._key_held: Optional[str] = None
         self._key_anim: Optional[Tuple[str, int]] = None
         # ── 会话面板（黑正文行 + 蓝字链接行 + 按钮）：独立组件 ──────
+        self.hotbar_top: Optional[int] = None   # 本帧快捷栏顶边 y（无栏 None）
         self.conv = ConvPanel(assets)
         self._plate_cache: dict = {}
         self._balloon_cache: dict = {}
@@ -278,14 +279,7 @@ class UI:
         self._draw_key_buttons(surface, mouse, left_down, bx, by,
                                bar.get_width(), bar.get_height())
 
-        # 击杀 / 金币 / 背包（白色横栏右端，深色文字）
-        info = render_text(
-            self.font_small,
-            f"击杀 {combat.total_kills}  金币 {combat.meso}  背包 {player.inventory.total_items()}",
-            (90, 96, 110))
-        surface.blit(info, (bx + bar.get_width() - 240 - info.get_width(), by + 10))
-
-        # 血条上方：生效中的 buff 技能图标 + 状态异常色块（带剩余秒数）
+        # 血条上方：生效中的 buff / 状态异常图标（灰蒙层表示剩余时间）
         self._draw_effect_icons(surface, player, bx, by)
 
         # 状态栏右上：技能 / 药水快捷栏（图标 + 键位 + 冷却遮罩 + 余量）
@@ -297,56 +291,75 @@ class UI:
     # ── 技能 / 药水快捷栏（状态栏右上方，常驻冷却与余量）────────────
     def _draw_hotbar(self, surface, player, bindings, bx: int, by: int,
                      bar_w: int) -> None:
+        self.hotbar_top = None
         if bindings is None:
             return
         from game.core.hotbar import build_hotbar
         slots = build_hotbar(player, bindings)
         if not slots:
             return
-        cell, gap = 30, 3
-        total_w = len(slots) * (cell + gap) - gap
+        frame = self._img("StatusBar.img", "QuickSlot/normal/0")
+        frame_d = self._img("StatusBar.img", "QuickSlot/disabled/0")
+        cell = frame.get_size() if frame is not None else (28, 20)
+        total_w = len(slots) * cell[0]
         x0 = bx + bar_w - total_w - 4
-        y0 = by - cell - 4
+        y0 = by - cell[1] - 13
+        self.hotbar_top = y0                  # 快捷栏顶边（供战斗日志避让）
         for s in slots:
-            rect = pygame.Rect(x0, y0, cell, cell)
-            pygame.draw.rect(surface, (16, 14, 10, 220), rect, border_radius=4)
-            pygame.draw.rect(surface, (120, 108, 80) if s.cooling
-                             else (180, 168, 120), rect, 1, border_radius=4)
+            rect = pygame.Rect(x0, y0, *cell)
+            if frame is not None:
+                surface.blit(frame_d if s.cooling and frame_d is not None
+                             else frame, rect.topleft)
+            else:                   # 素材缺失 → 旧自绘格
+                pygame.draw.rect(surface, (16, 14, 10, 220), rect, border_radius=4)
+                pygame.draw.rect(surface, (120, 108, 80) if s.cooling
+                                 else (180, 168, 120), rect, 1, border_radius=4)
             icon = (self.assets.skill_icon(s.ref_id) if s.kind == "skill"
                     else self.assets.item_icon(s.ref_id))
             if icon is not None:
-                if icon.get_width() > cell - 4:
-                    icon = pygame.transform.scale(icon, (cell - 4, cell - 4))
-                surface.blit(icon, (rect.centerx - icon.get_width() // 2,
-                                    rect.centery - icon.get_height() // 2))
+                side = min(icon.get_width(), icon.get_height(), cell[0] - 4)
+                if icon.get_width() != side or icon.get_height() != side:
+                    icon = pygame.transform.scale(icon, (side, side))
+                surface.blit(icon, (rect.centerx - side // 2,
+                                    rect.centery - side // 2))
             else:
                 glyph = self.font_small.render(
                     (s.name or s.label)[:1], True, (235, 230, 210))
                 surface.blit(glyph, (rect.centerx - glyph.get_width() // 2,
                                      rect.centery - glyph.get_height() // 2))
-            kt = self.font_tiny.render(s.label, True, (255, 233, 120))
-            surface.blit(kt, (rect.x + 2, rect.y - 11 if rect.y > 12 else rect.bottom + 1))
+            # 键位标签：StatusBar/key 贴片是烤死的多字母组合，与槽位绑定
+            # 无法对应 → 直接画实际按键名（白字黑边，居中于格下方）
+            kt = self.font_tiny.render(s.label, True, (255, 255, 255))
+            ks = self.font_tiny.render(s.label, True, (0, 0, 0))
+            kx = rect.x + (cell[0] - kt.get_width()) // 2
+            ky = rect.bottom + 1
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                surface.blit(ks, (kx + dx, ky + dy))
+            surface.blit(kt, (kx, ky))
             if s.kind == "item" and s.count is not None:
                 ct = self.font_tiny.render(str(s.count),
                                            True,
                                            (255, 120, 110) if s.count == 0
                                            else (235, 235, 235))
+                shadow = self.font_tiny.render(str(s.count), True, (0, 0, 0))
+                surface.blit(shadow, (rect.right - ct.get_width() - 1,
+                                      rect.bottom - ct.get_height() + 1))
                 surface.blit(ct, (rect.right - ct.get_width() - 2,
                                   rect.bottom - ct.get_height()))
             if s.cooling and s.cd_total > 0:
-                mask_h = int(cell * min(1.0, s.cd_remain / s.cd_total))
-                veil = pygame.Surface((cell, mask_h), pygame.SRCALPHA)
+                mask_h = int(cell[1] * min(1.0, s.cd_remain / s.cd_total))
+                veil = pygame.Surface((cell[0], mask_h), pygame.SRCALPHA)
                 veil.fill((10, 10, 14, 190))
                 surface.blit(veil, (rect.x, rect.y))
                 secs = self.font_tiny.render(
                     f"{s.cd_remain:.1f}", True, (255, 240, 200))
                 surface.blit(secs, (rect.centerx - secs.get_width() // 2,
                                     rect.centery - secs.get_height() // 2))
-            x0 += cell + gap
+            x0 += cell[0]
 
     # ── buff / 状态异常图标条（血条上方）──────────────────────────
     def _draw_effect_icons(self, surface, player, bx: int, by: int) -> None:
-        """绘制生效中的 buff 技能图标与状态异常色块，右下角标剩余秒数。"""
+        """绘制生效中的 buff/状态异常图标：剩余时间越少，灰蒙层从顶部渐涨。"""
         buffs = getattr(player, "buffs", None)
         statuses = getattr(player, "statuses", None)
         rows: List[Tuple[object, Optional[pygame.Surface], Tuple[int, int, int]]] = []
@@ -360,14 +373,9 @@ class UI:
                       "slow": (120, 180, 255)}
             labels = {"poison": "毒", "stun": "晕", "slow": "慢"}
             for s in statuses.active():
-                icon = pygame.Surface((28, 28), pygame.SRCALPHA)
                 color = colors.get(s.kind, (200, 200, 200))
-                pygame.draw.rect(icon, color, (2, 2, 24, 24), border_radius=4)
-                tag = self.font_small.render(labels.get(s.kind, "?"),
-                                             True, (20, 16, 10))
-                icon.blit(tag, (14 - tag.get_width() // 2,
-                                14 - tag.get_height() // 2))
-                rows.append((s, icon, color))
+                s.name = labels.get(s.kind, "?")
+                rows.append((s, None, color))
         if not rows:
             return
         x = bx
@@ -375,17 +383,43 @@ class UI:
         gap = 4
         for obj, icon, color in rows:
             if icon is None:
-                icon = pygame.Surface((28, 28), pygame.SRCALPHA)
-                pygame.draw.rect(icon, color, (2, 2, 24, 24), border_radius=4)
+                icon = self._buff_fallback_icon(obj, color)
             surface.blit(icon, (x, y))
-            secs = int(obj.remaining)
-            label = render_text(self.font_tiny, str(secs), (255, 255, 255))
-            surface.blit(label, (x + icon.get_width() - label.get_width(),
-                                 y + icon.get_height() - label.get_height()))
+            total = getattr(obj, "total", 0.0)
+            if total > 0:           # 剩余越少、灰蒙层从顶部压下越多
+                veil_h = int(icon.get_height()
+                             * max(0.0, min(1.0, 1.0 - obj.remaining / total)))
+                if veil_h > 0:
+                    veil = pygame.Surface((icon.get_width(), veil_h),
+                                          pygame.SRCALPHA)
+                    veil.fill((30, 30, 34, 170))
+                    surface.blit(veil, (x, y))
             x += icon.get_width() + gap
 
-    def draw_map_name(self, surface, name: str, y: int) -> None:
-        """右上角地图名名牌。y 由调用方给出（小地图可见时下移避让）。"""
+    def _buff_fallback_icon(self, obj, color) -> pygame.Surface:
+        """缺图标 buff 的替身：深色小牌 + 名称首字（不再画彩色方块）。"""
+        icon = pygame.Surface((28, 28), pygame.SRCALPHA)
+        pygame.draw.rect(icon, (22, 26, 36), (0, 0, 28, 28), border_radius=4)
+        pygame.draw.rect(icon, color, (0, 0, 28, 28), 1, border_radius=4)
+        name = getattr(obj, "name", "") or "?"
+        tag = self.font_small.render(name[:1], True, (235, 235, 240))
+        icon.blit(tag, (14 - tag.get_width() // 2, 14 - tag.get_height() // 2))
+        return icon
+
+    def draw_map_name(self, surface, name: str, y: int,
+                      band: Optional[pygame.Rect] = None) -> None:
+        """右上角地图名名牌。band 给出时（小地图九宫格顶带）：白字黑边居中。"""
+        if band is not None:
+            txt = self.font_small.render(name, True, (255, 255, 255))
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    if dx or dy:
+                        shadow = self.font_small.render(name, True, (0, 0, 0))
+                        surface.blit(shadow, (band.centerx - txt.get_width() // 2 + dx,
+                                              band.centery - txt.get_height() // 2 + dy))
+            surface.blit(txt, (band.centerx - txt.get_width() // 2,
+                               band.centery - txt.get_height() // 2))
+            return
         hit = self._plate_cache.get(name)
         if hit is None:
             txt = self.font_small.render(name, True, (255, 255, 255))

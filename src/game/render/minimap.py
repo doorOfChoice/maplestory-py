@@ -26,8 +26,10 @@ class MiniMap:
                  map_width: int, map_height: int,
                  mag: Optional[int] = None,
                  canvas: Optional[pygame.Surface] = None,
-                 map_surface: Optional[pygame.Surface] = None):
+                 map_surface: Optional[pygame.Surface] = None,
+                 assets=None):
         self.visible = True
+        self.assets = assets
         self.bounds = bounds
         self.map_width = map_width
         self.map_height = map_height
@@ -158,7 +160,37 @@ class MiniMap:
         self._draw_arrow(surface, panel.x + px, panel.y + py,
                          settings.MINIMAP_PLAYER_COLOR, down=False,
                          flip=facing_right)
-        pygame.draw.rect(surface, (200, 205, 215), panel, 1)
+        if not self._draw_frame(surface, panel):
+            pygame.draw.rect(surface, (200, 205, 215), panel, 1)
+
+    # ── 官方九宫格边框（UIWindow/MiniMap/MinMap）─────────────────────
+    def _draw_frame(self, surface, panel: pygame.Rect) -> bool:
+        """九宫格套边压在面板四缘上；缺素材返回 False 走线框回退。"""
+        if self.assets is None:
+            return False
+        from game.render.conv import ui_image
+        base = "MiniMap/MinMap"
+        parts = {k: ui_image(self.assets, "UIWindow.img", f"{base}/{k}")
+                 for k in ("nw", "n", "ne", "w", "e", "sw", "s", "se")}
+        if any(v is None for v in parts.values()):
+            return False
+        nw, ne, sw, se = parts["nw"], parts["ne"], parts["sw"], parts["se"]
+        side_w, top_h, bot_h = nw.get_width(), nw.get_height(), sw.get_height()
+        inner_w = max(1, panel.width - 2 * side_w)
+        mid_h = max(1, panel.height - top_h - bot_h)
+        surface.blit(nw, panel.topleft)
+        surface.blit(pygame.transform.scale(parts["n"], (inner_w, top_h)),
+                     (panel.x + side_w, panel.y))
+        surface.blit(ne, (panel.right - ne.get_width(), panel.y))
+        surface.blit(pygame.transform.scale(parts["w"], (side_w, mid_h)),
+                     (panel.x, panel.y + top_h))
+        surface.blit(pygame.transform.scale(parts["e"], (side_w, mid_h)),
+                     (panel.right - side_w, panel.y + top_h))
+        surface.blit(sw, (panel.x, panel.bottom - bot_h))
+        surface.blit(pygame.transform.scale(parts["s"], (inner_w, bot_h)),
+                     (panel.x + side_w, panel.bottom - bot_h))
+        surface.blit(se, (panel.right - se.get_width(), panel.bottom - bot_h))
+        return True
 
     def _draw_entities(self, surface, view_left: float, view_top: float,
                        panel: pygame.Rect, monsters: List, npcs: List) -> None:

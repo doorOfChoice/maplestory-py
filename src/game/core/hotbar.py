@@ -36,9 +36,10 @@ def build_hotbar(player, bindings) -> List[HotbarSlot]:
         return slots
     book = getattr(player, "skills", None)
     if book is not None:
+        levels = getattr(book, "levels", {})
         for n in range(1, SKILL_SLOT_COUNT + 1):
             sid = book.hotkeys.get(n)
-            if sid is None:
+            if sid is None or not levels.get(sid, 0):
                 continue
             key = bindings.slot_key(n)
             remain = float(book.cooldowns.get(sid, 0.0) or 0.0)
