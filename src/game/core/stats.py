@@ -125,7 +125,8 @@ def attack_range(stats: Mapping[str, int], pad: int, ranged: bool,
 def roll_damage(atk_lo: int, atk_hi: int, mult: float, mob_pd: int,
                 player_level: int, mob_level: int,
                 rng: random.Random, crit_rate: float = 0.0,
-                crit_mult: float = settings.CRIT_MULT) -> Tuple[int, bool]:
+                crit_mult: float = settings.CRIT_MULT,
+                elem_mult: float = 1.0) -> Tuple[int, bool]:
     """单次命中伤害（AyumiLove 经典物理公式）。
 
     :param atk_lo / atk_hi: 面板攻击区间（attack_range 的返回值）。
@@ -135,12 +136,13 @@ def roll_damage(atk_lo: int, atk_hi: int, mult: float, mob_pd: int,
     :param rng: 注入的随机数发生器（可复现）。
     :param crit_rate: 暴击率（%）。
     :param crit_mult: 暴击伤害倍率（默认 settings.CRIT_MULT，被霸王箭等覆盖）。
+    :param elem_mult: 属性克制倍率（弱点 1.5 / 抵抗 0.5 / 免疫 0，默认 1.0）。
     :return: (实际伤害, 是否暴击)；伤害下限 1。
     """
     d = max(0, mob_level - player_level)
     mult_fall = max(0.0, 1.0 - 0.01 * d)
-    hi = atk_hi * mult * mult_fall - mob_pd * 0.5
-    lo = atk_lo * mult * mult_fall - mob_pd * 0.6
+    hi = atk_hi * mult * mult_fall * elem_mult - mob_pd * 0.5
+    lo = atk_lo * mult * mult_fall * elem_mult - mob_pd * 0.6
     raw = rng.uniform(min(lo, hi), max(lo, hi))
     dmg = max(1, int(raw))
     crit = crit_rate > 0 and rng.random() * 100.0 < crit_rate

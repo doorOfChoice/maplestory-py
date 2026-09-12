@@ -69,6 +69,12 @@ def roll_damage(base: int) -> int:
     return max(1, int(round(base * random.uniform(0.9, 1.1))))
 
 
+def elem_multiplier_of(mob, element) -> float:
+    """取怪物对某元素的克制倍率；无该接口的合成目标回退 1.0。"""
+    fn = getattr(mob, "element_multiplier", None)
+    return fn(element) if callable(fn) else 1.0
+
+
 class DamageNumber:
     """官方样式伤害飘字：Effect.wz/BasicEff.img 的 NoRed/NoViolet/NoBlue 像素数字。
 
@@ -282,7 +288,9 @@ class Arrow:
                  atk_lo: Optional[int] = None, atk_hi: Optional[int] = None,
                  mult: float = 1.0, crit_rate: float = 0.0,
                  crit_mult: float = settings.CRIT_MULT, player_level: int = 0,
-                 attack_count: int = 1, magic: bool = False):
+                 attack_count: int = 1, magic: bool = False,
+                 element: str = "", poison_prop: int = 0,
+                 poison_time: float = 0.0, poison_level: int = 0):
         self.x = x
         self.y = y
         self.vx = vx
@@ -303,6 +311,10 @@ class Arrow:
         self.player_level = player_level
         self.attack_count = max(1, attack_count)
         self.magic = magic                # 魔法攻击改用怪 mdd 而非 pd 减伤
+        self.element = element            # 技能元素（属性克制）
+        self.poison_prop = poison_prop    # 命中中毒概率（%）
+        self.poison_time = poison_time    # 中毒持续秒数
+        self.poison_level = poison_level  # 毒雾术技能等级（毒伤 = maxHP/(70-lv)）
         self.age = 0.0
         self.hit_ids: set = set()
         self.dead = False
@@ -320,7 +332,8 @@ class Arrow:
         return stats_mod.roll_damage(
             self.atk_lo, self.atk_hi, self.mult, mob_pd,
             self.player_level, mob.level, rng,
-            self.crit_rate, self.crit_mult)
+            self.crit_rate, self.crit_mult,
+            elem_mult=elem_multiplier_of(mob, self.element))
 
     def update(self, dt: float, monsters, combat, player=None) -> None:
         if self.dead:
@@ -349,6 +362,13 @@ class Arrow:
                         use_origin=True,
                         flip=self.vx > 0))
                 combat.preferred_mob = mob
+                # 魔力吸收（弹道魔法也触发）；毒雾术按 prop 概率中毒
+                if self.magic and player is not None:
+                    combat._absorb_mp(player, mob)
+                if self.poison_prop > 0 and self.poison_time > 0 \
+                        and hasattr(mob, "apply_poison") \
+                        and combat.rng.random() * 100 < self.poison_prop:
+                    combat._apply_poison(mob, self.poison_time, self.poison_level)
                 for _ in range(self.attack_count):
                     dmg, crit = self._roll(mob, combat.rng)
                     combat.numbers.append(DamageNumber(
@@ -477,6 +497,9 @@ class Combat:
         if skill and skill.get("form") == "mob_status":
             self._cast_mob_status(player, skill, monsters)
             return
+        if skill and skill.get("form") == "heal":
+            self._cast_heal(player, skill, monsters)
+            return
         if skill and skill.get("cone_attack"):
             targets = self._instant_magic_targets(player, skill, monsters)
         else:
@@ -486,6 +509,7 @@ class Combat:
                 targets.sort(key=lambda m: (m.x - cx) ** 2 + (m.cy - cy) ** 2)
                 targets = targets[:max(1, skill["mob_count"])]
         magic = bool(skill.get("magic")) if skill else False
+        element = skill.get("element", "") if skill else ""
         if magic:
             atk_lo, atk_hi = player.magic_attack_range(
                 skill.get("skill_mad", 0), skill.get("skill_mastery", 0))
@@ -520,7 +544,8 @@ class Combat:
                 dmg, crit = stats_mod.roll_damage(
                     atk_lo, atk_hi, mult, mob_pd,
                     player_level, mob.level, random,
-                    crit_rate, crit_mult)
+                    crit_rate, crit_mult,
+                    elem_mult=elem_multiplier_of(mob, element))
                 self.numbers.append(DamageNumber(
                     mob.x, mob.cy - mob.sprite_h, dmg,
                     "violet" if crit else "red", big=crit))
@@ -545,25 +570,89 @@ class Combat:
             if hasattr(mob, "apply_slow"):
                 mob.apply_slow(mult, skill.get("duration", 0.0))
 
-    def _absorb_mp(self, player: Combatant, mob: CombatTarget) -> None:
-        """魔力吸收(2200000)：魔法命中时按技能等级 prop/x 吸怪 MP 回蓝。
+    def _cast_heal(self, player, skill: dict,
+                   monsters: List[CombatTarget]) -> None:
+        """群体治愈：先回自身血（maxHP × hp%，旧版按队伍人数分摊，单机=100%），
+        再对 lt/rb 范围内**不死系**怪物造成魔法伤害（HeavenMS v83 公式）。"""
+        heal_pct = int(skill.get("heal_pct", 0))
+        if heal_pct > 0:
+            heal = int(player.max_hp * heal_pct / 100.0)
+            player.hp = min(player.max_hp, player.hp + heal)
+        # 不死系伤害：Max = round((INT*4.8 + LUK*4) × Magic / 1000) × hp%
+        stats = player.total_stats() if hasattr(player, "total_stats") else {}
+        int_total = int(stats.get("int", 0))
+        luk = int(getattr(player, "luk", 0))
+        magic = player.magic_attack_value() if hasattr(
+            player, "magic_attack_value") else 0
+        base = int(round((int_total * 4.8 + luk * 4) * magic / 1000.0))
+        hi = max(1, base * heal_pct // 100)
+        lo = max(1, int(hi * 0.7))
+        hit_frames = self.assets.skill_hit_frames(skill["id"])
+        for mob in self._instant_magic_targets(player, skill, monsters):
+            if getattr(mob, "dead", False) or not getattr(mob, "undead", False):
+                continue
+            if hit_frames:
+                self.effects.append(Effect(
+                    hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45,
+                    use_origin=True, flip=player.facing_right))
+            self.preferred_mob = mob
+            dmg, crit = stats_mod.roll_damage(
+                lo, hi, 1.0, mob.mdd, player.level, mob.level, random,
+                player.crit_rate(), player.crit_mult(), elem_mult=1.0)
+            self.numbers.append(DamageNumber(
+                mob.x, mob.cy - mob.sprite_h, dmg, "violet" if crit else "red",
+                big=crit))
+            if mob.take_hit(dmg, from_x=player.x):
+                self._on_kill(player, mob)
 
-        纯被动（不可落键施放），只在玩家已学该技能且怪仍有 MP 时生效；
-        概率 prop（%），吸收量 x 不超过怪当前 MP，回蓝不超过自身上限。
+    def _apply_poison(self, mob: CombatTarget, seconds: float,
+                      level: int) -> None:
+        """毒雾术中毒：毒伤/秒 = maxHP/(70-技能等级)（旧版公式），持续 time 秒。"""
+        if level <= 0 or seconds <= 0:
+            return
+        dps = int(math.ceil(mob.max_hp / (70.0 - level)))
+        if dps > 0:
+            mob.apply_poison(dps, seconds)
+
+    def tick_mob_status(self, player, monsters: List[CombatTarget]) -> None:
+        """结算怪物身上的持续伤害（中毒）：入账飘字、判死、给经验与掉落。"""
+        for mob in monsters:
+            if getattr(mob, "dead", False):
+                continue
+            pending = int(getattr(mob, "poison_pending", 0) or 0)
+            if pending <= 0:
+                continue
+            mob.poison_pending = 0
+            self.numbers.append(DamageNumber(
+                mob.x, mob.cy - mob.sprite_h, pending, "violet"))
+            if mob.take_dot(pending):
+                self._on_kill(player, mob)
+
+    def _absorb_mp(self, player: Combatant, mob: CombatTarget) -> None:
+        """魔力吸收（2100000/2200000/2300000）：魔法命中时按技能等级吸怪 MP 回蓝。
+
+        纯被动（不可落键施放），只在玩家已学该技能、怪非 boss 且仍有 MP 时生效；
+        概率 prop（%），吸收量 = 怪最大 MP × x%（旧版公式），不超过其当前 MP。
         """
         skills = getattr(player, "skills", None)
         if skills is None:
             return
-        level = skills.levels.get("2200000", 0)
-        d = skills.defs.get("2200000")
-        if level <= 0 or d is None:
+        learned = next((sid for sid in ("2100000", "2200000", "2300000")
+                        if skills.levels.get(sid, 0) > 0), None)
+        if learned is None or getattr(mob, "boss", False):
+            return
+        level = skills.levels[learned]
+        d = skills.defs.get(learned)
+        if d is None:
             return
         mob_mp = getattr(mob, "mp", 0)
         if mob_mp <= 0:
             return
         prop = d.stat(level, "prop", 0)
-        amount = min(d.stat(level, "x", 0), mob_mp)
-        if prop <= 0 or amount <= 0 or random.random() * 100 >= prop:
+        if prop <= 0 or self.rng.random() * 100 >= prop:
+            return
+        amount = min(int(mob.max_mp * d.stat(level, "x", 0) / 100.0), int(mob_mp))
+        if amount <= 0:
             return
         mob.mp = mob_mp - amount
         player.mp = min(player.max_mp, player.mp + amount)
@@ -712,7 +801,11 @@ class Combat:
                 atk_lo=atk_lo, atk_hi=atk_hi, mult=mult,
                 crit_rate=crit_rate, crit_mult=crit_mult,
                 player_level=player_level, attack_count=attack_count,
-                magic=magic))
+                magic=magic,
+                element=skill_data.get("element", "") if skill_data else "",
+                poison_prop=skill_data.get("poison_prop", 0) if skill_data else 0,
+                poison_time=skill_data.get("poison_time", 0.0) if skill_data else 0.0,
+                poison_level=int(skill_data.get("level", 0)) if skill_data else 0))
 
     def update_arrows(self, dt: float, monsters, player=None) -> None:
         for a in self.arrows:
@@ -808,6 +901,12 @@ class Combat:
             guard = player.magic_defense_value() if hit.get("magic") \
                 else player.defense_value()
             amount = max(1, int(hit["amount"] * 100.0 / (100 + guard)))
+            if not hit.get("magic"):
+                # 神之保护：物理伤害按 buff dmg_reduce% 减免（仅物理，魔法无效）
+                reduce = player.physical_damage_reduce() \
+                    if hasattr(player, "physical_damage_reduce") else 0
+                if reduce > 0:
+                    amount = max(1, int(amount * (100 - min(100, reduce)) / 100))
             player.take_attack_damage(amount)
             self.numbers.append(DamageNumber(
                 player.x, player.y - 40, amount, "red"))

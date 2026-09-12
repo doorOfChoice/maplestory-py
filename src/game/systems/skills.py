@@ -66,7 +66,8 @@ class SkillDef:
                  char_level: int = 0, invisible: bool = False,
                  repeat: bool = False, has_ball: bool = False,
                  has_hit: bool = False, has_mob_icon: bool = False,
-                 action: str = "", helps: Optional[Dict[int, str]] = None):
+                 action: str = "", helps: Optional[Dict[int, str]] = None,
+                 element: str = ""):
         self.id = skill_id
         self.name = name
         self.desc = desc
@@ -80,6 +81,7 @@ class SkillDef:
         self.has_hit = has_hit              # WZ 带 hit 节点：攻击技（time 可能是状态时长）
         self.has_mob_icon = has_mob_icon    # WZ 带 mob 节点：对怪上状态（debuff）
         self.action = action                # WZ action 节点：官方施法动作名
+        self.element = element              # WZ elemAttr：技能元素字母（f/i/l/s/h/d）
         self.helps = dict(helps) if helps else {}   # 级别 → WZ 逐级说明（hs→String.wz hN）
 
     def lv(self, level: int) -> dict:
@@ -138,12 +140,14 @@ def cast_form(d: "SkillDef", level: int) -> str:
 
     判定优先级由「WZ 顶层节点 + level 字段」共同决定：
     · passive    —— 已登记被动（skill_effects 语义表，结构无法判定），不可落键
+    · heal       —— 已登记治愈技（群体治愈），回血 + 对不死系伤害，非普通攻击
+    · teleport   —— 已登记瞬移技（快速移动），按方向键位移，非攻击
     · buff       —— 有 time 且无攻击属性（魔法盾/精神力/无形箭…），扣消耗直接上 buff
     · projectile —— 有 ball 节点（魔法弹/火焰箭/圣箭术…），生成弹道
     · instant    —— 有 hit 或带伤害标记（魔法双击/冰冻术/武器攻击），瞬发命中
     · aoe        —— instant 且带 lt/rb（雷电术/箭雨），按自身矩形结算
     · mob_status —— 有 mob 节点且无伤害（缓速术/击退箭），对怪上状态无伤害
-    · unsupported—— 无任何施放标记（快速移动只有 range），需专用输入，暂不可施放
+    · unsupported—— 无任何施放标记（仅有 range/time 等无法独立成形的字段），暂不可施放
     """
     if level <= 0:
         level = 1
@@ -152,6 +156,10 @@ def cast_form(d: "SkillDef", level: int) -> str:
         return "projectile"                     # 蜗牛投掷：借怪物贴图发射弹道
     if skill_effects.is_passive(sid):
         return "passive"
+    if sid in skill_effects.HEAL_SKILLS:
+        return "heal"
+    if sid in skill_effects.TELEPORT_SKILLS:
+        return "teleport"
     if skill_buff_seconds(d, level) > 0:
         return "buff"
     if d.has_ball:
@@ -234,6 +242,11 @@ def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
                 act_node = node.get("action/0")
                 if act_node is not None:
                     action = str(getattr(act_node, "value", "") or "")
+                # WZ elemAttr：技能元素（小写单字符 f/i/l/s/h/d），供属性克制结算
+                element = ""
+                elem_node = node.get("elemAttr")
+                if elem_node is not None:
+                    element = str(getattr(elem_node, "value", "") or "").strip().lower()
                 name, desc = f"技能 {sid}", ""
                 help_by_key: Dict[str, str] = {}
                 if s_root is not None:
@@ -258,7 +271,7 @@ def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
                                      invisible=invisible, repeat=repeat,
                                      has_ball=has_ball, has_hit=has_hit,
                                      has_mob_icon=has_mob_icon, action=action,
-                                     helps=helps)
+                                     helps=helps, element=element)
     except Exception:
         pass
     return defs
@@ -462,21 +475,29 @@ class SkillBook:
             "repeat": d.repeat,                  # 通道技：按住可连发
             "action": d.action,                  # WZ action：官方施法动作名
             "magic": magic,                      # 魔法伤害走 mdd 与魔法区间
+            "element": d.element,                # WZ elemAttr：属性克制元素字母
             "skill_mad": d.stat(lv, "mad", 0),
             "skill_mastery": d.stat(lv, "mastery", 0),
             # WZ lt/rb 矩形（相对 navel）：AOE 自身范围 / mob_status debuff 范围
             "area": None,
             "status": None,                      # mob_status 的状态键（slow/freeze…）
             "freeze": 0.0,                       # 命中冻结秒数（冰冻术）
+            "poison_prop": 0,                    # 中毒概率 %（毒雾术）
+            "poison_time": 0.0,                  # 中毒持续秒数（毒雾术）
             "slow_x": 0,                          # 减速幅度（% 负值，缓速术）
             "duration": 0.0,                      # debuff 持续秒数
+            "heal_pct": 0,                        # 治愈恢复率 %（群体治愈）
         }
-        if form in ("aoe", "mob_status") and _has_area(d, lv):
+        if form in ("aoe", "mob_status", "heal") and _has_area(d, lv):
             data["area"] = (tuple(d.lv(lv)["lt"]), tuple(d.lv(lv)["rb"]))
         if form == "mob_status":
             data["status"] = skill_effects.DEBUFF_SKILLS.get(skill_id)
             data["slow_x"] = d.stat(lv, "x", 0)
             data["duration"] = float(d.stat(lv, "time", 0))
+        elif form == "heal":
+            data["heal_pct"] = d.stat(lv, "hp", 0)     # 恢复率（%），对不死系同作伤害倍率
+        elif form == "teleport":
+            pass                                        # range 已在通用字段（瞬移距离）
         elif form == "projectile":
             data["projectile"] = True                  # 弹道技：不进近战命中框
             if skill_id == settings.SNAIL_THROW_SKILL_ID:
@@ -489,9 +510,13 @@ class SkillBook:
             # 无 ball 的魔法攻击（魔法双击/冰冻术/雷电术）：瞬发、无弹道。
             # WZ 带 lt/rb 的按角色周围矩形结算（雷电术自身 AOE），否则命中瞄准扇形。
             data["cone_attack"] = True
-        if form in ("instant", "aoe", "projectile") \
-                and skill_effects.ATTACK_STATUS.get(skill_id) == "freeze":
-            data["freeze"] = float(d.stat(lv, "time", 0))
+        if form in ("instant", "aoe", "projectile"):
+            status = skill_effects.ATTACK_STATUS.get(skill_id)
+            if status == "freeze":
+                data["freeze"] = float(d.stat(lv, "time", 0))
+            elif status == "poison":
+                data["poison_prop"] = d.stat(lv, "prop", 0)
+                data["poison_time"] = float(d.stat(lv, "time", 0))
         return data
 
     def start_cooldown(self, skill_id: str, cooldown_ms: int = 0) -> None:

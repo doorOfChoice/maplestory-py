@@ -542,6 +542,16 @@ class Game:
         if player.mp < data["mp_con"]:
             self.ctx.windows.flash(f"{name}：MP 不足（需 {data['mp_con']}）")
             return
+        if data.get("form") == "teleport":
+            # 快速移动：按方向键（↑/↓）或朝向水平瞬移 range px，不进入攻击流程。
+            # 位移失败（如无可落平台/落点是无底深渊）则原地不动、不扣 MP、不写冷却。
+            if player.teleport(data.get("range", 0), self.ctx.world.physics,
+                               up=self.keys.up and not self.keys.down,
+                               down=self.keys.down and not self.keys.up):
+                player.mp -= data["mp_con"]
+                player.skills.start_cooldown(sid, data.get("cooldown_ms", 0))
+                self.ctx.audio.play_skill_cast(sid, player.equips)
+            return
         if not player.start_attack(data):
             return
         if not data.get("repeat"):

@@ -109,6 +109,52 @@ def test_magician_advance_grants_wand_and_magic_range():
 
 
 @needs_wz
+def test_magician_second_job_semantics_from_wz():
+    """真实 WZ：技能元素、群体治愈恢复率、毒雾术中毒、神之保护减伤、
+    怪物 elemAttr/undead 均按 WZ 字段解析。"""
+    pygame.init()
+    pygame.display.set_mode((8, 8))
+    from game.render.assets import Assets
+    from game.core import skill_effects
+    from game.systems.skills import SkillBook, load_skill_defs
+    assets = Assets(settings.TRAINER_SPAWN_MAP)
+    try:
+        ids = ["2101002", "2101003", "2101004", "2101005",
+               "2201004", "2201005", "2301002", "2301003", "2301005"]
+        defs = load_skill_defs(assets, ids)
+        assert defs["2101004"].element == "f"      # 火焰箭
+        assert defs["2101005"].element == "s"      # 毒雾术
+        assert defs["2201004"].element == "i"      # 冰冻术
+        assert defs["2201005"].element == "l"      # 雷电术
+        assert defs["2301005"].element == "h"      # 圣箭术
+
+        # 群体治愈：恢复率取 level.hp；毒雾术：prop% 概率中毒 time 秒
+        book = SkillBook(assets, 2300, defs=defs)
+        book.add_sp(230, 10)
+        book.learn("2301002", 120)
+        heal = book.cast("2301002", 120)
+        assert heal["form"] == "heal" and heal["heal_pct"] == 10 and heal["area"]
+        # 神之保护：x=物理减伤%，登记进 dmg_reduce
+        d = defs["2301003"]
+        assert skill_effects.buff_mods(
+            "2301003", lambda k: d.stat(d.max_level, k, 0)) == {"dmg_reduce": 30}
+
+        fire = SkillBook(assets, 2100, defs=defs)
+        fire.add_sp(210, 10)
+        assert fire.learn("2101005", 120)
+        poison = fire.cast("2101005", 120)
+        assert poison["poison_prop"] == 31 and poison["poison_time"] == 4.0
+        assert poison["element"] == "s" and poison["magic"] is True
+        # 缓速术（火毒）同 冰雷 一样登记为 slow
+        assert skill_effects.DEBUFF_SKILLS.get("2101003") == "slow"
+
+        # 怪物属性：菇菇寶貝 弱火（F3）、不死系标记来自 info/undead
+        assert assets.mob_info("0130100")["stats"].get("elemAttr") == "F3"
+    finally:
+        assets.close()
+
+
+@needs_wz
 def test_bowman_second_third_job_trees_load():
     """2/3/4 转（猎人/神射手/弓手大师）技能树自 WZ 正常加载，转职附赠被动满级生效。"""
     pygame.init()
@@ -184,7 +230,7 @@ def test_thunder_bolt_exposes_wz_area_box():
 @needs_wz
 def test_magician_second_support_skills_wired_to_wz():
     """真实 220.img：冰冻术判为魔法攻击+冻结、缓速术判为减速 debuff、
-    魔力吸收为被动、快速移动从技能窗剔除且不阻塞缓速术前置。"""
+    魔力吸收为被动、快速移动为已实装瞬移且作为缓速术前置受门控。"""
     pygame.init()
     pygame.display.set_mode((8, 8))
     from game.render.assets import Assets
@@ -196,13 +242,17 @@ def test_magician_second_support_skills_wired_to_wz():
         assert "2201002" in skill_ids_for_job(assets, 2200)
         assert skill_effects.is_passive("2200000")
         book = SkillBook(assets, 2200)
-        assert "2201002" not in book.skills_for_group(220)
-        assert "2201002" not in book.learnable()
-        book.add_sp(220, 10)
+        assert "2201002" in book.skills_for_group(220)   # 快速移动已实装，进技能窗
+        assert "2201002" in book.learnable()
+        book.add_sp(220, 20)
         assert book.learn("2201004", 120)
         cold = book.cast("2201004", 120)
         assert cold["magic"] is True and cold["freeze"] == 1.0
-        assert book.learn("2201003", 120)          # 前置 2201002 被豁免
+        # 缓速术前置 快速移动≥5：未点前置不可学
+        assert book.learn("2201003", 120) is False
+        for _ in range(5):
+            assert book.learn("2201002", 120)
+        assert book.learn("2201003", 120)
         slow = book.cast("2201003", 120)
         assert slow["form"] == "mob_status" and slow["status"] == "slow"
         assert slow["slow_x"] < 0 and slow["area"]
@@ -235,19 +285,19 @@ def test_magician_cast_form_derived_from_wz_structure():
         assert form("2101004") == "projectile" and defs["2101004"].action == "shoot1"
         assert form("2101003") == "mob_status"
         assert form("2200000") == "passive"
-        assert form("2201002") == "unsupported"          # 只有 range
+        assert form("2201002") == "teleport"             # 只有 range
         assert form("2201003") == "mob_status"           # mob 节点
         assert form("2201004") == "instant"              # hit + time(冻结)
         assert form("2201005") == "aoe"                  # hit + lt/rb
         assert form("2301005") == "projectile"
 
-        # 快速移动（快速移动 2101002/2201002/2301001）三系均不在技能窗
-        for job, group, unsupported in ((2100, 210, "2101002"),
-                                        (2200, 220, "2201002"),
-                                        (2300, 230, "2301001")):
+        # 快速移动（2101002/2201002/2301001）三系均已实装并进技能窗
+        for job, group, sid in ((2100, 210, "2101002"),
+                                (2200, 220, "2201002"),
+                                (2300, 230, "2301001")):
             book = SkillBook(assets, job)
-            assert unsupported not in book.skills_for_group(group)
-            assert unsupported not in book.learnable()
+            assert sid in book.skills_for_group(group)
+            assert sid in book.learnable()
     finally:
         assets.close()
 

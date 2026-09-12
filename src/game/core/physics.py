@@ -210,6 +210,33 @@ class Physics:
                 best, best_d = f, d
         return best
 
+    def teleport_vertical_surface(self, x: float, feet: float,
+                                  distance: float,
+                                  up: bool = True) -> Optional[Foothold]:
+        """瞬移垂直落点：距脚底 distance 内、最贴近脚底的水平面。
+
+        up=True 取脚底上方最近（y 最大），否则取下方最近（y 最小）。层不参与
+        筛选——链可以在 layer 间穿行，同高的前后景平台也是可行走地面（与
+        grounded_surface 的层无关语义一致）。range 内没有平台则返回 None，
+        调用方原地不动，避免穿墙或掉出世界。"""
+        best: Optional[Foothold] = None
+        best_y: Optional[float] = None
+        for f in self.footholds:
+            if f.x1 == f.x2 or not f.covers(x):
+                continue
+            y_a = f.y_at(x)
+            if up:
+                if not (feet - distance <= y_a <= feet - 1.0):
+                    continue
+                closer = best_y is None or y_a > best_y
+            else:
+                if not (feet + 1.0 <= y_a <= feet + distance):
+                    continue
+                closer = best_y is None or y_a < best_y
+            if closer:
+                best, best_y = f, y_a
+        return best
+
     def top_landing(self, x: float, feet: float,
                     max_rise: float = 34.0) -> Optional[Foothold]:
         """绳/梯顶端出绳：找 x 处位于脚底上方 max_rise 内（或平齐）的支撑面，
@@ -368,6 +395,35 @@ class Physics:
         if self.vr_left is None:
             return x
         return min(max(x, self.vr_left), self.vr_right)
+
+    def has_ground_below(self, x: float, feet: float) -> bool:
+        """x 处脚底及以下是否还有可行走面（落点兜底：判定是否为无底深渊）。"""
+        return any(f.x1 != f.x2 and f.covers(x) and f.y_at(x) >= feet - 1.0
+                   for f in self.footholds)
+
+    def wall_overlap_clamp(self, x: float, feet: float, direction: int,
+                           layer: Optional[int] = None) -> float:
+        """把已嵌入阻挡墙的身体沿来向推到墙外（瞬移落点兜底）。
+
+        步进中的 wall_block 允许链接台阶豁免（爬楼梯），个别地图里与链续段
+        同高的实体墙会被误豁免而穿进去。此处在落点按「来向」把身体推回近侧
+        墙面外：右行取最左的重叠墙左面，左行取最右的右面。"""
+        chains, _ = self._layer_chains(layer)
+        r = settings.PLAYER_BODY_HALF_W
+        hit: Optional[float] = None
+        for w in chains:
+            if not self._blocks(w, feet):
+                continue
+            if not (w.x - r < x < w.x + r):
+                continue
+            cand = w.x - r if direction >= 0 else w.x + r
+            if hit is None:
+                hit = cand
+            elif direction >= 0:
+                hit = min(hit, cand)
+            else:
+                hit = max(hit, cand)
+        return self._vr_clamp(x if hit is None else hit)
 
     def touching_wall(self, x: float, feet_y: float, direction: int,
                       layer: Optional[int] = None) -> Optional[float]:

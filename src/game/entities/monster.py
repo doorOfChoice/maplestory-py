@@ -15,6 +15,7 @@ import pygame
 
 from game import settings
 from game.core.animation import Animation
+from game.core import elements
 from game.render.assets import Assets
 from game.systems.combat import roll_damage
 from game.systems.drops import scaled_equip_rate
@@ -91,6 +92,9 @@ class Monster:
                               settings.MOB_SPEED_MAX)
         self._raw_move_speed = raw
         self.boss = bool(stats.get("boss"))
+        self.undead = bool(stats.get("undead"))     # 不死系：群体治愈对其造成伤害
+        # 属性克制表：元素字母小写 → 1=免疫 / 2=抵抗 / 3=弱点（WZ info/elemAttr）
+        self.elem = elements.parse_elem_attr(stats.get("elemAttr"))
         self.drops = info.get("drops") or []
         # WZ info 行为字段
         self.body_attack = bool(stats.get("bodyAttack", 1))
@@ -123,10 +127,14 @@ class Monster:
         self.hit_flash = 0.0
         self.hp_bar_timer = 0.0    # 受击后脚下血条剩余显示时长
         self.attack_cooldown = 0.0
-        # 玩家技能施加的异常：减速倍率 / 冻结（移速归零、不接触攻击）
+        # 玩家技能施加的异常：减速倍率 / 冻结（移速归零、不接触攻击）/ 中毒
         self.slow_mult = 1.0
         self.slow_timer = 0.0
         self.frozen_timer = 0.0
+        self.poison_dps = 0.0        # 每秒中毒伤害（毒雾术：maxHP/(70-lv)）
+        self.poison_timer = 0.0
+        self.poison_pending = 0.0    # 本帧累积待结算的中毒伤害（世界层取走）
+        self._poison_acc = 0.0
         self.dead = False
         self.remove_after = 0.0
         self._death_sound_played = False
@@ -235,6 +243,28 @@ class Monster:
         if seconds > 0:
             self.frozen_timer = max(self.frozen_timer, seconds)
 
+    def apply_poison(self, dps: float, seconds: float) -> None:
+        """中毒：每秒扣 dps 点（无视防御），持续 seconds；重复取更强/更长。"""
+        if seconds > 0 and dps > 0:
+            self.poison_dps = max(self.poison_dps, dps)
+            self.poison_timer = max(self.poison_timer, seconds)
+
+    def element_multiplier(self, skill_element) -> float:
+        """技能元素对自身的伤害倍率（弱点 1.5 / 抵抗 0.5 / 免疫 0）。"""
+        return elements.element_multiplier(self.elem, skill_element)
+
+    def take_dot(self, damage: int) -> bool:
+        """持续伤害（中毒）：只扣血 + 闪白，不硬直、不击退、不触发仇恨。"""
+        if self.dead or damage <= 0:
+            return False
+        self.hp -= damage
+        self.hit_flash = 0.15
+        self.hp_bar_timer = settings.MOB_HP_BAR_TTL
+        if self.hp <= 0:
+            self.die()
+            return True
+        return False
+
     def speed_now(self) -> float:
         """当前有效移速：冻结为 0，减速按倍率缩放（含飞行怪）。"""
         if self.frozen_timer > 0:
@@ -276,6 +306,15 @@ class Monster:
                 self.slow_mult = 1.0
         if self.frozen_timer > 0:
             self.frozen_timer -= dt
+        # 中毒：按 POISON_TICK 结算，伤害累积到 poison_pending 交世界层入账
+        if self.poison_timer > 0:
+            self.poison_timer -= dt
+            self._poison_acc += dt
+            while self._poison_acc >= settings.POISON_TICK:
+                self._poison_acc -= settings.POISON_TICK
+                self.poison_pending += int(self.poison_dps)
+            if self.poison_timer <= 0:
+                self.poison_dps = 0.0
 
         # 回蓝（异常技能按 mpCon 耗蓝）
         if self.max_mp > 0 and self.mp < self.max_mp and self.mp_recovery > 0:

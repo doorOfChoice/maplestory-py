@@ -11,7 +11,7 @@ WZ 的 level 表字段语义随技能而异，无法用一张表覆盖全部：
   mdef(魔防)、acc(命中)、eva(回避)、range(射程 px)。
 · buff 的平坦命中/回避用 acc_flat/eva_flat：特效药已占用 acc/eva 表百分比。
 · 百分比：speed/jump（面板移速/跳跃）、crit（暴击率）、crit_mult（暴伤）、
-  stat_pct（四维全属性）、mastery（熟练度百分点）。
+  stat_pct（四维全属性）、mastery（熟练度百分点）、dmg_reduce（物理伤害减免%）。
 · mp_regen：MP 自然回复加成（单位 0.1/s，玩家 mp_regen() 换算）。
 """
 
@@ -45,6 +45,7 @@ _BUFF_OVERRIDES: Dict[str, Dict[str, str]] = {
     "3121006": {},   # 召喚鳳凰：pad 为召唤物攻击，非玩家增益
     "3121007": {},   # 牽制射擊：debuff 技，非自身 buff
     "2001002": {"magic_guard": "x"},   # 魔法盾：x=伤害转 MP 比例
+    "2301003": {"dmg_reduce": "x"},    # 神之保护：x=物理伤害减免 %（仅物理）
     # 魔法铠甲(2001003) 走通用字段 pdd→def，无需覆盖
 }
 
@@ -52,14 +53,23 @@ _BUFF_OVERRIDES: Dict[str, Dict[str, str]] = {
 # 伤害型攻击命中后施加的状态：技能 id → 状态键（持续秒数取 level 的 time）。
 ATTACK_STATUS: Dict[str, str] = {
     "2201004": "freeze",   # 冰冻术：命中冻结 time 秒
+    "2101005": "poison",   # 毒雾术：prop% 概率中毒 time 秒
 }
 
 # 怪物 debuff 技：技能 id → 状态键。施放形态由 WZ 的 mob 节点推导（见 skills.cast_form），
 # 本表只负责「哪一种状态」这一 WZ 无法表达的语义。不进入伤害结算，
 # 按 lt/rb 范围选最多 mobCount 只目标施加（减速幅度取 level 的 x，负=减速）。
 DEBUFF_SKILLS: Dict[str, str] = {
-    "2201003": "slow",     # 缓速术
+    "2101003": "slow",     # 缓速术（火毒）
+    "2201003": "slow",     # 缓速术（冰雷）
 }
+
+# 群体治愈：WZ 有 hit 节点但无伤害字段，靠 hp（恢复率%）与 undead 标记决定效果，
+# 形态与常规 AOE 不同，单独登记（见 combat._cast_heal）。
+HEAL_SKILLS = {"2301002"}
+
+# 快速移动（瞬移）：WZ 仅有 range/mpCon，靠方向键瞬移一段距离，形态需专用输入。
+TELEPORT_SKILLS = {"2101002", "2201002", "2301001"}
 
 
 # ── 被动逐技能声明（mod 键 → WZ 字段）────────────────────────────────
@@ -74,7 +84,9 @@ _PASSIVE_FIELDS: Dict[str, Dict[str, str]] = {
     "3120005": {"mastery": "mastery", "acc": "x"},        # 弓術精通
     "2000001": {"mp": "x"},                       # 魔力强化：x=MaxMP 提升
     "2000000": {"mp_regen": "mp_regen"},          # 魔力恢复：合成表（WZ 无数值），提升自然回蓝
-    "2200000": {},                                # 魔力吸收：命中回蓝在 combat._absorb_mp 特判
+    "2100000": {},                                # 魔力吸收（火毒）：命中吸怪 MP，combat._absorb_mp
+    "2200000": {},                                # 魔力吸收（冰雷）：同上
+    "2300000": {},                                # 魔力吸收（牧师）：同上
 }
 
 # 未登记被动的通用回退字段（平坦键，不使用 x/y/prop/damage 等歧义字段）

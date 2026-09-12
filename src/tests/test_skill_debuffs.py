@@ -16,14 +16,18 @@ class _Mob:
     eva = 0
     dead = False
     exp = 0
+    boss = False
     mob_id = "9999999"
 
-    def __init__(self, x: float = 100.0, cy: float = 100.0, mp: int = 0):
+    def __init__(self, x: float = 100.0, cy: float = 100.0, mp: int = 0,
+                 max_mp: int = 100):
         self.x = x
         self.cy = cy
         self.mp = mp
+        self.max_mp = max_mp
         self.slow: list = []
         self.freeze: list = []
+        self.poison: list = []
 
     def rect(self) -> pygame.Rect:
         return pygame.Rect(int(self.x - 15), int(self.cy - 30), 30, 30)
@@ -39,6 +43,12 @@ class _Mob:
 
     def apply_freeze(self, seconds) -> None:
         self.freeze.append(seconds)
+
+    def element_multiplier(self, element) -> float:
+        return 1.0
+
+    def apply_poison(self, dps, seconds) -> None:
+        self.poison.append((dps, seconds))
 
 
 class _Assets:

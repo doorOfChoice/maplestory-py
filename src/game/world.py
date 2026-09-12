@@ -318,6 +318,9 @@ class World:
         self.tick_respawns(dt)
         self.combat.apply_mob_hits(self.player, self.hits)
 
+        # 怪物持续伤害（中毒）：mob.update 累积的本帧毒伤在此入账/判死
+        self.combat.tick_mob_status(self.player, self.monsters)
+
         # 飞行中的箭（在怪物移动之后结算）
         self.combat.update_arrows(dt, self.monsters, self.player)
 

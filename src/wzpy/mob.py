@@ -483,6 +483,10 @@ class MobRenderer:
                 prop = info.get(source_name) if info is not None else None
                 if prop is not None:
                     stats[output_name] = bool(_int(prop))
+            # 属性克制：info/elemAttr 为字符串（如 "F3S2"，1=免疫 2=抵抗 3=弱点）
+            elem = info.get("elemAttr") if info is not None else None
+            if elem is not None:
+                stats["elemAttr"] = str(_value(elem, ""))
             actions = self._actions(root)
             has_drop_data, drops = self._drops(requested)
             animated = next((action for action in actions if action["frames"] > 1), None)

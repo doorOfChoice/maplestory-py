@@ -55,10 +55,10 @@ def test_mob_icon_with_hit_stays_attack():
     assert cast_form(d, 1) == "instant"
 
 
-def test_only_range_is_unsupported():
-    """只有 range/mpCon（快速移动）→ WZ 未声明施放形态，不可施放。"""
+def test_only_range_is_teleport():
+    """只有 range/mpCon（快速移动）→ 已登记瞬移技，按方向键位移。"""
     d = make("2201002", mpCon=13, range=130)
-    assert cast_form(d, 1) == "unsupported"
+    assert cast_form(d, 1) == "teleport"
 
 
 def test_registered_passive_is_passive():

@@ -304,6 +304,10 @@ class Player:
             + self._buff_mod("mdef", with_buffs)
         return int(flat * self._buff_rate("mdd", with_buffs))
 
+    def physical_damage_reduce(self) -> int:
+        """物理伤害减免 %（神之保护 buff）；仅对怪物接触/物理攻击生效。"""
+        return max(0, self.buffs.mod_sum("dmg_reduce"))
+
     def accuracy_value(self, with_buffs: bool = True) -> int:
         """命中率：(基础 20 + DEX//2 + 装备 ACC + 被动/buff 平坦命中) × 命藥%。"""
         extra = self.skills.passive_mods().get("acc", 0) \
@@ -470,6 +474,116 @@ class Player:
             self.wall_side = d
             self.wall_lock = settings.WALL_JUMP_LOCK
             self.feather.consume()
+
+    def teleport(self, distance: float, physics: Optional[Physics],
+                 up: bool = False, down: bool = False) -> bool:
+        """快速移动：朝指定方向瞬移 distance px，落点吸附最近可行走地面。
+
+        水平：按朝向沿 foothold 链接以极小步长推进（爬坡/下坡随地形起伏），
+        被实墙挡住即停在墙外；落点下方有地面则腾空坠落，无底深渊则原地不动。
+        垂直：↑/↓ 找 range 内最近的平台落下；range 内无平台则原地不动
+        （不穿墙、不掉出世界）。
+        地面按「最近」判定，与 layer 无关：链可在 layer 间穿行，同高的前后景
+        平台同样是可行走面（与行走语义一致）。落点会把 ground_layer 同步到
+        所站平台，墙体碰撞随之切换。
+        返回是否成功位移（供施放流程决定是否扣 MP/写冷却）。
+        """
+        if physics is None or distance <= 0:
+            return False
+        feet = self.y + settings.FEET_OFFSET
+        if up or down:
+            fh = physics.teleport_vertical_surface(self.x, feet, distance,
+                                                   up=up)
+            if fh is None:
+                return False
+            self._teleport_land(fh)
+        else:
+            if not self._teleport_walk(distance, physics):
+                return False
+        self.vx = 0.0
+        self.drop_layers.clear()
+        if not self.attacking:
+            self._load_anim(POSE_IDLE if self.on_ground else POSE_JUMP)
+        return True
+
+    def _teleport_walk(self, distance: float, physics: Physics) -> bool:
+        """水平瞬移：按下朝向以极小步长推进到 distance 处。
+
+        逐段沿 foothold 链接「走」过去（含楼梯/斜坡，脚随地形起伏），到无链接
+        的断崖边缘即转为腾空；路径上被实墙挡住就停在墙外。步长很小，既不埋进
+        上升坡体，也不会被墙豁免规则送进墙里（落点再用 wall_overlap_clamp 兜底）。
+        最终腾空且落点下方是无底深渊时原地不动、返回 False（不掉出世界）。"""
+        direction = 1 if self.facing_right else -1
+        target = self.x + direction * distance
+        x = self.x
+        feet = self.y + settings.FEET_OFFSET
+        fh = self.cur_fh
+        grounded = self.on_ground and fh is not None
+        layer = fh.layer if grounded else self.ground_layer
+        max_step = 4.0
+        guard = int(abs(distance) / max_step) + 4
+        while guard > 0 and abs(target - x) > 0.5:
+            guard -= 1
+            step = direction * min(max_step, abs(target - x))
+            nx = x + step
+            bx = physics.wall_block(x, nx, feet, feet,
+                                    fh if grounded else None, layer=layer)
+            if direction * (bx - x) <= 1e-6:
+                x = bx                                 # 撞墙：贴到墙面外
+                break
+            nx = bx
+            if grounded:
+                surf = physics.walk_surface(fh, nx, direction)
+                if surf is None:
+                    grounded = False
+                else:
+                    fh = surf
+                    layer = surf.layer
+                    feet = surf.y_at(nx)
+            if not grounded:
+                snap = physics.spawn_surface(
+                    nx, feet, tol=settings.TELEPORT_SNAP_TOL)
+                if snap is not None:
+                    grounded = True
+                    fh = snap
+                    layer = snap.layer
+                    feet = snap.y_at(nx)
+            x = nx
+        # 落点贴地 → 以真实脚高再推离一次墙（途中脚高可能与落点不同），
+        # 推离后地面可能变，故最多迭代几次直到既不嵌墙又有地面。
+        for _ in range(3):
+            if grounded:
+                surf = physics.walk_surface(fh, x, 0) if fh is not None else None
+                if surf is None:
+                    surf = physics.spawn_surface(
+                        x, feet, tol=settings.TELEPORT_SNAP_TOL)
+            else:
+                surf = None
+            if surf is None:
+                break
+            feet = surf.y_at(x)
+            cx = physics.wall_overlap_clamp(x, feet, direction, surf.layer)
+            if abs(cx - x) <= 1e-6:
+                self.x = x
+                self._teleport_land(surf)
+                return True
+            x = cx
+            fh = surf
+        if not physics.has_ground_below(x, feet):
+            return False                                # 深渊：不位移
+        self.x = x
+        self.on_ground = False
+        self.cur_fh = None
+        self.y = feet - settings.FEET_OFFSET
+        return True
+
+    def _teleport_land(self, fh) -> None:
+        """瞬移落点吸附到平台：脚贴面、清竖直速度、重置地面状态。"""
+        self.y = fh.y_at(self.x) - settings.FEET_OFFSET
+        self.cur_fh = fh
+        self.on_ground = True
+        self.ground_layer = fh.layer
+        self.vy = 0.0
 
     def drop_through(self, physics: Optional[Physics] = None) -> None:
         if self.in_water:
