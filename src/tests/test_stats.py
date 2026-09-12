@@ -125,11 +125,11 @@ def test_accuracy_includes_dex_equipment_skill():
 
 
 def test_hit_chance_level_term_and_clamps():
-    """命中概率 = acc/(acc+eva) + 1%/级差，钳在 [5%, 95%]。"""
+    """命中概率 = acc/(acc+eva) + 1%/级差，钳在 [5%, 100%]。"""
     assert hit_chance(100, 100) == 0.5
     assert hit_chance(100, 100, level_diff=10) == 0.6
     assert hit_chance(100, 100, level_diff=-95) == 0.05    # 地板：永远打得中
-    assert hit_chance(100, 0, level_diff=95) == 0.95       # 天花板：留 5% MISS 手感
+    assert hit_chance(100, 0, level_diff=95) == 1.0        # 天花板：等级碾压必中
 
 
 def test_evasion_includes_luk_and_equipment():

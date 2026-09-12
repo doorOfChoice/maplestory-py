@@ -89,7 +89,7 @@ ATTACK_DELAY_STEP_MS = 60
 ATTACK_DELAY_REF_MS = 540
 # 命中判定：acc/(acc+eva) + LEVEL_STEP×攻方等级优势，钳 [FLOOR, CEIL]
 HIT_RATE_FLOOR = 0.05
-HIT_RATE_CEIL = 0.95
+HIT_RATE_CEIL = 1.0
 HIT_RATE_LEVEL_STEP = 0.01
 # 经验需求：官方逐级表见 game/stats.py EXP_TO_NEXT，此处不再用指数近似
 RESPAWN_FULL = True

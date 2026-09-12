@@ -172,10 +172,10 @@ def evasion(stats: Mapping[str, int], equip_eva: int) -> int:
 
 
 def hit_chance(acc: int, eva: int, level_diff: int = 0) -> float:
-    """命中概率：acc/(acc+eva) + 1%/等级差（攻方等级优势），钳在 [5%, 95%]。
+    """命中概率：acc/(acc+eva) + 1%/等级差（攻方等级优势），钳在 [5%, 100%]。
 
-    钳位保证打高回避 Boss 也有 5% 能摸到、同级清怪保留 5% MISS 手感；
-    等级项让越级碾压基本必中、以下犯上明显吃力（官方体感）。
+    地板保证打高回避 Boss 也有 5% 能摸到；等级项让越级碾压必中、
+    以下犯上明显吃力（官方体感）。
     """
     base = 1.0 if acc + eva <= 0 else acc / (acc + eva)
     rate = base + settings.HIT_RATE_LEVEL_STEP * level_diff
