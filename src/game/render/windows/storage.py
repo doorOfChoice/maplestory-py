@@ -14,6 +14,7 @@ import pygame
 from game import settings
 from game.core.item_tip import build_item_tip, tip_with_note
 from game.render.windows.inventory import _asset_desc, _item_tip
+from game.render.windows.core import widgets
 from game.render.windows.core.dialogs import Modal
 from game.render.windows.core.transfer import take_from_source
 from game.render.windows.core.widgets import draw_menu_bg, ellipsize, scroll_icon
@@ -21,7 +22,23 @@ from game.render.windows.core.window import DragPickup, Window
 from game.systems.inventory import Item, item_kind
 from game.systems.scrolls import is_scroll_id
 
-PANEL_W, PANEL_H = 600, 330
+# ── 官方仓库窗（UIWindow/Trunk）几何：463×318，左右两栏列表式 ────────
+# 左栏 = 仓库、右栏 = 背包；逐行 = 行首图标格 + 名称 + 数量，行高 35 的
+# Trunk/select 作悬停高亮。素材缺失回退旧自绘面板（PANEL_FB_*）。
+TRUNK_BG = "Trunk/backgrnd"
+TRUNK_SELECT = "Trunk/select"
+PANEL_W, PANEL_H = 463, 318
+LIST_X = (9, 238)          # 左右栏内容左缘（相对窗口）
+LIST_W = 208               # 每栏行宽
+ROW_TOP = 84               # 首行顶（相对窗口）
+ROW_PITCH = 39
+ROW_H = 35
+VISIBLE_ROWS = 5
+SLOT_CX = 20               # 行首图标格中心（相对栏左缘）
+NAME_X = 40                # 名称文字左缘（相对栏左缘）
+
+# ── 旧自绘回退面板（素材缺失时用）──────────────────────────────────
+PANEL_FB_W, PANEL_FB_H = 600, 330
 TITLE_H = 26
 CELL = 32
 STORAGE_COLS = 6
@@ -41,6 +58,8 @@ class StorageWindow(Window):
         self.storage_rects: List[Tuple[pygame.Rect, int]] = []
         self.bag_rects: List[Tuple[pygame.Rect, int]] = []
         self._scroll = 0
+        self._scroll_storage = 0
+        self._fallback = False
 
     # ── 开关 ───────────────────────────────────────────────────────
     def open(self) -> None:
@@ -56,7 +75,7 @@ class StorageWindow(Window):
         return entries
 
     def _vis_rows(self) -> int:
-        return max(1, (PANEL_H - TITLE_H - 20 - 56) // ROW_H)
+        return max(1, (PANEL_FB_H - TITLE_H - 20 - 56) // ROW_H)
 
     def _icon(self, item_id: str) -> Optional[pygame.Surface]:
         if is_scroll_id(item_id):    # 234 段自制卷轴：统一用自绘图标
@@ -129,8 +148,17 @@ class StorageWindow(Window):
                            else f"存入 {got.name}")
 
     def handle_wheel(self, pos: Tuple[int, int], amount: int) -> bool:
-        entries = self._bag_entries(self.svc.player())
-        max_scroll = max(0, len(entries) - self._vis_rows())
+        """官方列表式：光标在哪一栏就滚哪一栏；回退面板只滚背包栏。"""
+        player = self.svc.player()
+        if not self._fallback and pos[0] < self.rect.centerx:
+            rows = VISIBLE_ROWS
+            max_scroll = max(0, len(player.inventory.storage) - rows)
+            self._scroll_storage = max(0, min(max_scroll,
+                                              self._scroll_storage + amount))
+            return True
+        entries = self._bag_entries(player)
+        rows = VISIBLE_ROWS if not self._fallback else self._vis_rows()
+        max_scroll = max(0, len(entries) - rows)
         self._scroll = max(0, min(max_scroll, self._scroll + amount))
         return True
 
@@ -181,21 +209,91 @@ class StorageWindow(Window):
 
     # ── 绘制 ───────────────────────────────────────────────────────
     def anchor(self, vw: int, vh: int) -> Tuple[int, int]:
-        return (vw - PANEL_W) // 2, (vh - PANEL_H) // 2 - 10
+        w, h = ((PANEL_FB_W, PANEL_FB_H) if self._fallback
+                else (PANEL_W, PANEL_H))
+        return (vw - w) // 2, (vh - h) // 2 - 10
 
     def draw(self, surface) -> None:
-        f, fs = self.svc.ui.font, self.svc.ui.font_small
+        """优先用官方 Trunk 底图；素材缺失回退旧自绘面板。"""
         self.storage_rects.clear()
         self.bag_rects.clear()
+        bg = widgets.wz_surface(self.svc, TRUNK_BG)
+        self._fallback = bg is None
+        if self._fallback:
+            x, y = self.place(surface, (PANEL_FB_W, PANEL_FB_H))
+            self._draw_fallback(surface, x, y)
+            return
         x, y = self.place(surface, (PANEL_W, PANEL_H))
-        if not draw_menu_bg(surface, self.svc, self.rect):
-            pygame.draw.rect(surface, (18, 22, 30, 216), self.rect, border_radius=8)
-            pygame.draw.rect(surface, (90, 96, 110), self.rect, 1, border_radius=8)
+        surface.blit(bg, (x, y))
+        self.add_chrome(surface, x, y, PANEL_W, 20)
+        mouse = self.svc.mouse()
+        inv = self.svc.player().inventory
+        self._draw_list(surface, x, y, 0, list(inv.storage), self._scroll_storage,
+                        self.storage_rects, inv=inv)
+        entries = [it for _src, it in self._bag_entries(self.svc.player())]
+        self._draw_list(surface, x, y, 1, entries, self._scroll,
+                        self.bag_rects, inv=None)
+
+    def _draw_list(self, surface, x: int, y: int, col: int, items: List[Item],
+                   scroll: int, rects: List[Tuple[pygame.Rect, int]],
+                   inv) -> None:
+        """画一栏官方列表行：悬停高亮 + 图标 + 名称 + 数量。"""
+        f, fs = self.svc.ui.font, self.svc.ui.font_small
+        mouse = self.svc.mouse()
+        lx = x + LIST_X[col]
+        sel = widgets.wz_surface(self.svc, TRUNK_SELECT)
+        for j in range(VISIBLE_ROWS):
+            idx = scroll + j
+            rect = pygame.Rect(lx, y + ROW_TOP + j * ROW_PITCH, LIST_W, ROW_H)
+            if idx >= len(items):
+                if col == 1:
+                    break
+                rects.append((rect, idx))
+                continue
+            item = items[idx]
+            if rect.collidepoint(mouse) and sel is not None:
+                surface.blit(pygame.transform.scale(sel, (LIST_W, ROW_H)),
+                             rect.topleft)
+            elif rect.collidepoint(mouse):
+                pygame.draw.rect(surface, (120, 150, 190), rect, 1)
+            slot = pygame.Rect(lx + SLOT_CX - 13, rect.y + 3, 26, 26)
+            icon = self._icon(item.id)
+            if icon is not None:
+                if icon.get_width() > 24 or icon.get_height() > 24:
+                    icon = pygame.transform.scale(
+                        icon, (min(24, icon.get_width()),
+                               min(24, icon.get_height())))
+                surface.blit(icon, (slot.centerx - icon.get_width() // 2,
+                                    slot.centery - icon.get_height() // 2))
+            name_c = (46, 38, 32)
+            txt = ellipsize(item.name, fs, LIST_W - NAME_X - 30)
+            surface.blit(fs.render(txt, True, name_c),
+                         (lx + NAME_X, rect.centery - fs.get_height() // 2))
+            if item.count > 1:
+                cnt = fs.render(f"×{item.count}", True, (60, 60, 70))
+                surface.blit(cnt, (lx + LIST_W - cnt.get_width() - 2,
+                                   rect.centery - cnt.get_height() // 2))
+            if rect.collidepoint(mouse):
+                self.svc.tooltip(self._tip_payload(item))
+            rects.append((rect, idx))
+        # 栏头计数（贴官方空头区，避开底部金币栏）
+        total = len(items)
+        label = (f"仓库 {total}/{settings.STORAGE_CAP}" if col == 0
+                 else f"背包 {total}")
+        surface.blit(f.render(label, True, (70, 66, 58)),
+                     (lx + 6, y + 22))
+
+    def _draw_fallback(self, surface, x: int, y: int) -> None:
+        f, fs = self.svc.ui.font, self.svc.ui.font_small
+        w, h = PANEL_FB_W, PANEL_FB_H
+        if not draw_menu_bg(surface, self.svc, pygame.Rect(x, y, w, h)):
+            pygame.draw.rect(surface, (18, 22, 30, 216), (x, y, w, h), border_radius=8)
+            pygame.draw.rect(surface, (90, 96, 110), (x, y, w, h), 1, border_radius=8)
 
         surface.blit(f.render("仓库", True, (255, 216, 96)), (x + 14, y + 5))
-        self.close_rect = pygame.Rect(x + PANEL_W - 40, y + 4, 32, 18)
+        self.close_rect = pygame.Rect(x + w - 40, y + 4, 32, 18)
         surface.blit(fs.render("×", True, (235, 235, 240)), self.close_rect.topleft)
-        self.title_rect = pygame.Rect(x, y, PANEL_W - 46, TITLE_H)
+        self.title_rect = pygame.Rect(x, y, w - 46, TITLE_H)
         mouse = self.svc.mouse()
 
         # 仓库格（左栏）
@@ -238,7 +336,8 @@ class StorageWindow(Window):
             _src, item = entries[i]
             ry = grid_y + 16 + j * ROW_H
             rect = pygame.Rect(bag_x, ry,
-                               PANEL_W - 28 - STORAGE_COLS * CELL - 16, ROW_H - 4)
+                               self.rect.width - 28 - STORAGE_COLS * CELL - 16,
+                               ROW_H - 4)
             pygame.draw.rect(surface, (36, 42, 54), rect, border_radius=4)
             icon = self._icon(item.id)
             if icon is not None:

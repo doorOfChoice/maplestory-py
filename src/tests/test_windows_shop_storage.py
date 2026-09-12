@@ -9,7 +9,8 @@ import pygame
 from game import settings
 from game.render.windows.shop import (BG_LCOL_W, BG_LCOL_X, BG_NROWS,
                                       BG_ROW_H, BG_ROW_Y0, ShopWindow)
-from game.render.windows.storage import CELL, STORAGE_COLS, StorageWindow
+from game.render.windows.storage import (CELL, STORAGE_COLS, VISIBLE_ROWS,
+                                         StorageWindow)
 from game.render.windows.core.services import WindowServices
 from game.systems.inventory import Inventory, Item
 from game.systems.shop import register_lua_shop, register_shop_profile
@@ -51,6 +52,17 @@ class _FakeAssets:
 
     def equip_info(self, item_id: str):
         return None
+
+
+class _TrunkAssets(_FakeAssets):
+    """在商店底图之外再提供官方 Trunk 底图，用于仓库官方布局路径。"""
+
+    def ui_surface(self, img: str, path: str):
+        if path == "Trunk/backgrnd":
+            return [pygame.Surface((463, 318), pygame.SRCALPHA)]
+        if path == "Trunk/select":
+            return [pygame.Surface((162, 35), pygame.SRCALPHA)]
+        return super().ui_surface(img, path)
 
 
 def _shop_player() -> types.SimpleNamespace:
@@ -574,3 +586,52 @@ def test_storage_wheel_scrolls_and_clamps():
         wheel(mgr, pos, up=False)
     draw_once(mgr)
     assert win.bag_rects[0][1] == min(5, 40 - len(win.bag_rects))
+
+
+# ── 仓库：官方 Trunk 列表布局 ───────────────────────────────────────
+def _storage_trunk_window(n_bag: int = 3):
+    inv = Inventory()
+    for i in range(n_bag):
+        inv.add(Item(id=f"20000{i:03d}", name=f"道具{i}", kind="consume",
+                     count=1))
+    player = types.SimpleNamespace(inventory=inv)
+    svc = WindowServices(assets=_TrunkAssets(), ui=FakeUI(),
+                         player=lambda: player)
+    win = StorageWindow(svc)
+    win.open()
+    mgr = make_manager(win)
+    draw_once(mgr)
+    return win, mgr, player
+
+
+def test_storage_official_trunk_uses_bg_and_list_rows():
+    """有 Trunk 底图时走官方布局：窗口 463×318，右栏背包逐行登记。"""
+    win, mgr, player = _storage_trunk_window()
+    assert not win._fallback
+    assert win.rect.size == (463, 318)
+    assert len(win.bag_rects) == min(3, VISIBLE_ROWS)
+    _click(mgr, win.bag_rects[0][0].center)
+    assert len(player.inventory.storage) == 1
+
+
+def test_storage_official_trunk_left_column_scrolls():
+    """官方布局：光标在左栏滚存仓库栏，右栏背包不随之滚动。"""
+    win, mgr, player = _storage_trunk_window(n_bag=1)
+    player.inventory.storage = [Item(id=f"9000{i}", name=f"仓{i}", kind="etc",
+                                     count=1) for i in range(12)]
+    draw_once(mgr)
+    wheel(mgr, (win.rect.x + 50, win.rect.y + 150), up=False)
+    draw_once(mgr)
+    assert win.storage_rects[0][1] == 1
+    assert win.bag_rects[0][1] == 0
+
+
+def test_storage_official_trunk_take_back_to_bag():
+    """官方布局：点左栏仓库行把物品取回背包。"""
+    win, mgr, player = _storage_trunk_window()
+    _click(mgr, win.bag_rects[0][0].center)
+    draw_once(mgr)
+    grid_rect, gidx = win.storage_rects[0]
+    _click(mgr, grid_rect.center)
+    assert player.inventory.storage == []
+    assert gidx == 0
