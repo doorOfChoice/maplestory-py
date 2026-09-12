@@ -1,4 +1,4 @@
-"""技能学习四重门控与转职附赠：SP / 前置 req / 人物等级 / invisible 排除。"""
+"""技能学习门控与转职附赠：SP / 前置 req / 人物等级 / 满级；附赠被动不可手学。"""
 from __future__ import annotations
 
 from game.core.jobs import JOBS
@@ -77,11 +77,17 @@ def test_learn_does_not_assign_hotkey():
     assert book.hotkeys == {}
 
 
-def test_learnable_excludes_invisible_and_passives():
-    """invisible 与转职附赠被动都不进可学习列表。"""
-    book = book_with(make_def("3000000", invisible=True),
-                     make_def("3001004"))
-    assert book.learnable() == ["3001004"]
+def test_learnable_excludes_passives_includes_invisible():
+    """转职附赠被动不进可学习列表；invisible 仅原版 UI 隐藏，不挡学习
+    （4 转树如暴風神射大量标 invisible，照学）。"""
+    book = book_with(make_def("3001005"),
+                     make_def("3121004", invisible=True))
+    book.add_sp(312, 1)
+    assert book.learn("3121004", player_level=120) is True
+    assert "3121004" in book.learnable()
+    passive = book_with(make_def("3000000"))
+    passive.on_advance(JOBS[3000])
+    assert passive.learnable() == []
 
 
 def test_on_advance_grants_passives_only():

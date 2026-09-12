@@ -307,7 +307,8 @@ class Arrow:
                 if self.hit_frames:
                     combat.effects.append(Effect(
                         self.hit_frames, mob.x,
-                        mob.cy - mob.sprite_h * 0.45))
+                        mob.cy - mob.sprite_h * 0.45,
+                        flip=self.vx < 0))
                 combat.preferred_mob = mob
                 died = mob.take_hit(dmg, from_x=self.x)
                 if died and player is not None:
@@ -428,7 +429,8 @@ class Combat:
                 "violet" if crit else "red", big=crit))
             if hit_frames:
                 self.effects.append(Effect(
-                    hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45))
+                    hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45,
+                    flip=not getattr(player, "facing_right", True)))
             self.preferred_mob = mob
             died = mob.take_hit(dmg, from_x=player.x)
             if died:

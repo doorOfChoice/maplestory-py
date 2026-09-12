@@ -312,7 +312,7 @@ def test_build_advance_quest_defs_trainer_collect():
 
 
 def test_advance_quests_follow_job_chain():
-    """同一导师按职业链给任务：新手→adv_3000，弓箭手→adv_3100，猎人→adv_3110，神射手→无。"""
+    """同一导师按职业链给任务：新手→adv_3000 …… 神射手→adv_3120，弓手大师→无。"""
     defs = build_advance_quest_defs()
     log = QuestLog(defs)
     player = SimpleNamespace(level=10, job=0, x=0.0, y=0.0,
@@ -323,4 +323,6 @@ def test_advance_quests_follow_job_chain():
     player.job = 3100
     assert [it.qid for it in collect_npc_quests(defs, log, "1012100", player)] == ["adv_3110"]
     player.job = 3110
+    assert [it.qid for it in collect_npc_quests(defs, log, "1012100", player)] == ["adv_3120"]
+    player.job = 3120
     assert collect_npc_quests(defs, log, "1012100", player) == []

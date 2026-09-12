@@ -88,6 +88,14 @@ JOBS: Dict[int, JobDef] = {
         advance_lv=70, advance_sp=4, prejob=3100, trainer_npc=1012100,
         hp_gain=20, mp_gain=12, auto_ap={"dex": 1},
     ),
+    # 弓箭手 4 转：弓手大师。Skill.wz/312.img（楓葉祝福/召喚鳳凰/烈火箭系进阶，
+    # 龙魂之箭/暴風神射等）；被动 弓術精通；门槛 Lv120。
+    3120: JobDef(
+        code=3120, name="弓手大师", tree_imgs=["312.img"],
+        passive_ids=[3120005],
+        advance_lv=120, advance_sp=4, prejob=3110, trainer_npc=1012100,
+        hp_gain=20, mp_gain=12, auto_ap={"dex": 1},
+    ),
 }
 
 

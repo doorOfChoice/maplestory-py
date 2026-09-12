@@ -1,7 +1,8 @@
 """技能系统：按职业树加载技能表，管理等级 / SP / 冷却 / 消耗 / 快捷键。
 
 · SkillDef：一个技能的静态数据（名称、各等级 mpCon/damage/bulletCount/mobCount、
-  前置 req、学习所需人物等级 CharLevel、invisible 标记）。
+  前置 req、学习所需人物等级 CharLevel；invisible 只是原版 UI 隐藏标记
+  ——4 转树大量标 invisible 但仍可学，故本项目不以其为门控）。
 · SkillBook：玩家运行时状态 —— 累积加载「当前职业 + 各前置职业」的技能树
   （原版行为：转职后保留旧职业技能）。学习受四重门控：该转 SP > 0、前置 req
   满足、CharLevel 满足、未满级。SP 按职业组分池独立结算（一转/二转/三转各自结余）。
@@ -47,7 +48,8 @@ class SkillDef:
     def __init__(self, skill_id: str, name: str, desc: str,
                  levels: List[dict], max_level: int,
                  req: Optional[Dict[str, int]] = None,
-                 char_level: int = 0, invisible: bool = False):
+                 char_level: int = 0, invisible: bool = False,
+                 repeat: bool = False):
         self.id = skill_id
         self.name = name
         self.desc = desc
@@ -56,6 +58,7 @@ class SkillDef:
         self.req = req or {}                # 前置技能 {skill_id: 所需等级}
         self.char_level = char_level        # 学习所需人物等级
         self.invisible = invisible          # 职业自动附赠被动（不可手学）
+        self.repeat = repeat                # WZ 带 keydown 通道技（按住连发）
 
     def lv(self, level: int) -> dict:
         """第 level 级数值表（越界取最高级）。"""
@@ -128,6 +131,9 @@ def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
                         invisible = int(getattr(inv_node, "value", 1)) != 0
                     except (TypeError, ValueError):
                         invisible = True
+                # WZ 带 keydown 动画节点 = 通道技（原版按住键以 keydown 帧连发，
+                # 如暴風神射 3121004）；本项目用固定补放间隔模拟该行为
+                repeat = node.get("keydown") is not None
                 name, desc = f"技能 {sid}", ""
                 if s_root is not None:
                     sn = s_root.get(sid)
@@ -139,7 +145,7 @@ def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
                 max_lv = min(len(levels), settings.SKILL_MAX_LEVEL)
                 defs[sid] = SkillDef(sid, name, desc, levels[:max_lv], max_lv,
                                      req=req, char_level=char_lv,
-                                     invisible=invisible)
+                                     invisible=invisible, repeat=repeat)
     except Exception:
         pass
     return defs
@@ -177,10 +183,10 @@ class SkillBook:
         return sorted(self.levels)
 
     def learnable(self, owner_group: Optional[int] = None) -> List[str]:
-        """可手动学习的技能（排除附赠被动与 invisible）；给定组则只回该转。"""
+        """可手动学习的技能（只排除转职附赠被动；invisible 不挡学习）；给定组则只回该转。"""
         return sorted(
-            sid for sid, d in self.defs.items()
-            if not d.invisible and sid not in self._passive_ids
+            sid for sid in self.defs
+            if sid not in self._passive_ids
             and (owner_group is None or sp_group_of_skill(sid) == owner_group))
 
     def skills_for_group(self, group: int) -> List[str]:
@@ -221,7 +227,7 @@ class SkillBook:
         if self.sp_by_job.get(group, 0) <= 0:
             return False
         d = self.defs.get(skill_id)
-        if d is None or d.invisible:
+        if d is None:
             return False
         cur = self.levels.get(skill_id, 0)
         if cur >= d.max_level:
@@ -327,6 +333,7 @@ class SkillBook:
             "mob_count": d.stat(lv, "mobCount", 1),
             "bullet_count": max(1, d.stat(lv, "bulletCount", 1)),
             "cooldown_ms": d.stat(lv, "cooldown", 0),  # WZ 官方冷却（毫秒）
+            "repeat": d.repeat,                  # 通道技：按住可连发
         }
         if skill_id == settings.SNAIL_THROW_SKILL_ID:
             data["projectile"] = True                  # 弹道技：不进近战命中框

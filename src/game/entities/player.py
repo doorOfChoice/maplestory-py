@@ -435,10 +435,15 @@ class Player:
         之后的动画纯属后摇）。取消规则对齐原版手感与平衡：
         普攻不可互取消（攻速由动画决定）；技能可取消普攻后摇，
         但技能动画（含技能接技能）必须完整播完，防止双技交替变相提速。
+        例外：通道技（repeat，如暴風神射）不受上一条限制——按住连发的
+        节奏由补放间隔决定，若等上一发后摇播完，间隔会被动画吞掉变慢速单发。
         """
         if self.hurt_timer > 0 or self.statuses.locked():
             return False
         if not self.attacking:
+            return True
+        if (for_skill and self.pending_skill is not None
+                and self.pending_skill.get("repeat")):
             return True
         if not for_skill or self.pending_skill is not None:
             return False

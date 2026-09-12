@@ -1157,6 +1157,21 @@ class Assets:
         return self.effect_frames("Skill", resolve_skill_img(skill_id),
                                   f"skill/{skill_id}/effect")
 
+    def skill_prepare_frames(self, skill_id: str) -> List:
+        """通道技起手特效（WZ prepare，如暴風神射拉弓）。"""
+        return self.effect_frames("Skill", resolve_skill_img(skill_id),
+                                  f"skill/{skill_id}/prepare")
+
+    def skill_keydown_frames(self, skill_id: str) -> List:
+        """通道技按住期间的持续特效（WZ keydown，循环播放，如暴風神射箭雨）。"""
+        return self.effect_frames("Skill", resolve_skill_img(skill_id),
+                                  f"skill/{skill_id}/keydown")
+
+    def skill_keydown_end_frames(self, skill_id: str) -> List:
+        """通道技松手收招特效（WZ keydownend）。"""
+        return self.effect_frames("Skill", resolve_skill_img(skill_id),
+                                  f"skill/{skill_id}/keydownend")
+
     def skill_hit_frames(self, skill_id: str = "1001004") -> List:
         """技能命中特效（怪物身位播放）。"""
         return self.effect_frames("Skill", resolve_skill_img(skill_id),

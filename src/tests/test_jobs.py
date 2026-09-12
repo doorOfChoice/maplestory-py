@@ -55,24 +55,38 @@ def test_bowmaster_is_hunter_third_job():
     assert can_advance(SimpleNamespace(job=3000, level=70), bowmaster) is False
 
 
+def test_bowmaster_is_sniper_fourth_job():
+    """弓手大师 3120：前置神射手 3110、需 Lv120、技能树 312.img、被动 弓術精通。"""
+    bm4 = JOBS[3120]
+    assert bm4.prejob == 3110
+    assert bm4.advance_lv == 120
+    assert bm4.tree_imgs == ["312.img"]
+    assert bm4.passive_ids == [3120005]
+    assert can_advance(SimpleNamespace(job=3110, level=119), bm4) is False
+    assert can_advance(SimpleNamespace(job=3110, level=120), bm4) is True
+    assert can_advance(SimpleNamespace(job=3100, level=120), bm4) is False
+
+
 def test_job_for_trainer_resolves_chain_by_current_job():
     """同一导师赫丽娜：按玩家当前职业回传下一步转职目标职业。"""
     assert job_for_trainer(1012100, player_job=0) is JOBS[3000]
     assert job_for_trainer(1012100, player_job=3000) is JOBS[3100]
     assert job_for_trainer(1012100, player_job=3100) is JOBS[3110]
+    assert job_for_trainer(1012100, player_job=3110) is JOBS[3120]
 
 
 def test_job_for_trainer_terminal_and_unknown():
-    """已是最高阶（神射手）或无关职业/导师 → None。"""
-    assert job_for_trainer(1012100, player_job=3110) is None
+    """已是最高阶（弓手大师）或无关职业/导师 → None。"""
+    assert job_for_trainer(1012100, player_job=3120) is None
     assert job_for_trainer(1012100, player_job=1000) is None
     assert job_for_trainer(9999999, player_job=0) is None
 
 
 def test_job_chain_orders_from_first_to_current():
-    """职业链：旧→新，猎人 → [新手, 弓箭手, 猎人]，神射手含全部四阶。"""
+    """职业链：旧→新，猎人 → [新手, 弓箭手, 猎人]，弓手大师含全部五阶。"""
     assert [j.code for j in job_chain(3100)] == [0, 3000, 3100]
     assert [j.code for j in job_chain(3110)] == [0, 3000, 3100, 3110]
+    assert [j.code for j in job_chain(3120)] == [0, 3000, 3100, 3110, 3120]
     assert [j.code for j in job_chain(3000)] == [0, 3000]
 
 
@@ -88,5 +102,6 @@ def test_sp_group_of_skill_and_job():
     assert sp_group_of_skill("3110000") == 311
     assert job_sp_group(3000) == 300
     assert job_sp_group(3110) == 311
+    assert job_sp_group(3120) == 312
     assert job_sp_group(0) == 100          # 新手组对齐 1000.img 前缀
     assert sp_group_of_skill("10001000") == 100

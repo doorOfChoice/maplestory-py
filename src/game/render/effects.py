@@ -14,24 +14,61 @@ from game.core.animation import Animation
 
 class Effect:
     def __init__(self, frames: List[Tuple[pygame.Surface, Tuple[int, int], int]],
-                 x: float, y: float):
-        self.anim = Animation(frames, loop=False)
+                 x: float, y: float, loop: bool = False,
+                 use_origin: bool = False, follow=None,
+                 flip: bool = False, face_follow: bool = False):
+        """WZ 帧特效。
+
+        loop=True 时持续循环（通道技按住特效），永不 done；
+        use_origin=True 时按帧 origin 对齐锚点（默认以贴图中心对齐）；
+        follow 提供 x/y 属性时每帧跟随（如跟随玩家的持续特效）；
+        flip=True 时水平镜像，face_follow=True 时随 follow 的朝向实时翻转
+        （特效素材朝右，玩家朝左时镜像）。
+        """
+        self.anim = Animation(frames, loop=loop)
         self.x = x
         self.y = y
+        self.loop = loop
+        self.use_origin = use_origin
+        self.follow = follow
+        self.flip = flip
+        self.face_follow = face_follow
+        self._flip_cache: dict = {}
 
     @property
     def done(self) -> bool:
-        return self.anim.done
+        return (not self.loop) and self.anim.done
 
     def update(self, dt: float) -> None:
         self.anim.advance(dt)
+        if self.follow is not None:
+            self.x = self.follow.x
+            self.y = self.follow.y
+            if self.face_follow:
+                self.flip = not getattr(self.follow, "facing_right", True)
+
+    def _mirror(self, idx: int, img: pygame.Surface) -> pygame.Surface:
+        cached = self._flip_cache.get(idx)
+        if cached is None:
+            cached = pygame.transform.flip(img, True, False)
+            self._flip_cache[idx] = cached
+        return cached
 
     def draw(self, surface: pygame.Surface, camera) -> None:
         if self.done:
             return
+        idx = self.anim.frame
         img = self.anim.surface
         if img is None:
             return
+        if self.flip:
+            img = self._mirror(idx, img)
         sx, sy = camera.to_screen(self.x, self.y)
+        if self.use_origin:
+            ox, oy = self.anim.frames[idx][1]
+            if self.flip:
+                ox = self.anim.frames[idx][0].get_width() - 1 - ox
+            surface.blit(img, (int(sx - ox), int(sy - oy)))
+            return
         surface.blit(img, (int(sx - img.get_width() / 2),
                            int(sy - img.get_height() / 2)))

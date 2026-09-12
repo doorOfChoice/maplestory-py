@@ -38,7 +38,7 @@ def test_bowman_tree_contains_bowman_skills():
 
 @needs_wz
 def test_bowman_second_third_job_trees_load():
-    """2/3 转（猎人/神射手）技能树自 WZ 正常加载，转职附赠被动满级生效。"""
+    """2/3/4 转（猎人/神射手/弓手大师）技能树自 WZ 正常加载，转职附赠被动满级生效。"""
     pygame.init()
     pygame.display.set_mode((8, 8))
     from game.render.assets import Assets
@@ -56,6 +56,11 @@ def test_bowman_second_third_job_trees_load():
         bm = SkillBook(assets, 3110)
         bm.on_advance(JOBS[3110])
         assert bm.levels["3110001"] == bm.defs["3110001"].max_level
+        assert "3121006" in skill_ids_for_job(assets, 3120)
+        bm4 = SkillBook(assets, 3120)
+        bm4.on_advance(JOBS[3120])
+        assert bm4.levels["3120005"] == bm4.defs["3120005"].max_level
+        assert bm4.passive_mods()["acc"] > 0
     finally:
         assets.close()
 

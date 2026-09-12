@@ -58,6 +58,14 @@ def make_skill_cast() -> dict:
             "damage": 1.9, "range": 0, "mob_count": 1, "bullet_count": 1}
 
 
+def make_repeat_cast() -> dict:
+    """通道技施放数据（WZ 带 keydown，如暴風神射 3121004）。"""
+    d = SkillDef("3121004", "暴風神射", "", [{"damage": 51}], 1, repeat=True)
+    return {"id": "3121004", "def": d, "level": 1, "mp_con": 0, "hp_con": 0,
+            "damage": 0.51, "range": 0, "mob_count": 1, "bullet_count": 1,
+            "repeat": True}
+
+
 def book_with(*defs: SkillDef) -> SkillBook:
     return SkillBook(None, 3000, defs={d.id: d for d in defs})
 
@@ -104,6 +112,16 @@ def test_skill_recovery_never_cancellable(monkeypatch):
     assert player.attack_slot_free(for_skill=True) is False
     assert player.start_attack() is False
     assert player.start_attack(make_skill_cast()) is False
+
+
+def test_repeat_skill_recasts_while_channeling(monkeypatch):
+    """通道技在被按住时不需等上一发后摇：可立刻起下一发，节奏由补放间隔控制。"""
+    player = make_player(monkeypatch)
+    assert player.start_attack(make_repeat_cast()) is True
+    player.attack_projectile_spawned = True
+    player.attack_elapsed = 0.0
+    assert player.attack_slot_free(for_skill=True) is True
+    assert player.start_attack(make_repeat_cast()) is True
 
 
 def test_normal_attack_never_cancels_recovery(monkeypatch):

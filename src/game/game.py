@@ -213,6 +213,10 @@ class Game:
         self._banner_timer = 0.0
         self._pickup_timer = 0.0
         self._skill_buffer: Optional[Tuple[int, float]] = None
+        self._hold_cast_slot: Optional[int] = None   # 通道技（keydown 系）按住补放中
+        self._hold_cast_timer = 0.0
+        self._channel_fx: Optional[Effect] = None    # 通道技持续特效（跟随玩家循环播放）
+        self._channel_fx_sid: Optional[str] = None
         self._attack_buffer = 0.0
         self.spawn_grace = settings.SPAWN_GRACE
         self.fade = 1.0        # 开屏进入游戏时黑场淡入
@@ -490,7 +494,12 @@ class Game:
 
         攻击锁定期内按下则进输入缓冲，窗口内一旦解锁立即补放；
         cast 无副作用，只有真正出手成功才写冷却。
+        同时登记通道技按住态：绑定的仍是 keydown 技能时，
+        松手前由 _tick_skill_hold 按间隔自动补放（原版暴風神射行为）。
         """
+        self._start_channel_fx(hotkey)
+        self._hold_cast_slot = hotkey
+        self._hold_cast_timer = settings.SKILL_KEYDOWN_INTERVAL
         if not self.ctx.world.player.attack_slot_free(for_skill=True):
             self._skill_buffer = (hotkey, settings.SKILL_INPUT_BUFFER)
             return
@@ -516,12 +525,82 @@ class Game:
             return
         if not player.start_attack(data):
             return
-        player.skills.start_cooldown(sid, data.get("cooldown_ms", 0))
+        if not data.get("repeat"):
+            player.skills.start_cooldown(sid, data.get("cooldown_ms", 0))
         self.ctx.audio.play_skill_cast(sid, player.equips)
         eff = self.assets.skill_effect_frames(sid)
         if eff:
             self.ctx.world.combat.effects.append(Effect(
-                eff, player.x, player.y))
+                eff, player.x, player.y, flip=not player.facing_right))
+
+    def _tick_skill_hold(self, dt: float) -> None:
+        """通道技按住补放：绑键仍是 repeat 技能且物理按住时，按间隔调 _try_cast。
+
+        通道技在 _try_cast 里不写冷却，节奏全靠本间隔；松手 / 换绑非通道技 /
+        槽空 / 死亡 / 弹窗 / 聊天聚焦 一律立即解除按住态。
+        """
+        if self._hold_cast_slot is None:
+            return
+        slot = self._hold_cast_slot
+        skills = self.ctx.world.player.skills
+        sid = skills.hotkeys.get(slot)
+        d = skills.defs.get(sid) if sid is not None else None
+        key = self.keybindings.key_of(f"skill_{slot}")
+        held = (d is not None and d.repeat and key is not None and key >= 0
+                and pygame.key.get_pressed()[key]
+                and not self.dead and not self.chat.focused
+                and not self.ctx.ui.dialog_visible)
+        if not held:
+            self._hold_cast_slot = None
+            self._end_channel_fx()
+            return
+        self._hold_cast_timer -= dt
+        if self._hold_cast_timer > 0.0:
+            return
+        self._hold_cast_timer = settings.SKILL_KEYDOWN_INTERVAL
+        self._try_cast(slot)
+
+    def _start_channel_fx(self, hotkey: int) -> None:
+        """通道技起手：挂上循环的 keydown 持续特效（跟随玩家），非通道技先收掉。
+
+        同一技能重复登记（OS 按键自动重复）不重启动画，避免特效不断闪回首帧。
+        """
+        player = self.ctx.world.player
+        sid = player.skills.hotkeys.get(hotkey)
+        d = player.skills.defs.get(sid) if sid is not None else None
+        if sid is None or d is None or not d.repeat:
+            self._end_channel_fx()
+            return
+        if self._channel_fx is not None and self._channel_fx_sid == sid:
+            return
+        self._end_channel_fx()
+        frames = self.assets.skill_keydown_frames(sid)
+        if not frames:
+            return
+        self._channel_fx = Effect(frames, player.x, player.y, loop=True,
+                                  use_origin=True, follow=player,
+                                  face_follow=True)
+        self._channel_fx_sid = sid
+        self.ctx.world.combat.effects.append(self._channel_fx)
+
+    def _end_channel_fx(self) -> None:
+        """通道技结束：移除循环特效，并在玩家身位补播一次 keydownend 收招。"""
+        fx = self._channel_fx
+        if fx is None:
+            return
+        effects = self.ctx.world.combat.effects
+        if fx in effects:
+            effects.remove(fx)
+        sid = self._channel_fx_sid
+        self._channel_fx = None
+        self._channel_fx_sid = None
+        if sid is not None:
+            tail = self.assets.skill_keydown_end_frames(sid)
+            player = self.ctx.world.player
+            if tail:
+                effects.append(Effect(tail, player.x, player.y,
+                                      use_origin=True,
+                                      flip=not player.facing_right))
 
     def _tick_skill_buffer(self, dt: float) -> None:
         """输入缓冲计时：攻击槽一旦空闲立即补放，超窗作废。"""
@@ -620,6 +699,9 @@ class Game:
             return
         self._dialogue.close_all()
         self._skill_buffer = None
+        self._hold_cast_slot = None
+        self._channel_fx = None
+        self._channel_fx_sid = None
         self.ctx.windows.cancel_interactions()
         self.ctx.windows.close_npc_windows()
         self.ctx.audio.stop_bgm()
@@ -698,6 +780,9 @@ class Game:
         # 技能输入缓冲：攻击槽一空闲就补放锁定期内按下的技能
         self._tick_skill_buffer(dt)
 
+        # 通道技按住连发（暴風神射等）：按住键按间隔补放，松手即停
+        self._tick_skill_hold(dt)
+
         # 普攻输入缓冲：后摇期间的单点在槽空闲瞬间补上
         if self._attack_buffer > 0.0:
             self._attack_buffer -= dt
@@ -727,6 +812,8 @@ class Game:
         if self.ctx.world.player.hp <= 0:
             self.dead = True
             self._skill_buffer = None
+            self._hold_cast_slot = None
+            self._end_channel_fx()
             self.ctx.ui.show_death()
             self.ctx.audio.play("GameIn", 0.4)
 
