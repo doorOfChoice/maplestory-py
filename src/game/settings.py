@@ -240,8 +240,7 @@ ETC_DEFAULT_PRICE = 20           # 未分档的普通怪兽素材（壳 / 皮 / 
 BOWMAN_JOB = 3000                # 弓箭手 1 转职业码
 BOWMAN_STARTER_BOW = "1452002"   # 转职附赠木弓（需求 Lv10；短弓 1452000 需 Lv25/DEX80）
 BOWMAN_TRAINER_NPC = "1012100"   # 导师赫丽娜
-TRAINER_SPAWN_MAP = "100010000"  # 导师注入的地图（出生图：弓箭手村东部小山）
-TRAINER_SPAWN = (-520.0, 455.0)  # 导师站立点（出生 portal 旁地面 foothold，脚底坐标）
+TRAINER_SPAWN_MAP = "100010000"  # 出生图（弓箭手村东部小山；WZ 冒烟测试用作有效地图）
 
 # ── 远程弹道（直线快箭 + 穿透计数）──────────────────────────────────
 ARROW_SPEED = 900.0              # 箭矢飞行速度 px/s（瞄准后为合速）

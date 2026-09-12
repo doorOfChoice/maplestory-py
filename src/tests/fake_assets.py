@@ -50,6 +50,7 @@ class FakeAssets:
         self.ropes: List[Dict] = []
         self.portals: List[Dict] = [
             {"name": "sp", "type": 0, "x": 0.0, "y": 0.0, "targetMap": 0},
+            {"name": "tp", "type": 6, "x": 100.0, "y": 0.0, "targetMap": 0},
             {"name": "to2", "type": 2, "x": 300.0, "y": 0.0,
              "targetMap": "200000000", "targetName": "sp"},
         ]

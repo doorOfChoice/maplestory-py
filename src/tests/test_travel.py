@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from game.core.travel import (NO_TARGET, pay_fare, portal_hidden, portal_target,
-                              portal_trigger, scroll_target, usable_portals)
+                              portal_trigger, register_portal_script, scroll_target,
+                              town_portal_position, usable_portals)
+from game.core import travel
 
 
 def portal(ptype, tm=999999999, name="p"):
@@ -22,12 +24,13 @@ def test_portal_target_rejects_sentinel_and_missing():
 
 
 def test_portal_trigger_by_type():
-    """type 2 与隐藏门 10/11 都按↑（隐藏门仅不可见）；脚本门 1 有 tm 降级为按↑；sp 出生点不可用。"""
+    """type 2 / 隐藏门 10/11 按↑；脚本门 1 有 tm 降级为按↑；
+    碰撞门 3 走进即触发（collision）；sp 出生点不可用。"""
     assert portal_trigger(portal(2)) == "up"
     assert portal_trigger(portal(10)) == "up"
     assert portal_trigger(portal(11)) == "up"
     assert portal_trigger(portal(1, tm=100000000)) == "up"
-    assert portal_trigger(portal(3, tm=100000000)) is None   # 命令门不开放
+    assert portal_trigger(portal(3, tm=100000000)) == "collision"
     assert portal_trigger(portal(0, name="sp")) is None
 
 
@@ -75,6 +78,48 @@ def test_same_map_flag_marks_self_target():
     assert by_name["out"]["same_map"] is False
 
 
+def test_usable_portals_includes_collision_walk_in():
+    """碰撞门（type 3）目标存在时保留，trigger=collision 且不标记 hidden（不绘制）。"""
+    portals = [portal(3, tm=105040300, name="goSleepy0")]
+    result = usable_portals(portals, lambda mid: mid == "105040300")
+    assert [p["name"] for p in result] == ["goSleepy0"]
+    assert result[0]["trigger"] == "collision"
+    assert result[0]["hidden"] is False
+    assert result[0]["target_id"] == "105040300"
+
+
+# ── 脚本门：登记「script 名 → 目标图」后按↑进入 ─────────────────────
+
+def script_portal(script, ptype=7, name="jobin00"):
+    return {"type": ptype, "targetMap": NO_TARGET, "name": name, "script": script,
+            "x": 0, "y": 0}
+
+
+def test_unregistered_script_portal_is_skipped():
+    """未登记的脚本门（无 tm）不可达，也不可触发。"""
+    travel.clear_portal_scripts()
+    p = script_portal("enterMagiclibrar")
+    assert portal_target(p) is None
+    assert portal_trigger(p) is None
+    assert usable_portals([p], lambda mid: True) == []
+
+
+def test_registered_script_portal_becomes_walk_in():
+    """登记脚本名 → 目标图后：解析出目标、按↑触发、不绘制（hidden）。"""
+    travel.clear_portal_scripts()
+    register_portal_script("enterMagiclibrar", "101000003")
+    p = script_portal("enterMagiclibrar")
+    assert portal_target(p) == "101000003"
+    assert portal_trigger(p) == "up"
+    assert portal_hidden(p) is True
+    result = usable_portals([p], lambda mid: mid == "101000003")
+    assert len(result) == 1
+    assert result[0]["trigger"] == "up"
+    assert result[0]["hidden"] is True
+    assert result[0]["target_id"] == "101000003"
+    travel.clear_portal_scripts()
+
+
 def test_scroll_target_resolves_sentinel_to_return_map():
     """回程卷轴 moveTo=999999999 → 当前图 returnMap；显式目标原样字符串化。"""
     assert scroll_target(NO_TARGET, 100000000) == "100000000"
@@ -84,6 +129,20 @@ def test_scroll_target_resolves_sentinel_to_return_map():
 def test_scroll_target_without_return_map_is_none():
     assert scroll_target(NO_TARGET, 0) is None
     assert scroll_target(NO_TARGET, None) is None
+
+
+# ── 回程卷轴落点：城镇传送点 pt=6 ─────────────────────────────────────
+
+def test_town_portal_position_returns_type6_coords():
+    """城镇传送点（pt=6）回传 (x, y)；多个时取第一个。"""
+    portals = [portal(0, name="sp"), portal(6, name="tp"),
+               portal(6, name="tp2")]
+    assert town_portal_position(portals) == (0.0, 0.0)
+
+
+def test_town_portal_position_none_without_type6():
+    """无 pt=6 城镇传送点时回 None（调用方回退出生门）。"""
+    assert town_portal_position([portal(0, name="sp"), portal(2, name="pv")]) is None
 
 
 # ── 出租车票价 ──────────────────────────────────────────────────────

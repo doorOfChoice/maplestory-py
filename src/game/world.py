@@ -192,8 +192,14 @@ class World:
             return None
         return p
 
-    def portal_position(self, portal_name: Optional[str]):
-        """目标地图出生点：优先指定 portal，其次 sp 入口。"""
+    def portal_position(self, portal_name: Optional[str],
+                        town: bool = False):
+        """目标地图出生点：town=True 时优先城镇传送点（pt=6，回程卷轴落点）；
+        否则优先指定 portal，其次 sp 入口。"""
+        if town:
+            pos = travel.town_portal_position(self.assets.portals)
+            if pos is not None:
+                return pos
         for p in self.assets.portals:
             if portal_name and p.get("name") == portal_name:
                 return float(p["x"]), float(p["y"])
@@ -209,8 +215,12 @@ class World:
         self.spawn_x, self.spawn_y = sx, sy
         self.place_player_at_spawn()
 
-    def finish_loading(self, portal_name: Optional[str]) -> None:
-        """切图：后台渲染完成后，重建本图物理/相机/小地图、出生点与生命实体。"""
+    def finish_loading(self, portal_name: Optional[str],
+                       town: bool = False) -> None:
+        """切图：后台渲染完成后，重建本图物理/相机/小地图、出生点与生命实体。
+
+        town=True 时落点为城镇传送点（pt=6），供回程卷轴使用。
+        """
         self.physics = Physics(self.assets.footholds, self.assets.ropes,
                                bounds=self.assets.bounds)
         self.camera = Camera(self.assets.map_width, self.assets.map_height,
@@ -218,7 +228,7 @@ class World:
         self._life_mobs = [d for d in self.assets.life if d["type"] == "mob"]
         self._life_npcs = [d for d in self.assets.life if d["type"] == "npc"]
 
-        sx, sy = self.portal_position(portal_name)
+        sx, sy = self.portal_position(portal_name, town)
         self.spawn_x, self.spawn_y = sx, sy
         self.minimap.set_map(
             self.assets.footholds, self.assets.ropes, self.assets.portals,

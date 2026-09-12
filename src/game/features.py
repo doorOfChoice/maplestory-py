@@ -7,10 +7,16 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
-# map_id → [(npc_id, x, y)]：脚底坐标额外生成的角色（如原版在 100000201
-# 的导师赫丽娜不可达，改在出生图补一个实例）。
-TRAINER_SPAWNS: Dict[str, List[Tuple[str, float, float]]] = {
-    "100010000": [("1012100", -520.0, 455.0)],
+# map_id → [(npc_id, x, y)]：脚底坐标额外生成的角色。教官房已可由 WZ 门直达
+# （见 SCRIPT_PORTALS），故当前为空；保留此注册点供原版不可达的 NPC 使用。
+TRAINER_SPAWNS: Dict[str, List[Tuple[str, float, float]]] = {}
+
+# 脚本门登记：script 名 → (目标地图 id, 落点门名或 None=目标图 sp)。
+# WZ 里这些门只给 script 名、没有 tm，去向在此写死；启动期由 game 注册进
+# travel（见 travel.register_portal_scripts）。
+SCRIPT_PORTALS: Dict[str, Tuple[str, Optional[str]]] = {
+    "enterMagiclibrar": ("101000003", None),   # 魔法密林 → 法师导师 汉斯
+    "enterAchter": ("100000201", None),        # 弓箭手村 → 弓箭手导师 赫丽娜
 }

@@ -16,6 +16,7 @@ from typing import List, Optional, Tuple
 import pygame
 
 from game import settings
+from game import features
 from game.core.chat import Chat
 from game.core.keybindings import KeyBindings, item_id_of_action
 from game.core import travel
@@ -177,6 +178,8 @@ class Game:
             adv_defs = build_advance_quest_defs()
             if lua_defs or adv_defs:
                 self.quest_defs = {**self.quest_defs, **lua_defs, **adv_defs}
+            # 脚本门写死去向（教官房门等无 tm 的 script 门）
+            travel.register_portal_scripts(features.SCRIPT_PORTALS)
 
             self._boot_progress = 0.92
             self._boot_status = "正在进入世界"
@@ -246,7 +249,7 @@ class Game:
             "双击道具使用/穿戴，装备可直接拖到纸娃娃穿上；拖出界会先弹确认，"
             "拖到商店/仓库窗=卖出/存入。",
             "Esc 逐层关闭窗口；对话窗里 ↑↓/数字键可选条目，Enter 两步确认。",
-            "新手练到 Lv10 后，找出生点旁的赫丽娜转职弓箭手；"
+            "新手练到 Lv10 后，到弓箭手村进训练场找赫丽娜转职弓箭手；"
             "走到发光传送门前按 ↑ 可切换地图。"])
 
     # ── 输入 ───────────────────────────────────────────────────────
@@ -690,11 +693,15 @@ class Game:
         target = travel.scroll_target(move_to, self.assets.current_return_map())
         if target is None or not self.assets.map_exists(target):
             return "当前地图无法使用回程卷轴"
-        self._enter_map(target, None)
+        self._enter_map(target, None, town=True)
         return None
 
-    def _enter_map(self, map_id: str, portal_name: Optional[str]) -> None:
-        """切换到目标地图：后台渲染地图，主线程显示加载画面。"""
+    def _enter_map(self, map_id: str, portal_name: Optional[str],
+                   town: bool = False) -> None:
+        """切换到目标地图：后台渲染地图，主线程显示加载画面。
+
+        town=True 时落点为目标图的城镇传送点（pt=6），供回程卷轴使用。
+        """
         if self._loading:
             return
         self._dialogue.close_all()
@@ -708,16 +715,16 @@ class Game:
 
         self.assets.start_load_map(map_id)
         self._loading = True
-        self._pending_map = (map_id, portal_name)
+        self._pending_map = (map_id, portal_name, town)
         self._loading_timer = 0.0
 
     def _finish_loading(self) -> None:
         """后台线程完成后，在主线程恢复游戏状态。"""
         bgm_path = self.assets.finish_load_map()
-        _map_id, portal_name = self._pending_map
+        _map_id, portal_name, town = self._pending_map
         self._set_caption(self.assets.map_id)
         self.ctx.audio.bgm_path = bgm_path
-        self.ctx.world.finish_loading(portal_name)
+        self.ctx.world.finish_loading(portal_name, town)
         self.ctx.audio.play_bgm()
         self._show_banner()
         self._loading = False

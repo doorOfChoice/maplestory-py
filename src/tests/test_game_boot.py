@@ -72,6 +72,20 @@ def test_boot_completes_and_draws(game):
     _drive(game)
 
 
+def test_boot_registers_instructor_script_portals(game):
+    """启动装配登记教官房脚本门：enterMagiclibrar/enterAchter 可按↑进入。"""
+    from game.core import travel
+    _boot(game)
+    hines = {"type": 7, "script": "enterMagiclibrar", "targetMap": 999999999,
+             "name": "jobin00"}
+    athena = {"type": 7, "script": "enterAchter", "targetMap": 999999999,
+              "name": "in02"}
+    assert travel.portal_target(hines) == "101000003"
+    assert travel.portal_trigger(hines) == "up"
+    assert travel.portal_target(athena) == "100000201"
+    assert travel.portal_trigger(athena) == "up"
+
+
 def test_map_switch_finishes_loading(game):
     """切图：_enter_map 后等加载完成，玩家被重定位到新图出生点。"""
     _boot(game)
@@ -96,6 +110,25 @@ def test_return_scroll_wires_player_warp_to_map_switch(game):
     assert p.use_item_by_id("02030000")
     assert game._loading
     assert "02030000" not in p.inventory.consumes
+
+
+def test_return_scroll_lands_on_town_portal(game):
+    """回程卷轴落点：抵达目标图后落在城镇传送点（pt=6），而非出生门 sp。"""
+    from game.systems.inventory import Item
+    _boot(game)
+    p = game.ctx.world.player
+    p.x = 999.0
+    p.inventory.add(Item(id="02030000", name="回程卷轴", count=1,
+                         kind="consume", info={"spec": {"moveTo": 999999999}}))
+    assert p.use_item_by_id("02030000")
+    for _ in range(120):
+        game._update(0.016)
+        game._draw()
+        if not game._loading:
+            break
+    assert not game._loading, "加载未在超时内完成"
+    assert game.ctx.assets.map_id == "200000000"
+    assert game.ctx.world.player.x == 100.0
 
 
 def test_return_scroll_refused_on_unknown_target_keeps_item(game):
