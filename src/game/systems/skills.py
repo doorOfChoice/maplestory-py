@@ -5,8 +5,9 @@
 · SkillBook：玩家运行时状态 —— 累积加载「当前职业 + 各前置职业」的技能树
   （原版行为：转职后保留旧职业技能）。学习受四重门控：该转 SP > 0、前置 req
   满足、CharLevel 满足、未满级。SP 按职业组分池独立结算（一转/二转/三转各自结余）。
-  转职时 on_advance 把该转附赠被动直接满级（被动跨转累加进 passive_mods），
-  并为已学主动技能重排快捷键。技能数据全部来自官方 Skill.wz，伤害倍率 = level.damage / 100。
+  转职时 on_advance 把该转附赠被动直接满级（被动跨转累加进 passive_mods）。
+  快捷键永不自动分配：只有玩家把技能拖到键格上（assign_skill_to_key）才上键。
+  技能数据全部来自官方 Skill.wz，伤害倍率 = level.damage / 100。
 """
 
 from __future__ import annotations
@@ -233,26 +234,17 @@ class SkillBook:
         return True
 
     def learn(self, skill_id: str, player_level: int) -> bool:
-        """消耗该转 1 SP 学习或升级。四重门控见 can_learn（单一事实来源）。"""
+        """消耗该转 1 SP 学习或升级。四重门控见 can_learn（单一事实来源）。
+
+        不自动上快捷键：上键只由玩家主动拖拽触发（assign_skill_to_key）。
+        """
         if not self.can_learn(skill_id, player_level):
             return False
         group = sp_group_of_skill(skill_id)
         cur = self.levels.get(skill_id, 0)
         self.sp_by_job[group] -= 1
         self.levels[skill_id] = cur + 1
-        self._assign_hotkey(skill_id)
         return True
-
-    def _assign_hotkey(self, skill_id: str) -> None:
-        """主动技能未上键时补入最小空闲数字键。"""
-        if skill_id in self._passive_ids:
-            return
-        if skill_id in self.hotkeys.values():
-            return
-        used = set(self.hotkeys)
-        key = next((k for k in range(1, 13) if k not in used), None)
-        if key is not None:
-            self.hotkeys[key] = skill_id
 
     def passive_mods(self) -> Dict[str, int]:
         """已学被动技能的聚合属性修正（跨转累加）。
@@ -293,7 +285,7 @@ class SkillBook:
         return mods
 
     def on_advance(self, jobdef) -> None:
-        """转职：附赠 SP 进本职业组池、附赠被动满级（累加进 passive）、重排快捷键。"""
+        """转职：附赠 SP 进本职业组池、附赠被动满级（累加进 passive）。不自动上键。"""
         self.add_sp(job_sp_group(jobdef.code), jobdef.advance_sp)
         for p in jobdef.passive_ids:
             pid = str(p)
@@ -301,7 +293,6 @@ class SkillBook:
             d = self.defs.get(pid)
             if d is not None:
                 self.levels[pid] = d.max_level
-        self.rebuild_hotkeys()
 
     def inherit(self, old: "SkillBook") -> None:
         """转职累积：把旧技能书的已学等级、各转 SP 结余、被动集合搬进本书。"""
@@ -310,17 +301,6 @@ class SkillBook:
         self.levels = dict(old.levels)
         self.sp_by_job = dict(old.sp_by_job)
         self._passive_ids = set(old._passive_ids)
-
-    def rebuild_hotkeys(self) -> None:
-        """只为已学的主动技能重排最小空闲数字键（没学过的不上键）。"""
-        self.hotkeys = {}
-        for sid in sorted(self.defs):
-            d = self.defs[sid]
-            if sid in self._passive_ids or d.invisible:
-                continue
-            if not self.levels.get(sid, 0):
-                continue
-            self._assign_hotkey(sid)
 
     # ── 施放 ───────────────────────────────────────────────────────
     def cast(self, skill_id: str, player_level: int) -> Optional[dict]:

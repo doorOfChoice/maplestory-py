@@ -27,6 +27,7 @@ def test_already_assigned_skill_moves_to_new_key():
     """学过的技能已有槽位：只把该槽的动作键换掉，槽位号不变。"""
     book, kb = make_book("3001000"), KeyBindings()
     learn(book, "3001000")
+    book.hotkeys[1] = "3001000"
     assert book.hotkeys == {1: "3001000"}
     assert assign_skill_to_key(book, kb, "3001000", pygame.K_q)
     assert kb.key_of("skill_1") == pygame.K_q
@@ -39,6 +40,8 @@ def test_two_skills_displace_on_key():
     book, kb = make_book("3001000", "3001001"), KeyBindings()
     learn(book, "3001000")
     learn(book, "3001001")
+    book.hotkeys[1] = "3001000"
+    book.hotkeys[2] = "3001001"
     assert assign_skill_to_key(book, kb, "3001001", pygame.K_1)
     assert kb.key_of("skill_1") == -1
     assert kb.key_of("skill_2") == pygame.K_1
@@ -46,11 +49,11 @@ def test_two_skills_displace_on_key():
 
 
 def test_unassigned_skill_takes_free_slot():
-    """槽位空出的已学技能（手动删槽后）：落键时分配最小空闲槽。"""
+    """已学但未上键的技能：落键时分配最小空闲槽。"""
     book, kb = make_book("3001000", "3001001"), KeyBindings()
     learn(book, "3001000")
     learn(book, "3001001")
-    del book.hotkeys[2]
+    book.hotkeys[1] = "3001000"          # 技能 2 未上键
     assert assign_skill_to_key(book, kb, "3001001", pygame.K_w)
     assert book.hotkeys == {1: "3001000", 2: "3001001"}
     assert kb.skill_slot_for(pygame.K_w) == 2
@@ -60,6 +63,7 @@ def test_drop_on_key_held_by_action_displaces_it():
     """拖到「普通攻击」占的 A 键：攻击被直接顶掉解绑。"""
     book, kb = make_book("3001000"), KeyBindings()
     learn(book, "3001000")
+    book.hotkeys[1] = "3001000"
     assert assign_skill_to_key(book, kb, "3001000", pygame.K_a)
     assert kb.key_of("skill_1") == pygame.K_a
     assert kb.key_of("attack") == -1
@@ -75,8 +79,10 @@ def test_full_hotkeys_block_unassigned_skill():
     """12 槽全被别的技能占着且拖入技未上键：拒绝且不动绑定表。"""
     sids = [f"30010{i:02d}" for i in range(13)]
     book, kb = make_book(*sids), KeyBindings()
-    for sid in sids:
+    for i, sid in enumerate(sids[:12]):
         learn(book, sid)
+        book.hotkeys[i + 1] = sid
+    learn(book, sids[12])                 # 第 13 个已学但无槽
     assert len(book.hotkeys) == 12
     assert not assign_skill_to_key(book, kb, sids[12], pygame.K_w)
     assert kb.key_of("skill_1") == pygame.K_1

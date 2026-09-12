@@ -29,7 +29,8 @@ def make_book() -> SkillBook:
             for sid in (MAGIC_ARROW, SECOND_SKILL)}
     book = SkillBook(assets=None, job=3000, defs=defs)
     book.add_sp(sp_group_of_skill(MAGIC_ARROW), 3)
-    book.learn(MAGIC_ARROW, 1)          # 已学：自动占 1 号槽
+    book.learn(MAGIC_ARROW, 1)          # 已学：手动占 1 号槽（不自动上键）
+    book.hotkeys[1] = MAGIC_ARROW
     return book
 
 

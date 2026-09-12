@@ -67,13 +67,14 @@ def test_learn_consumes_only_that_job_group():
     assert book.sp_for_group(300) == 0
 
 
-def test_learn_assigns_hotkey():
-    """学会主动技能自动补入最小空闲快捷键。"""
+def test_learn_does_not_assign_hotkey():
+    """学会主动技能不自动上快捷键：上键只由玩家主动拖拽触发。"""
     book = book_with(make_def("3001004"), make_def("3001005"))
     book.add_sp(300, 5)
     book.learn("3001004", player_level=10)
     book.learn("3001005", player_level=10)
-    assert book.hotkeys == {1: "3001004", 2: "3001005"}
+    assert book.levels == {"3001004": 1, "3001005": 1}
+    assert book.hotkeys == {}
 
 
 def test_learnable_excludes_invisible_and_passives():
@@ -83,8 +84,8 @@ def test_learnable_excludes_invisible_and_passives():
     assert book.learnable() == ["3001004"]
 
 
-def test_on_advance_grants_passives_and_hotkeys():
-    """转职：被动直接满级；未学主动不占键位，学会后才上键。"""
+def test_on_advance_grants_passives_only():
+    """转职：被动直接满级；不上任何快捷键，学会主动也不自动上键。"""
     book = book_with(
         make_def("3000000", max_level=16),
         make_def("3000001", max_level=20),
@@ -97,10 +98,10 @@ def test_on_advance_grants_passives_and_hotkeys():
     assert book.levels["3000000"] == 16
     assert book.levels["3000001"] == 20
     assert book.levels["3000002"] == 8
-    assert book.hotkeys == {}               # 没学过 → 快捷栏保持空
+    assert book.hotkeys == {}               # 转职不排键
     book.add_sp(300, 5)
     book.learn("3001004", player_level=10)
-    assert book.hotkeys == {1: "3001004"}   # 学会才自动补最小空键
+    assert book.hotkeys == {}               # 学会也不自动上键
 
 
 def test_on_advance_grants_bonus_sp_to_new_group():
@@ -143,6 +144,7 @@ def test_hotkeys_roundtrip():
     book = book_with(make_def("3001004"))
     book.add_sp(300, 2)
     book.learn("3001004", player_level=10)
+    book.hotkeys[1] = "3001004"
     d = book.to_dict()
     book2 = book_with(make_def("3001004"))
     book2.from_dict(d)

@@ -42,13 +42,15 @@ def build_hotbar(player, bindings) -> List[HotbarSlot]:
             if sid is None or not levels.get(sid, 0):
                 continue
             key = bindings.slot_key(n)
+            if key is None or key <= 0:
+                continue   # 物理键已解绑：该槽不上快捷栏（槽位映射仍保留）
             remain = float(book.cooldowns.get(sid, 0.0) or 0.0)
             total = float(getattr(book, "cooldown_totals", {})
                           .get(sid, remain) or 0.0)
             d = book.defs.get(sid)
             slots.append(HotbarSlot(
                 kind="skill", ref_id=sid,
-                label=display_key(key) if key and key > 0 else str(n),
+                label=display_key(key),
                 name=d.name if d is not None else sid,
                 cd_remain=max(0.0, remain), cd_total=max(remain, total)))
     inv = getattr(player, "inventory", None)
