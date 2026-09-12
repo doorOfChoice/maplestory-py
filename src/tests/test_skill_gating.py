@@ -211,6 +211,27 @@ def test_learnable_and_skills_grouped_by_owner():
     assert book.skills_for_group(310) == ["3101005"]
 
 
+def test_unimplemented_skill_hidden_from_window_and_learn():
+    """未实装技能（快速移动 2201002：WZ 只有 range 无数值）不出现在可学/技能窗，也不可学。"""
+    book = SkillBook(None, 2200, defs={
+        "2201002": make_def("2201002", mpCon=13, range=130),
+        "2201003": make_def("2201003")})
+    book.add_sp(220, 5)
+    assert book.learnable() == ["2201003"]
+    assert book.skills_for_group(220) == ["2201003"]
+    assert book.can_learn("2201002", player_level=120) is False
+    assert book.learn("2201002", player_level=120) is False
+
+
+def test_unimplemented_prereq_does_not_block_followup():
+    """前置是未实装技能（快速移动）时不再阻塞后续技能（缓速术）学习。"""
+    book = SkillBook(None, 2200, defs={
+        "2201002": make_def("2201002", mpCon=13, range=130),
+        "2201003": make_def("2201003", req={"2201002": 5})})
+    book.add_sp(220, 5)
+    assert book.learn("2201003", player_level=120) is True
+
+
 def test_inherit_preserves_old_job_progress():
     """转职累积：旧转已学等级与各转 SP 结余搬入新书。"""
     old = book_with(make_def("3001004", max_level=20))

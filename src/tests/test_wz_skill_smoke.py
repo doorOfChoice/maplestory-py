@@ -102,7 +102,7 @@ def test_magician_advance_grants_wand_and_magic_range():
         assert int(weapon.id) == int(settings.MAGICIAN_STARTER_WAND)
         assert weapon.stat("incMAD") > 0
         p.stats["int"] = 40
-        lo, hi = p.magic_attack_range()
+        lo, hi = p.magic_attack_range(skill_mad=20)
         assert 1 <= lo <= hi and hi > 1
     finally:
         assets.close()
@@ -135,6 +135,138 @@ def test_bowman_second_third_job_trees_load():
         bm4.on_advance(JOBS[3120])
         assert bm4.levels["3120005"] == bm4.defs["3120005"].max_level
         assert bm4.passive_mods()["acc"] > 0
+    finally:
+        assets.close()
+
+
+@needs_wz
+def test_magician_second_job_trees_load():
+    """法师二转三系树自 WZ 加载，转职附赠 SP 进各自组池（被动不附赠）。"""
+    pygame.init()
+    pygame.display.set_mode((8, 8))
+    from game.render.assets import Assets
+    from game.core.jobs import JOBS, skill_ids_for_job
+    from game.systems.skills import SkillBook
+    assets = Assets(settings.TRAINER_SPAWN_MAP)
+    try:
+        assert "2101004" in skill_ids_for_job(assets, 2100)   # 火焰箭
+        assert "2201004" in skill_ids_for_job(assets, 2200)   # 冰冻术
+        assert "2301005" in skill_ids_for_job(assets, 2300)   # 圣箭术
+        for code, group in ((2100, 210), (2200, 220), (2300, 230)):
+            book = SkillBook(assets, code)
+            book.on_advance(JOBS[code])
+            assert book.sp_for_group(group) == 4
+            assert book.levels == {}          # 无附赠被动
+    finally:
+        assets.close()
+
+
+@needs_wz
+def test_thunder_bolt_exposes_wz_area_box():
+    """真实 220.img：雷电术 cast 暴露 lt/rb=150×50 自身 AOE；冰冻术无 lt/rb → 扇形。"""
+    pygame.init()
+    pygame.display.set_mode((8, 8))
+    from game.render.assets import Assets
+    from game.systems.skills import SkillBook, load_skill_defs
+    assets = Assets(settings.TRAINER_SPAWN_MAP)
+    try:
+        defs = load_skill_defs(assets, ["2201005", "2201004"])
+        book = SkillBook(assets, 2200, defs=defs)
+        book.add_sp(220, 2)
+        assert book.learn("2201005", 30)
+        assert book.cast("2201005", 30)["area"] == ((-150, -50), (150, 50))
+        assert book.learn("2201004", 30)
+        assert book.cast("2201004", 30)["area"] is None
+    finally:
+        assets.close()
+
+
+@needs_wz
+def test_magician_second_support_skills_wired_to_wz():
+    """真实 220.img：冰冻术判为魔法攻击+冻结、缓速术判为减速 debuff、
+    魔力吸收为被动、快速移动从技能窗剔除且不阻塞缓速术前置。"""
+    pygame.init()
+    pygame.display.set_mode((8, 8))
+    from game.render.assets import Assets
+    from game.core import skill_effects
+    from game.core.jobs import skill_ids_for_job
+    from game.systems.skills import SkillBook
+    assets = Assets(settings.TRAINER_SPAWN_MAP)
+    try:
+        assert "2201002" in skill_ids_for_job(assets, 2200)
+        assert skill_effects.is_passive("2200000")
+        book = SkillBook(assets, 2200)
+        assert "2201002" not in book.skills_for_group(220)
+        assert "2201002" not in book.learnable()
+        book.add_sp(220, 10)
+        assert book.learn("2201004", 120)
+        cold = book.cast("2201004", 120)
+        assert cold["magic"] is True and cold["freeze"] == 1.0
+        assert book.learn("2201003", 120)          # 前置 2201002 被豁免
+        slow = book.cast("2201003", 120)
+        assert slow["form"] == "mob_status" and slow["status"] == "slow"
+        assert slow["slow_x"] < 0 and slow["area"]
+    finally:
+        assets.close()
+
+
+@needs_wz
+def test_magician_cast_form_derived_from_wz_structure():
+    """真实 WZ：三系魔法师技能按顶层节点结构推导施放形态，action 亦被解析。"""
+    pygame.init()
+    pygame.display.set_mode((8, 8))
+    from game.render.assets import Assets
+    from game.systems.skills import SkillBook, load_skill_defs, cast_form
+    assets = Assets(settings.TRAINER_SPAWN_MAP)
+    try:
+        ids = ["2001002", "2001004", "2001005",
+               "2101003", "2101004",
+               "2200000", "2201002", "2201003", "2201004", "2201005",
+               "2301001", "2301005"]
+        defs = load_skill_defs(assets, ids)
+
+        def form(sid):
+            d = defs[sid]
+            return cast_form(d, d.max_level)
+
+        assert form("2001002") == "buff" and defs["2001002"].action == "alert2"
+        assert form("2001004") == "projectile"
+        assert form("2001005") == "instant"
+        assert form("2101004") == "projectile" and defs["2101004"].action == "shoot1"
+        assert form("2101003") == "mob_status"
+        assert form("2200000") == "passive"
+        assert form("2201002") == "unsupported"          # 只有 range
+        assert form("2201003") == "mob_status"           # mob 节点
+        assert form("2201004") == "instant"              # hit + time(冻结)
+        assert form("2201005") == "aoe"                  # hit + lt/rb
+        assert form("2301005") == "projectile"
+
+        # 快速移动（快速移动 2101002/2201002/2301001）三系均不在技能窗
+        for job, group, unsupported in ((2100, 210, "2101002"),
+                                        (2200, 220, "2201002"),
+                                        (2300, 230, "2301001")):
+            book = SkillBook(assets, job)
+            assert unsupported not in book.skills_for_group(group)
+            assert unsupported not in book.learnable()
+    finally:
+        assets.close()
+
+
+@needs_wz
+def test_magician_level_help_parsed_from_string_wz():
+    """真实 WZ：level.hs 指向 String.wz 的 hN，逐级说明被解析进 SkillDef.help()。"""
+    pygame.init()
+    pygame.display.set_mode((8, 8))
+    from game.render.assets import Assets
+    from game.systems.skills import load_skill_defs
+    assets = Assets(settings.TRAINER_SPAWN_MAP)
+    try:
+        defs = load_skill_defs(assets, ["2001004", "2000000", "2201004"])
+        assert "基本攻击力20" in defs["2001004"].help(1)
+        assert "MP6" in defs["2001004"].help(1)
+        # 2000000 的 level 表只有 hs、无任何数值字段：逐级说明是唯一效果描述
+        assert defs["2000000"].help(1)
+        assert defs["2201004"].help(1)
     finally:
         assets.close()
 

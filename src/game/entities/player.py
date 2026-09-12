@@ -268,32 +268,33 @@ class Player:
             + self._buff_mod("def", with_buffs)
         return int(flat * self._buff_rate("pdd", with_buffs))
 
-    def magic_attack_value(self, with_buffs: bool = True,
-                           skill_mad: int = 0) -> int:
-        """魔法力（面板上限端）：(武器 MAD × (2×INT + LUK) / 100 + 被动/buff 魔攻) × 魔法藥%。
+    def magic_attack_value(self, with_buffs: bool = True) -> int:
+        """面板魔法力（旧版 Magic）：总 INT + 装备 M.ATK + 被动/buff 魔攻，× 魔法藥%。
 
-        skill_mad 为施放技能的 WZ mad 加成，并入武器 MAD 后参与折算。
+        法师伤害里 Magic 与技能 mad（Basic）是两个独立因子（见 magic_attack_range）。
         """
-        return self.magic_attack_range(skill_mad=skill_mad,
-                                       with_buffs=with_buffs)[1]
+        stats = self.total_stats(with_buffs)
+        magic = stats_mod.magic_attack(
+            stats, self.inventory.stat_sum("incMAD")) \
+            + self.skills.passive_mods().get("matk", 0) \
+            + self._buff_mod("matk", with_buffs)
+        return int(magic * self._buff_rate("mad", with_buffs))
 
     def magic_attack_range(self, skill_mad: int = 0, skill_mastery: int = 0,
                            with_buffs: bool = True) -> Tuple[int, int]:
-        """魔法攻击区间 (min, max)：供战斗按魔法公式结算。
+        """法师伤害区间 (min, max)：旧版 Spell Damage。
 
-        上限 = ((武器 MAD + 技能 mad) × (2×INT + LUK) / 100 + 被动/buff 魔攻)
-              × 魔法藥%；下限 = 上限 × 熟练度。
-        熟练度 = 基础 MAGIC_BASE_MASTERY + (技能 mastery + 被动/buff mastery) 百分点。
+        Magic = 面板魔法力（总 INT + 装备 M.ATK + 魔攻加成）；
+        Basic = 技能 WZ mad（乘数）；mastery 只抬下限。
+        熟练度 = 基础 MAGIC_BASE_MASTERY + (技能/被动/buff mastery 点) × 每点系数。
         """
-        mad = self.inventory.stat_sum("incMAD") + skill_mad
-        flat = stats_mod.magic_attack(self.total_stats(with_buffs), mad) \
-            + self.skills.passive_mods().get("matk", 0) \
-            + self._buff_mod("matk", with_buffs)
-        hi = max(1, int(flat * self._buff_rate("mad", with_buffs)))
+        int_total = self.total_stats(with_buffs)["int"]
         points = skill_mastery + self.skills.passive_mods().get("mastery", 0) \
             + self._buff_mod("mastery", with_buffs)
-        mastery = min(1.0, max(0.0, settings.MAGIC_BASE_MASTERY + points / 100.0))
-        return max(1, int(hi * mastery)), hi
+        mastery = min(1.0, max(0.0, settings.MAGIC_BASE_MASTERY
+                               + points * settings.MAGIC_MASTERY_PER_POINT))
+        return stats_mod.magic_attack_range(
+            int_total, self.magic_attack_value(with_buffs), skill_mad, mastery)
 
     def magic_defense_value(self, with_buffs: bool = True) -> int:
         """魔法防御：(装备 MDD 总和 + INT//10 + 被动/buff 魔防) × 護甲藥%。"""
@@ -511,6 +512,18 @@ class Player:
         settled = self.attack_hit_applied or self.attack_projectile_spawned
         return settled and self.attack_elapsed >= settings.ATTACK_CANCEL_DELAY
 
+    def _attack_pose_for(self, skill_data: Optional[dict]) -> str:
+        """本次出手的姿态：技能 WZ action（法师 alert2 等）优先，否则回退武器攻击姿态。
+
+        action 是官方为该技能声明的施法动作名；只有角色身体确实含该姿态时才用，
+        避免无该动作的职业/武器拿到空帧。
+        """
+        action = (skill_data or {}).get("action")
+        if action and self.assets.character_frames(
+                self.equips, action, self.facing_right):
+            return action
+        return self.assets.attack_pose(self.equips)
+
     def start_attack(self, skill_data: Optional[dict] = None) -> bool:
         """发起攻击；skill_data 非空时为技能攻击（先扣 MP/HP 消耗）。
 
@@ -534,7 +547,7 @@ class Player:
         else:
             self.pending_skill = None
         self.attacking = True
-        self.attack_pose = self.assets.attack_pose(self.equips)
+        self.attack_pose = self._attack_pose_for(skill_data)
         self.attack_hit_applied = False
         self.attack_projectile_spawned = False
         self.attack_timer = 3.0

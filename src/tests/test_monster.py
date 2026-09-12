@@ -408,6 +408,48 @@ def test_mob_mp_regenerates_over_time():
     assert mob.mp == pytest.approx(100.0)
 
 
+def test_frozen_mob_cannot_move_and_thaws():
+    """冰冻：冻结期间不走动，时长耗尽后恢复漫游。"""
+    ph = make(CHAIN)
+    mob = Monster(FakeAssets(), {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                                 "rx0": 0, "rx1": 450}, 0, ph)
+    mob.apply_freeze(2.0)
+    start = mob.x
+    for _ in range(20):                      # 1 秒，仍在冻结
+        mob.update(0.05, player_x=100000, player_y=0, mobs=[])
+    assert mob.x == pytest.approx(start)
+    for _ in range(60):                      # 再 3 秒，已解冻
+        mob.update(0.05, player_x=100000, player_y=0, mobs=[])
+    assert mob.x != pytest.approx(start)
+
+
+def test_slow_and_freeze_scale_effective_speed():
+    """减速按倍率缩放移速，冻结归零；到期后恢复常速。"""
+    ph = make(CHAIN)
+    mob = Monster(FakeAssets(), {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                                 "rx0": 0, "rx1": 450}, 0, ph)
+    base = mob.speed_now()
+    mob.apply_slow(0.5, 10.0)
+    assert mob.speed_now() == pytest.approx(base * 0.5)
+    mob.apply_freeze(5.0)
+    assert mob.speed_now() == 0.0
+    for _ in range(120):                     # 5 秒后解冻
+        mob.update(0.05, player_x=100000, player_y=0, mobs=[])
+    assert mob.speed_now() == pytest.approx(base * 0.5)
+
+
+def test_frozen_mob_emits_no_contact_damage():
+    """冻结的怪不产生接触伤害。"""
+    ph = make(CHAIN)
+    mob = Monster(FakeAssets(), {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                                 "rx0": 0, "rx1": 450}, 0, ph)
+    mob.apply_freeze(5.0)
+    mobs = []
+    for _ in range(20):
+        mob.update(0.05, player_x=210, player_y=0, mobs=mobs)
+    assert mobs == []
+
+
 def test_flying_mob_speed_follows_wz_fly_speed():
     """仅有 fly 动作的怪，移速取 WZ flySpeed（有符号偏移，同 speed 套路）。"""
 

@@ -346,6 +346,7 @@ class Arrow:
                     combat.effects.append(Effect(
                         self.hit_frames, mob.x,
                         mob.cy - mob.sprite_h * 0.45,
+                        use_origin=True,
                         flip=self.vx > 0))
                 combat.preferred_mob = mob
                 for _ in range(self.attack_count):
@@ -453,8 +454,8 @@ class Combat:
         """玩家攻击：命中框（或瞬发魔法扇形）内怪物受伤 + 官方命中特效。
 
         普攻/近战技能：命中框与怪物碰撞盒相交则命中，mobCount 限制最多命中数。
-        瞬发魔法（cone_attack，如魔法双击）：无弹道，改用与射箭相同的瞄准扇形
-        （朝向 ±ARROW_AIM_HALF_ANGLE_DEG、半径 ARROW_AIM_RADIUS）圈定目标。
+        瞬发魔法（cone_attack）：无弹道。带 WZ lt/rb 的（雷电术）按角色周围矩形
+        结算；否则（魔法双击/冰冻术）用与射箭相同的瞄准扇形圈定目标。
         """
         if player.attack_hit_applied:
             return
@@ -473,8 +474,11 @@ class Combat:
             attack_count = max(1, int(skill.get("attack_count", 1)))
         else:
             mult = 1.0
+        if skill and skill.get("form") == "mob_status":
+            self._cast_mob_status(player, skill, monsters)
+            return
         if skill and skill.get("cone_attack"):
-            targets = self._cone_targets(player, skill, monsters)
+            targets = self._instant_magic_targets(player, skill, monsters)
         else:
             targets = [m for m in monsters
                        if not m.dead and rect.colliderect(m.rect())]
@@ -499,9 +503,17 @@ class Combat:
                     mob.x, mob.cy - mob.sprite_h, 0))
                 continue
             if hit_frames:
+                # 命中特效按 WZ origin 对齐落点：雷电术等竖向特效 origin 在底端，
+                # 居中绘制会把落点压到怪物脚下，origin 对齐则从怪物身上向上延伸。
                 self.effects.append(Effect(
                     hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45,
+                    use_origin=True,
                     flip=getattr(player, "facing_right", True)))
+            # 命中附带：魔力吸收回蓝（魔法）、冰冻术冻结
+            if magic:
+                self._absorb_mp(player, mob)
+            if skill and skill.get("freeze", 0) > 0 and hasattr(mob, "apply_freeze"):
+                mob.apply_freeze(skill["freeze"])
             self.preferred_mob = mob
             for _ in range(attack_count):
                 mob_pd = mob.mdd if magic else mob.pd
@@ -516,6 +528,45 @@ class Combat:
                 if died:
                     self._on_kill(player, mob)
                     break
+
+    def _cast_mob_status(self, player, skill: dict,
+                         monsters: List[CombatTarget]) -> None:
+        """怪物 debuff（缓速术等）：按 lt/rb 范围（无框则扇形）选最多 mobCount 只，无伤害。
+
+        施放形态由 WZ mob 节点推导；状态种类由 skill["status"]（skill_effects 语义表）给出。
+        """
+        targets = self._instant_magic_targets(player, skill, monsters)
+        if skill.get("status") != "slow":
+            return
+        mult = max(0.0, 1.0 + skill.get("slow_x", 0) / 100.0)
+        for mob in targets:
+            if getattr(mob, "dead", False):
+                continue
+            if hasattr(mob, "apply_slow"):
+                mob.apply_slow(mult, skill.get("duration", 0.0))
+
+    def _absorb_mp(self, player: Combatant, mob: CombatTarget) -> None:
+        """魔力吸收(2200000)：魔法命中时按技能等级 prop/x 吸怪 MP 回蓝。
+
+        纯被动（不可落键施放），只在玩家已学该技能且怪仍有 MP 时生效；
+        概率 prop（%），吸收量 x 不超过怪当前 MP，回蓝不超过自身上限。
+        """
+        skills = getattr(player, "skills", None)
+        if skills is None:
+            return
+        level = skills.levels.get("2200000", 0)
+        d = skills.defs.get("2200000")
+        if level <= 0 or d is None:
+            return
+        mob_mp = getattr(mob, "mp", 0)
+        if mob_mp <= 0:
+            return
+        prop = d.stat(level, "prop", 0)
+        amount = min(d.stat(level, "x", 0), mob_mp)
+        if prop <= 0 or amount <= 0 or random.random() * 100 >= prop:
+            return
+        mob.mp = mob_mp - amount
+        player.mp = min(player.max_mp, player.mp + amount)
 
     # ── 远程弹道 ───────────────────────────────────────────────────
     def _in_aim_cone(self, player, facing, mob, ref_y, tan_half, r2):
@@ -534,24 +585,43 @@ class Combat:
             return None
         return (mob.x, cy), d2
 
-    def _cone_targets(self, player: Combatant, skill: dict,
-                      monsters) -> List[CombatTarget]:
-        """瞬发魔法扇形命中列表：瞄准扇形内按距离取最近的 mobCount 只。"""
+    def _instant_magic_targets(self, player: Combatant, skill: dict,
+                               monsters) -> List[CombatTarget]:
+        """瞬发魔法命中列表：优先按 WZ lt/rb 矩形，否则按瞄准扇形。
+
+        带 `area`（雷电术等自身 AOE）：以角色 navel 为原点取 lt↔rb 矩形，
+        判定怪的中心是否落在框内，不区分朝向、左右皆中。
+        无 `area`（魔法双击/冰冻术）：沿用射箭同款瞄准扇形（朝向 ±半顶角、半径）。
+        两者都按「集火目标优先、距离次之」排序，取最近 mobCount 只。
+        """
         if not monsters:
             return []
-        facing = 1 if getattr(player, "facing_right", True) else -1
-        ref_y = player.y - 8.0
-        bonus = player.attack_range_bonus() if hasattr(
-            player, "attack_range_bonus") else 0.0
-        r2 = (settings.ARROW_AIM_RADIUS + bonus) ** 2
-        tan_half = math.tan(math.radians(settings.ARROW_AIM_HALF_ANGLE_DEG))
         found: List[Tuple[float, CombatTarget]] = []
-        for mob in monsters:
-            hit = self._in_aim_cone(player, facing, mob, ref_y, tan_half, r2)
-            if hit is None:
-                continue
-            _point, d2 = hit
-            found.append((d2, mob))
+        ref_y = player.y - 8.0
+        area = skill.get("area")
+        if area:
+            lt, rb = area
+            box = pygame.Rect(int(player.x + lt[0]), int(player.y + lt[1]),
+                              int(rb[0] - lt[0]), int(rb[1] - lt[1]))
+            for mob in monsters:
+                if getattr(mob, "dead", False):
+                    continue
+                cx, cy = mob.x, mob.cy - mob.sprite_h / 2.0
+                if not box.collidepoint(int(cx), int(cy)):
+                    continue
+                found.append(((cx - player.x) ** 2 + (cy - ref_y) ** 2, mob))
+        else:
+            facing = 1 if getattr(player, "facing_right", True) else -1
+            bonus = player.attack_range_bonus() if hasattr(
+                player, "attack_range_bonus") else 0.0
+            r2 = (settings.ARROW_AIM_RADIUS + bonus) ** 2
+            tan_half = math.tan(math.radians(settings.ARROW_AIM_HALF_ANGLE_DEG))
+            for mob in monsters:
+                hit = self._in_aim_cone(player, facing, mob, ref_y, tan_half, r2)
+                if hit is None:
+                    continue
+                _point, d2 = hit
+                found.append((d2, mob))
         preferred = self.preferred_mob
         found.sort(key=lambda t: (t[1] is not preferred, t[0]))
         return [mob for _d2, mob in found[:max(1, int(skill["mob_count"]))]]

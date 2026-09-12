@@ -30,6 +30,12 @@ BAR_RESERVE = 58         # 底部状态栏预留高度
 PAD = 10
 
 
+def _level_help(d, lv: int) -> str:
+    """技能 def 的第 lv 级逐级说明；测试替身可能无 help()，退化为空串。"""
+    fn = getattr(d, "help", None)
+    return fn(lv) if callable(fn) else ""
+
+
 class SkillWindow(Window):
     """技能窗（K 键）：页签切转、滚轮逐行滚动、点「+」学技能。"""
 
@@ -72,26 +78,35 @@ class SkillWindow(Window):
         return tabs, active, sids
 
     def _info_text(self, d, lv: int) -> str:
-        """技能行第二行信息：buff 显示持续时间与消耗，攻击技显示伤害%与消耗。"""
+        """技能行第二行信息：buff 显示持续时间，攻击技显示攻击力/伤害%，均带消耗。"""
         mp = d.stat(lv, "mpCon", 0)
         seconds = skill_buff_seconds(d, lv)
         if seconds > 0:
             return f"增益 {seconds:.0f}s  MP{mp}"
+        mad = d.stat(lv, "mad", 0)
+        if mad > 0:
+            return f"攻击力 {mad}  MP{mp}"
         return f"{d.stat(lv, 'damage', 100)}%  MP{mp}"
 
     def _skill_tip(self, book, d, lv: int, mouse, row: pygame.Rect) -> None:
-        """悬停技能行时把描述/伤害/快捷键放进深色 Tooltip，避免行内文字溢出。"""
+        """悬停技能行时把描述/逐级说明/伤害/快捷键放进深色 Tooltip，避免行内文字溢出。"""
         if not row.collidepoint(mouse):
             return
         lines = [d.name]
         if d.desc:
             lines.append(d.desc)
         if lv > 0:
+            help_text = _level_help(d, lv)
+            if help_text:
+                lines.append(help_text)             # WZ 逐级说明（hs→String.wz hN）
+            mp = d.stat(lv, "mpCon", 0)
             seconds = skill_buff_seconds(d, lv)
             if seconds > 0:
-                lines.append(f"增益持续 {seconds:.0f}s · 消耗 MP{d.stat(lv, 'mpCon', 0)}")
+                lines.append(f"增益持续 {seconds:.0f}s · 消耗 MP{mp}")
+            elif d.stat(lv, "mad", 0) > 0:
+                lines.append(f"攻击力 {d.stat(lv, 'mad', 0)} · 消耗 MP{mp}")
             else:
-                lines.append(f"伤害 {d.stat(lv, 'damage', 100)}% · 消耗 MP{d.stat(lv, 'mpCon', 0)}")
+                lines.append(f"伤害 {d.stat(lv, 'damage', 100)}% · 消耗 MP{mp}")
             key = self._hotkey_of(book, d.id)
             if key:
                 lines.append(f"快捷键 {key}")

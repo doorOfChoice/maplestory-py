@@ -11,6 +11,12 @@
         MAX走 (1-0.01D) − mobPDD×0.5；MIN 走 (1-0.01D) − mobPDD×0.6
     暴击率(%) 判定命中则 ×crit_mult。
 
+法师伤害单独走旧版 Spell Damage（AyumiLove 2009）：
+    Magic（面板魔法力）= 总 INT + 装备 M.ATK（+卷轴/buff）
+    Basic = 技能 WZ mad（旧版「基本攻击力」，是乘数而非加值）
+    Max = ((Magic²/1000 + Magic)/30 + INT/200) × Basic
+    Min = ((Magic²/1000 + Magic)×mastery/30 + INT/200) × Basic
+
 经验需求：非指数曲线，改用官方 v113 的逐级经验表（见 EXP_TO_NEXT）。
 """
 
@@ -148,21 +154,26 @@ def defense(stats: Mapping[str, int], equip_pdd: int) -> int:
     return equip_pdd + stats["dex"] // 10
 
 
-def magic_attack(stats: Mapping[str, int], mad: int) -> int:
-    """魔法力（面板上限端）：武器 MAD × (2×INT + LUK) / 100（经典法伤折算）。"""
-    return int((2 * stats["int"] + stats["luk"]) * mad / 100.0)
+def magic_attack(stats: Mapping[str, int], equip_mad: int) -> int:
+    """旧版面板魔法力（Magic）= 总 INT + 装备 M.ATK（卷轴/buff 由调用方并入）。"""
+    return stats["int"] + equip_mad
 
 
-def magic_attack_range(stats: Mapping[str, int], mad: int, skill_mad: int = 0,
+def magic_attack_range(int_total: int, magic: int, basic: int,
                        mastery: float = 0.10) -> Tuple[int, int]:
-    """魔法攻击区间 (min, max)：技能 mad 并入武器 MAD 再折算。
+    """旧版法师伤害区间（AyumiLove 2009 Spell Damage）。
 
-    Max = (2×INT + LUK) × (武器 MAD + 技能 mad) / 100；
-    Min = Max × mastery（熟练度比例，Magician 基础约 10%，技能 mastery 抬高）。
-    两端至少 1，避免 MAD 全 0 时出现 0 伤害。
+    Magic（面板魔法力）与 Basic（技能 WZ mad＝基本攻击力）是两个独立因子：
+        term = Magic²/1000 + Magic
+        Max  = (term/30 + INT/200) × Basic
+        Min  = (term × mastery/30 + INT/200) × Basic
+    Basic=0（未指定技能）时返回 (1,1)，避免 0 伤害。
     """
-    hi = int((2 * stats["int"] + stats["luk"]) * (mad + skill_mad) / 100.0)
-    lo = int(hi * min(1.0, max(0.0, mastery)))
+    if basic <= 0:
+        return 1, 1
+    term = magic * magic / 1000.0 + magic
+    hi = int((term / 30.0 + int_total / 200.0) * basic)
+    lo = int((term * mastery / 30.0 + int_total / 200.0) * basic)
     return max(1, lo), max(1, hi)
 
 

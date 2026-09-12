@@ -10,6 +10,8 @@
   快捷键永不自动分配：只有玩家把技能拖到键格上（assign_skill_to_key）才上键。
   技能数据全部来自官方 Skill.wz，伤害倍率 = level.damage / 100，
   冷却取 level.cooltime（秒），多段技取 level.attackCount。
+  施放形态（弹道/瞬发/AOE/buff/怪状态）由 WZ 顶层节点结构推导（见 cast_form），
+  只有字段语义（x/y 含义、状态种类）留给 core.skill_effects 的逐技能表。
   被动/buff 的 WZ 字段语义差异由 core.skill_effects 统一翻译（见该模块）。
 """
 
@@ -62,7 +64,9 @@ class SkillDef:
                  levels: List[dict], max_level: int,
                  req: Optional[Dict[str, int]] = None,
                  char_level: int = 0, invisible: bool = False,
-                 repeat: bool = False, has_ball: bool = False):
+                 repeat: bool = False, has_ball: bool = False,
+                 has_hit: bool = False, has_mob_icon: bool = False,
+                 action: str = "", helps: Optional[Dict[int, str]] = None):
         self.id = skill_id
         self.name = name
         self.desc = desc
@@ -73,12 +77,22 @@ class SkillDef:
         self.invisible = invisible          # WZ 原版 UI 隐藏标记（不挡学习）
         self.repeat = repeat                # WZ 带 keydown 通道技（按住连发）
         self.has_ball = has_ball            # WZ 带 ball 节点：弹道技（非瞬发）
+        self.has_hit = has_hit              # WZ 带 hit 节点：攻击技（time 可能是状态时长）
+        self.has_mob_icon = has_mob_icon    # WZ 带 mob 节点：对怪上状态（debuff）
+        self.action = action                # WZ action 节点：官方施法动作名
+        self.helps = dict(helps) if helps else {}   # 级别 → WZ 逐级说明（hs→String.wz hN）
 
     def lv(self, level: int) -> dict:
         """第 level 级数值表（越界取最高级）。"""
         if not self.levels:
             return {}
         return self.levels[min(max(level, 1), len(self.levels)) - 1]
+
+    def help(self, level: int) -> str:
+        """第 level 级的 WZ 逐级说明文案（level.hs 指向 String.wz 的 hN）；无则空串。"""
+        if level <= 0:
+            return ""
+        return self.helps.get(level, "")
 
     def stat(self, level: int, key: str, default=0):
         val = self.lv(level).get(key)
@@ -91,18 +105,64 @@ class SkillDef:
 def skill_buff_seconds(d: "SkillDef", level: int) -> float:
     """技能若为纯 buff（非攻击）则返回其持续秒数，否则 0.0。
 
-    关键区分：多个攻击技能的 level 表也带 time（烈火箭/炸弹箭的燃烧 DoT/引信），
-    若仅凭 time 判定会被误当 buff 吞掉、不触发攻击。故再看
-    damage/mobCount/range/bulletCount/attackCount 任一 > 0 即视为攻击技能。
+    关键区分：多个攻击技能的 level 表也带 time（冰冻术冻结时长、烈火箭燃烧 DoT、
+    引信），若仅凭 time 判定会被误当 buff 吞掉、不触发攻击。故再看 WZ 是否带
+    hit 节点（攻击技），或 damage/mobCount/range/bulletCount/attackCount 任一
+    > 0，任一成立即视为攻击技能。
     """
     seconds = d.stat(level, "time", 0) if level > 0 else 0
     if seconds <= 0:
+        return 0.0
+    if getattr(d, "has_hit", False):
         return 0.0
     if any(d.stat(level, key, 0) > 0
            for key in ("damage", "mobCount", "range", "bulletCount",
                        "attackCount")):
         return 0.0
     return float(seconds)
+
+
+def _offensive(d: "SkillDef", level: int) -> bool:
+    """该级数值表是否含伤害标记（魔法 mad 或物理 damage）。"""
+    return d.stat(level, "mad", 0) > 0 or d.stat(level, "damage", 0) > 0
+
+
+def _has_area(d: "SkillDef", level: int) -> bool:
+    """该级数值表是否带 WZ lt/rb 攻击矩形。"""
+    table = d.lv(level)
+    return table.get("lt") is not None and table.get("rb") is not None
+
+
+def cast_form(d: "SkillDef", level: int) -> str:
+    """按 WZ 结构推导技能的施放形态（不再散落技能 id 硬编码）。
+
+    判定优先级由「WZ 顶层节点 + level 字段」共同决定：
+    · passive    —— 已登记被动（skill_effects 语义表，结构无法判定），不可落键
+    · buff       —— 有 time 且无攻击属性（魔法盾/精神力/无形箭…），扣消耗直接上 buff
+    · projectile —— 有 ball 节点（魔法弹/火焰箭/圣箭术…），生成弹道
+    · instant    —— 有 hit 或带伤害标记（魔法双击/冰冻术/武器攻击），瞬发命中
+    · aoe        —— instant 且带 lt/rb（雷电术/箭雨），按自身矩形结算
+    · mob_status —— 有 mob 节点且无伤害（缓速术/击退箭），对怪上状态无伤害
+    · unsupported—— 无任何施放标记（快速移动只有 range），需专用输入，暂不可施放
+    """
+    if level <= 0:
+        level = 1
+    sid = d.id
+    if sid == settings.SNAIL_THROW_SKILL_ID:
+        return "projectile"                     # 蜗牛投掷：借怪物贴图发射弹道
+    if skill_effects.is_passive(sid):
+        return "passive"
+    if skill_buff_seconds(d, level) > 0:
+        return "buff"
+    if d.has_ball:
+        return "projectile"
+    if d.has_hit:
+        return "aoe" if _has_area(d, level) else "instant"
+    if d.has_mob_icon and not _offensive(d, level):
+        return "mob_status"
+    if _offensive(d, level):
+        return "instant"
+    return "unsupported"
 
 
 def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
@@ -168,7 +228,14 @@ def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
                 # WZ 带 ball 节点 = 发射弹道（魔法弹）；无 ball 的魔法攻击（双击）
                 # 命中即结算、不生成飞行物
                 has_ball = node.get("ball") is not None
+                has_hit = node.get("hit") is not None
+                has_mob_icon = node.get("mob") is not None
+                action = ""
+                act_node = node.get("action/0")
+                if act_node is not None:
+                    action = str(getattr(act_node, "value", "") or "")
                 name, desc = f"技能 {sid}", ""
+                help_by_key: Dict[str, str] = {}
                 if s_root is not None:
                     sn = s_root.get(sid)
                     if sn is not None:
@@ -176,11 +243,22 @@ def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
                         de = sn.get("desc")
                         name = to_simplified(str(nm.value)) if nm is not None else name
                         desc = to_simplified(str(de.value)) if de is not None else ""
+                        # 逐级说明：String.wz 里 h1..hN，由 level.hs 引用
+                        for hc in sn.children():
+                            if hc.name[:1] == "h" and hc.name[1:].isdigit():
+                                help_by_key[hc.name] = to_simplified(str(hc.value))
                 max_lv = min(len(levels), settings.SKILL_MAX_LEVEL)
+                helps: Dict[int, str] = {}
+                for i, lvtab in enumerate(levels[:max_lv]):
+                    hs_key = lvtab.get("hs")
+                    if hs_key is not None:
+                        helps[i + 1] = help_by_key.get(str(hs_key), "")
                 defs[sid] = SkillDef(sid, name, desc, levels[:max_lv], max_lv,
                                      req=req, char_level=char_lv,
                                      invisible=invisible, repeat=repeat,
-                                     has_ball=has_ball)
+                                     has_ball=has_ball, has_hit=has_hit,
+                                     has_mob_icon=has_mob_icon, action=action,
+                                     helps=helps)
     except Exception:
         pass
     return defs
@@ -218,15 +296,26 @@ class SkillBook:
         return sorted(self.levels)
 
     def learnable(self, owner_group: Optional[int] = None) -> List[str]:
-        """可手动学习的技能（只排除转职附赠被动；invisible 不挡学习）；给定组则只回该转。"""
+        """可手动学习的技能（只排除转职附赠被动与 WZ 未声明形态的技能）；给定组则只回该转。"""
         return sorted(
             sid for sid in self.defs
             if sid not in self._passive_ids
+            and not self._unsupported(sid)
             and (owner_group is None or sp_group_of_skill(sid) == owner_group))
 
     def skills_for_group(self, group: int) -> List[str]:
-        """技能窗某转页签要展示的全部技能（含自动满级被动，按 id 排序）。"""
-        return sorted(sid for sid in self.defs if sp_group_of_skill(sid) == group)
+        """技能窗某转页签要展示的全部技能（含自动满级被动，按 id 排序）。
+
+        WZ 未声明施放形态的技能（快速移动等，cast_form=unsupported）不展示，避免空壳。
+        """
+        return sorted(sid for sid in self.defs
+                      if sp_group_of_skill(sid) == group
+                      and not self._unsupported(sid))
+
+    def _unsupported(self, skill_id: str) -> bool:
+        """该技能是否为 WZ 未声明施放形态（不可施放），用于门控与技能窗过滤。"""
+        d = self.defs.get(skill_id)
+        return d is not None and cast_form(d, max(1, d.max_level)) == "unsupported"
 
     # ── SP 结算 ────────────────────────────────────────────────────
     def add_sp(self, group: int, amount: int) -> None:
@@ -258,6 +347,8 @@ class SkillBook:
         """
         if skill_id in self._passive_ids:
             return False
+        if self._unsupported(skill_id):
+            return False
         group = sp_group_of_skill(skill_id)
         if self.sp_by_job.get(group, 0) <= 0:
             return False
@@ -270,6 +361,8 @@ class SkillBook:
         if player_level < d.char_level:
             return False
         for rid, rlv in d.req.items():
+            if self._unsupported(rid):
+                continue        # 前置未声明施放形态（如快速移动）不阻塞后续技能
             if self.levels.get(rid, 0) < rlv:
                 return False
         return True
@@ -343,13 +436,20 @@ class SkillBook:
             return None
         if self.cooldowns.get(skill_id, 0.0) > 0.0:
             return None
-        # 魔法攻击技：该级有 mad 加成且非持续 buff（time>0 的是魔法盾/铠甲）。
+        form = cast_form(d, lv)
+        if form in ("passive", "unsupported"):
+            return None
+        # 魔法攻击技：该级有 mad 加成且形态为攻击/弹道（buff 的 time 是持续、
+        # mob_status 的 time 是状态时长，均不参与魔法区间）。
         # 这类技能 WZ 无 damage 倍率，伤害由玩家魔法区间（含 skill_mad/mastery）决定。
-        magic = d.stat(lv, "mad", 0) > 0 and d.stat(lv, "time", 0) == 0
+        magic = (form in ("projectile", "instant", "aoe")
+                 and d.stat(lv, "mad", 0) > 0)
         data = {
             "id": skill_id,
             "def": d,
             "level": lv,
+            # 施放形态：由 WZ 顶层节点推导（见 cast_form），供战斗/世界分派
+            "form": form,                        # buff/projectile/instant/aoe/mob_status
             "mp_con": d.stat(lv, "mpCon", 0),
             "hp_con": d.stat(lv, "hpCon", 0),
             "damage": d.stat(lv, "damage", 100) / 100.0,
@@ -360,23 +460,38 @@ class SkillBook:
             # WZ 官方冷却字段为 cooltime（秒）；换算成毫秒供 start_cooldown 统一处理
             "cooldown_ms": d.stat(lv, "cooltime", 0) * 1000,
             "repeat": d.repeat,                  # 通道技：按住可连发
+            "action": d.action,                  # WZ action：官方施法动作名
             "magic": magic,                      # 魔法伤害走 mdd 与魔法区间
             "skill_mad": d.stat(lv, "mad", 0),
             "skill_mastery": d.stat(lv, "mastery", 0),
+            # WZ lt/rb 矩形（相对 navel）：AOE 自身范围 / mob_status debuff 范围
+            "area": None,
+            "status": None,                      # mob_status 的状态键（slow/freeze…）
+            "freeze": 0.0,                       # 命中冻结秒数（冰冻术）
+            "slow_x": 0,                          # 减速幅度（% 负值，缓速术）
+            "duration": 0.0,                      # debuff 持续秒数
         }
-        if skill_id == settings.SNAIL_THROW_SKILL_ID:
+        if form in ("aoe", "mob_status") and _has_area(d, lv):
+            data["area"] = (tuple(d.lv(lv)["lt"]), tuple(d.lv(lv)["rb"]))
+        if form == "mob_status":
+            data["status"] = skill_effects.DEBUFF_SKILLS.get(skill_id)
+            data["slow_x"] = d.stat(lv, "x", 0)
+            data["duration"] = float(d.stat(lv, "time", 0))
+        elif form == "projectile":
             data["projectile"] = True                  # 弹道技：不进近战命中框
-            data["speed"] = settings.SNAIL_THROW_SPEED
-            data["life"] = settings.SNAIL_THROW_LIFETIME
-        elif magic and d.has_ball:
-            # 有 ball 节点的魔法攻击（魔法弹）：发射弹道
-            data["projectile"] = True
-            data["speed"] = settings.MAGIC_BALL_SPEED
-            data["life"] = settings.MAGIC_BALL_LIFETIME
+            if skill_id == settings.SNAIL_THROW_SKILL_ID:
+                data["speed"] = settings.SNAIL_THROW_SPEED
+                data["life"] = settings.SNAIL_THROW_LIFETIME
+            elif magic:
+                data["speed"] = settings.MAGIC_BALL_SPEED
+                data["life"] = settings.MAGIC_BALL_LIFETIME
         elif magic:
-            # 无 ball 的魔法攻击（魔法双击）：瞬发、无弹道，
-            # 命中射箭同款瞄准扇形内的怪
+            # 无 ball 的魔法攻击（魔法双击/冰冻术/雷电术）：瞬发、无弹道。
+            # WZ 带 lt/rb 的按角色周围矩形结算（雷电术自身 AOE），否则命中瞄准扇形。
             data["cone_attack"] = True
+        if form in ("instant", "aoe", "projectile") \
+                and skill_effects.ATTACK_STATUS.get(skill_id) == "freeze":
+            data["freeze"] = float(d.stat(lv, "time", 0))
         return data
 
     def start_cooldown(self, skill_id: str, cooldown_ms: int = 0) -> None:

@@ -73,6 +73,24 @@ JOBS: Dict[int, JobDef] = {
         advance_lv=10, advance_sp=5, trainer_npc=1032001, starter_weapon="1372005",
         hp_gain=12, mp_gain=20, auto_ap={"int": 4, "luk": 1},
     ),
+    # 法师 2 转三系：火毒法师/冰雷法师/牧师。Skill.wz/210/220/230.img；沿用同一
+    # 导师汉斯 1032001（魔法图书馆 101000003），转职时三系中选一；被动 魔力吸收
+    # 与 1 转一致采 SP 学习（不附赠）；已有短杖故不补发。
+    2100: JobDef(
+        code=2100, name="火毒法师", tree_imgs=["210.img"],
+        advance_lv=30, advance_sp=4, prejob=2000, trainer_npc=1032001,
+        hp_gain=12, mp_gain=20, auto_ap={"int": 4, "luk": 1},
+    ),
+    2200: JobDef(
+        code=2200, name="冰雷法师", tree_imgs=["220.img"],
+        advance_lv=30, advance_sp=4, prejob=2000, trainer_npc=1032001,
+        hp_gain=12, mp_gain=20, auto_ap={"int": 4, "luk": 1},
+    ),
+    2300: JobDef(
+        code=2300, name="牧师", tree_imgs=["230.img"],
+        advance_lv=30, advance_sp=4, prejob=2000, trainer_npc=1032001,
+        hp_gain=12, mp_gain=20, auto_ap={"int": 4, "luk": 1},
+    ),
     # 弓箭手 1 转：Skill.wz/300.img；被动 精準強化/霸王箭/百步穿楊；
     # 导师赫丽娜(1012100)；转职附赠木弓(1452002，需求 Lv10 无属性要求，
     # 短弓 1452000 需求 Lv25/DEX80 转职时穿不上)
@@ -114,19 +132,40 @@ def can_advance(player, jobdef: JobDef) -> bool:
             and player.level >= jobdef.advance_lv)
 
 
-def job_for_trainer(npc_id, player_job: Optional[int] = None) -> Optional["JobDef"]:
-    """回传导师 npc_id 对应的转职目标职业（无则 None）。
+def jobs_for_trainer(npc_id, player_job: Optional[int] = None) -> List["JobDef"]:
+    """回传导师 npc_id 名下、此刻可由玩家转职的目标职业列表（保持注册顺序）。
 
-    给定 player_job 时按职业链解析：返回以该 NPC 为导师、且前置职业恰为玩家
-    当前职业的那一阶（赫丽娜一人承担 1/2/3 转）；已达最高阶或职业不符则 None。
-    不给 player_job 时回退旧语义：首个匹配该导师的职业。
+    给定 player_job 时只取前置职业恰为玩家当前职业的那一阶；一个导师可对应多个
+    分支（汉斯 1032001 → 火毒/冰雷/牧师），也可跨转线性多阶（赫丽娜一人承担
+    弓手 1/2/3/4 转）。不给 player_job 时返回该导师的全部职业。
     """
-    for jd in JOBS.values():
-        if jd.trainer_npc is None or str(jd.trainer_npc) != str(npc_id):
-            continue
-        if player_job is None or jd.prejob == player_job:
-            return jd
-    return None
+    return [jd for jd in JOBS.values()
+            if jd.trainer_npc is not None and str(jd.trainer_npc) == str(npc_id)
+            and (player_job is None or jd.prejob == player_job)]
+
+
+def job_for_trainer(npc_id, player_job: Optional[int] = None) -> Optional["JobDef"]:
+    """回传导师 npc_id 对应的**首个**转职目标职业（无则 None）。
+
+    分支职业（法师二转）请改用 jobs_for_trainer 取全量；本函数保留给线性职业链
+    与 NPC 自带 talk() 脚本的单目标语义。
+    """
+    jobs = jobs_for_trainer(npc_id, player_job)
+    return jobs[0] if jobs else None
+
+
+def jobdef_for_advance_quest(qid: str) -> Optional["JobDef"]:
+    """转职任务 qid（adv_<code>）→ 对应目标职业；非转职任务返回 None。
+
+    分支职业下 qid 是唯一能区分「玩家点了哪一系」的事实来源（同一教官的
+    job_for_trainer 只能给出第一个分支），故 NPC 会话据此定位目标职业。
+    """
+    if not str(qid).startswith("adv_"):
+        return None
+    try:
+        return JOBS.get(int(str(qid)[4:]))
+    except (TypeError, ValueError):
+        return None
 
 
 def skill_ids_for_job(assets, code: int) -> List[str]:

@@ -123,6 +123,10 @@ class Monster:
         self.hit_flash = 0.0
         self.hp_bar_timer = 0.0    # 受击后脚下血条剩余显示时长
         self.attack_cooldown = 0.0
+        # 玩家技能施加的异常：减速倍率 / 冻结（移速归零、不接触攻击）
+        self.slow_mult = 1.0
+        self.slow_timer = 0.0
+        self.frozen_timer = 0.0
         self.dead = False
         self.remove_after = 0.0
         self._death_sound_played = False
@@ -219,6 +223,24 @@ class Monster:
         action = "die1" if self._has("die1") else ("die" if self._has("die") else "hit1")
         self._load_action(action)
 
+    # ── 玩家技能施加的异常 ──────────────────────────────────────────
+    def apply_slow(self, mult: float, seconds: float) -> None:
+        """减速：移速乘 mult（<1 变慢），取更长剩余时长；重复上取最新倍率。"""
+        if seconds > 0:
+            self.slow_mult = mult
+            self.slow_timer = max(self.slow_timer, seconds)
+
+    def apply_freeze(self, seconds: float) -> None:
+        """冻结：移速归零且不产生接触伤害，取更长剩余时长。"""
+        if seconds > 0:
+            self.frozen_timer = max(self.frozen_timer, seconds)
+
+    def speed_now(self) -> float:
+        """当前有效移速：冻结为 0，减速按倍率缩放（含飞行怪）。"""
+        if self.frozen_timer > 0:
+            return 0.0
+        return self.move_speed * self.slow_mult
+
     def _knockback_distance(self) -> float:
         """受击退距离：boss 与 pushed<=0 的怪不退，其余按 pushed 抗性反比缩放。"""
         if self.boss or self.pushed <= 0:
@@ -246,6 +268,14 @@ class Monster:
         # 攻击冷却
         if self.attack_cooldown > 0:
             self.attack_cooldown -= dt
+
+        # 异常状态倒计时：减速到期恢复常速，冻结到期解冻
+        if self.slow_timer > 0:
+            self.slow_timer -= dt
+            if self.slow_timer <= 0:
+                self.slow_mult = 1.0
+        if self.frozen_timer > 0:
+            self.frozen_timer -= dt
 
         # 回蓝（异常技能按 mpCon 耗蓝）
         if self.max_mp > 0 and self.mp < self.max_mp and self.mp_recovery > 0:
@@ -277,7 +307,7 @@ class Monster:
 
         if chasing and dist > settings.MOB_ATTACK_RANGE:
             self.state = "chase"
-            step = self.move_speed * dt
+            step = self.speed_now() * dt
             if dx > 0:
                 self._advance_x(min(self.x + step, player_x - 1))
                 self.dir = 1
@@ -304,6 +334,7 @@ class Monster:
         # 接触伤害（近身且冷却完毕；出生保护期内不攻击；不同层不攻击；
         # bodyAttack=0 的怪只挡路不造成伤害）
         if (self.body_attack and (not no_aggro)
+                and self.frozen_timer <= 0
                 and dist <= settings.MOB_ATTACK_RANGE
                 and dy <= settings.MOB_CONTACT_Y_RANGE
                 and self.attack_cooldown <= 0):
@@ -328,11 +359,11 @@ class Monster:
             if self.wander_target > self.x:
                 self.dir = 1
                 blocked = self._advance_x(
-                    min(self.x + self.move_speed * dt, self.wander_target))
+                    min(self.x + self.speed_now() * dt, self.wander_target))
             else:
                 self.dir = -1
                 blocked = self._advance_x(
-                    max(self.x - self.move_speed * dt, self.wander_target))
+                    max(self.x - self.speed_now() * dt, self.wander_target))
             if blocked or abs(self.x - self.wander_target) < 0.5:
                 self._wander_walking = False
                 self._wander_timer = random.uniform(*settings.MOB_WANDER_PAUSE)

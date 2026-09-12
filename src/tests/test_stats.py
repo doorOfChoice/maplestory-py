@@ -108,25 +108,28 @@ def test_defense_includes_dex_and_equipment():
     assert defense({"str": 4, "dex": 50, "int": 4, "luk": 4}, 20) == 25
 
 
-def test_magic_attack_formula():
-    """魔法力 = (2×INT + LUK) × 武器 MAD / 100（经典法伤折算）。"""
-    assert magic_attack({"str": 4, "dex": 4, "int": 100, "luk": 10}, 30) == 63
-    assert magic_attack({"str": 4, "dex": 4, "int": 4, "luk": 4}, 0) == 0
+def test_magic_power_is_int_plus_equipment_mad():
+    """旧版面板魔法力 = 总 INT + 装备 M.ATK（卷轴/buff 由调用方另加）。"""
+    assert magic_attack({"str": 4, "dex": 4, "int": 100, "luk": 10}, 30) == 130
+    assert magic_attack({"str": 4, "dex": 4, "int": 4, "luk": 4}, 0) == 4
 
 
-def test_magic_attack_range_includes_skill_mad_and_mastery():
-    """魔法攻击区间：技能 mad 并入武器 MAD；mastery 撑高下限。"""
-    stats = {"str": 4, "dex": 4, "int": 100, "luk": 10}
-    lo, hi = magic_attack_range(stats, 30, mastery=1.0)
-    assert (lo, hi) == (63, 63)                 # 满熟练：上下限重合
-    lo, hi = magic_attack_range(stats, 30, skill_mad=20, mastery=0.10)
-    assert hi == 105                            # (2×100+10)×(30+20)/100
-    assert lo == 10                             # 105 × 10%
+def test_magic_attack_range_follows_old_spell_formula():
+    """旧版法师伤害：term=Magic²/1000+Magic；Max=(term/30+INT/200)×Basic。
+
+    Magic=130, INT=100, Basic=30 → term=146.9。
+    Max=(146.9/30+0.5)×30=161.9→161；满熟练时限=Max；10% 熟练下限=29.69→29。
+    """
+    lo, hi = magic_attack_range(100, 130, 30, mastery=1.0)
+    assert (lo, hi) == (161, 161)
+    lo, hi = magic_attack_range(100, 130, 30, mastery=0.10)
+    assert (lo, hi) == (29, 161)
 
 
 def test_magic_attack_range_floors_at_one():
-    """武器/技能 MAD 全为 0 时区间下限仍为 1，不出现 0 伤害。"""
-    assert magic_attack_range(base_stats(), 0) == (1, 1)
+    """Basic（技能 mad）为 0 时区间为 (1,1)，不出现 0 伤害。"""
+    assert magic_attack_range(100, 130, 0) == (1, 1)
+    assert magic_attack_range(base_stats()["int"], 0, 0) == (1, 1)
 
 
 def test_magic_defense_includes_int_and_equipment():

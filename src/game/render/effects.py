@@ -66,9 +66,10 @@ class Effect:
         sx, sy = camera.to_screen(self.x, self.y)
         if self.use_origin:
             ox, oy = self.anim.frames[idx][1]
-            if self.flip:
-                ox = self.anim.frames[idx][0].get_width() - 1 - ox
-            surface.blit(img, (int(sx - ox), int(sy - oy)))
-            return
+            if ox or oy:        # 个别 WZ 帧无 origin（0,0）：退回居中，避免贴左上角
+                if self.flip:
+                    ox = self.anim.frames[idx][0].get_width() - 1 - ox
+                surface.blit(img, (int(sx - ox), int(sy - oy)))
+                return
         surface.blit(img, (int(sx - img.get_width() / 2),
                            int(sy - img.get_height() / 2)))

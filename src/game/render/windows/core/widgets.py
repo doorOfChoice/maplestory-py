@@ -163,11 +163,11 @@ _tip_num_font: Optional[pygame.font.Font] = None
 
 
 def _tip_font_big() -> pygame.font.Font:
-    """大数字（攻击力）字号 24 的缓存字体（12px 点阵字体的整数倍）。"""
+    """大数字（攻击力/魔法力提升）的缓存字体：18px，比正文大但不喧宾夺主。"""
     global _tip_num_font
     if _tip_num_font is None:
         from game.core.fonts import load_cjk_font
-        _tip_num_font = load_cjk_font(24)
+        _tip_num_font = load_cjk_font(18)
     return _tip_num_font
 
 
@@ -214,7 +214,8 @@ def _draw_equip_tip(surface, svc: WindowServices, mouse_pos: Tuple[int, int],
     name_h = lh + 8
     flag_h = lh + 4 if flag_text else 0
     icon_size = 38
-    hero_col_h = sum(max(lh, bh) + 3 for _h in tip.heroes) or icon_size
+    # 每条英雄数值占「标签行 + 大数字行」两行，缺一即与 REQ 段重叠
+    hero_col_h = sum(lh + bh + 3 for _h in tip.heroes) or icon_size
     hero_block_h = max(icon_size + 2, hero_col_h)
     has_req = tip.req_level is not None or bool(tip.req_stats)
     req_h = (lh if tip.req_level is not None else 0) + len(tip.req_stats) * lh
@@ -271,7 +272,7 @@ def _draw_equip_tip(surface, svc: WindowServices, mouse_pos: Tuple[int, int],
     for h in tip.heroes:
         _blit_text(surface, fs, h.label, item_tip.GRAY, hx, hy)
         _blit_text(surface, big, _signed_num(h.value), h.color, hx, hy + lh)
-        hy += max(lh, bh) + 3
+        hy += lh + bh + 3
     cy += hero_block_h
 
     # ── REQ：等级左列，四维右列 ──────────────────────────────────────

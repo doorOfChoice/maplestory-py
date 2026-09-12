@@ -4,8 +4,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from game.core.jobs import (JOBS, can_advance, is_ranged_weapon, job_chain,
-                            job_for_trainer, job_sp_group, resolve_skill_img,
-                            sp_group_of_skill)
+                            job_for_trainer, job_sp_group,
+                            jobdef_for_advance_quest, jobs_for_trainer,
+                            resolve_skill_img, sp_group_of_skill)
 
 
 def test_resolve_skill_img_by_length():
@@ -49,6 +50,44 @@ def test_magician_is_first_job_with_trainer_and_wand():
 def test_magician_passives_are_not_auto_granted():
     """法师 2000 的被动（魔力恢复/魔力强化）需花 SP 学，非转职附赠。"""
     assert JOBS[2000].passive_ids == []
+
+
+def test_magician_second_jobs_share_trainer():
+    """法师二转三系：前置法师 2000、需 Lv30、树 210/220/230.img、共用导师汉斯 1032001。"""
+    for code, tree in ((2100, "210.img"), (2200, "220.img"), (2300, "230.img")):
+        jd = JOBS[code]
+        assert jd.prejob == 2000
+        assert jd.advance_lv == 30
+        assert jd.tree_imgs == [tree]
+        assert jd.trainer_npc == 1032001
+        assert jd.starter_weapon is None          # 已有短杖，不再补发
+        assert can_advance(SimpleNamespace(job=2000, level=29), jd) is False
+        assert can_advance(SimpleNamespace(job=2000, level=30), jd) is True
+        assert can_advance(SimpleNamespace(job=0, level=30), jd) is False
+
+
+def test_magician_second_jobs_are_sp_learned_not_auto_passive():
+    """法师二转三系不附赠被动（与法师 1 转一致：被动花 SP 学）。"""
+    assert JOBS[2100].passive_ids == []
+    assert JOBS[2200].passive_ids == []
+    assert JOBS[2300].passive_ids == []
+    assert JOBS[2100].advance_sp == 4
+
+
+def test_jobs_for_trainer_lists_all_shared_branches():
+    """汉斯同时承担法师 1/2 转：按当前职业列全三系分支（火毒/冰雷/牧师）。"""
+    assert [j.code for j in jobs_for_trainer(1032001, player_job=2000)] \
+        == [2100, 2200, 2300]
+    assert [j.code for j in jobs_for_trainer(1032001, player_job=0)] == [2000]
+    assert jobs_for_trainer(1032001, player_job=2100) == []
+
+
+def test_jobdef_for_advance_quest_resolves_branch():
+    """转职任务 qid adv_<code> → 该分支职业；非转职 qid 返回 None。"""
+    assert jobdef_for_advance_quest("adv_2200") is JOBS[2200]
+    assert jobdef_for_advance_quest("adv_3000") is JOBS[3000]
+    assert jobdef_for_advance_quest("c_1072001_1") is None
+    assert jobdef_for_advance_quest("adv_9999") is None
 
 
 def test_hunter_is_bowman_second_job():
@@ -106,6 +145,8 @@ def test_job_chain_orders_from_first_to_current():
     assert [j.code for j in job_chain(3110)] == [0, 3000, 3100, 3110]
     assert [j.code for j in job_chain(3120)] == [0, 3000, 3100, 3110, 3120]
     assert [j.code for j in job_chain(3000)] == [0, 3000]
+    assert [j.code for j in job_chain(2100)] == [0, 2000, 2100]
+    assert [j.code for j in job_chain(2300)] == [0, 2000, 2300]
 
 
 def test_job_chain_newbie_has_snail_tree():

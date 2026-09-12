@@ -248,7 +248,8 @@ TRAINER_SPAWN_MAP = "100010000"  # 出生图（弓箭手村东部小山；WZ 冒
 MAGICIAN_JOB = 2000              # 法师 1 转职业码
 MAGICIAN_STARTER_WAND = "1372005"  # 转职附赠木制短杖（需求 Lv8、无属性要求、MAD 23）
 MAGICIAN_TRAINER_NPC = "1032001"   # 导师汉斯（魔法图书馆 101000003）
-MAGIC_BASE_MASTERY = 0.10        # 法师基础熟练度（伤害下限比例）
+MAGIC_BASE_MASTERY = 0.10        # 旧版法师基础熟练度（伤害下限比例）
+MAGIC_MASTERY_PER_POINT = 0.05   # 每点 WZ mastery 抬高的下限比例（满 10 点 → 0.60）
 MAGIC_BALL_SPEED = 620.0         # 魔法弹飞行速度 px/s（比箭慢、比蜗牛快）
 MAGIC_BALL_LIFETIME = 0.5        # 魔法弹存活秒数
 

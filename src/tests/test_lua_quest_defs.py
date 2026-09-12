@@ -281,6 +281,31 @@ def test_build_advance_quest_defs_trainer_collect():
     assert [it.qid for it in items] == ["adv_3000"]
 
 
+def test_build_advance_quest_defs_includes_magician_second_branches():
+    """法师二转三系各生成一条转职任务，均挂在导师汉斯 1032001、前置法师 2000。"""
+    defs = build_advance_quest_defs()
+    for code, name in ((2100, "转职：火毒法师"), (2200, "转职：冰雷法师"),
+                       (2300, "转职：牧师")):
+        d = defs[f"adv_{code}"]
+        assert d.name == name
+        assert d.script == "advance"
+        assert d.start_npc == 1032001
+        assert d.end_npc == 1032001
+        assert d.jobs == [2000]
+
+
+def test_magician_trainer_offers_all_three_branches_at_once():
+    """导师汉斯 1032001：玩家为法师时三条二转分支同时可接，转职后一并消失。"""
+    defs = build_advance_quest_defs()
+    log = QuestLog(defs)
+    player = SimpleNamespace(level=30, job=2000, x=0.0, y=0.0,
+                             inventory=SimpleNamespace(etcs={}, consumes={}))
+    qids = [it.qid for it in collect_npc_quests(defs, log, "1032001", player)]
+    assert qids == ["adv_2100", "adv_2200", "adv_2300"]
+    player.job = 2100
+    assert collect_npc_quests(defs, log, "1032001", player) == []
+
+
 def test_advance_quests_follow_job_chain():
     """同一导师按职业链给任务：新手→adv_3000 …… 神射手→adv_3120，弓手大师→无。"""
     defs = build_advance_quest_defs()

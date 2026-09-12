@@ -48,6 +48,20 @@ _BUFF_OVERRIDES: Dict[str, Dict[str, str]] = {
     # 魔法铠甲(2001003) 走通用字段 pdd→def，无需覆盖
 }
 
+# ── 攻击附带的怪物状态 ───────────────────────────────────────────────
+# 伤害型攻击命中后施加的状态：技能 id → 状态键（持续秒数取 level 的 time）。
+ATTACK_STATUS: Dict[str, str] = {
+    "2201004": "freeze",   # 冰冻术：命中冻结 time 秒
+}
+
+# 怪物 debuff 技：技能 id → 状态键。施放形态由 WZ 的 mob 节点推导（见 skills.cast_form），
+# 本表只负责「哪一种状态」这一 WZ 无法表达的语义。不进入伤害结算，
+# 按 lt/rb 范围选最多 mobCount 只目标施加（减速幅度取 level 的 x，负=减速）。
+DEBUFF_SKILLS: Dict[str, str] = {
+    "2201003": "slow",     # 缓速术
+}
+
+
 # ── 被动逐技能声明（mod 键 → WZ 字段）────────────────────────────────
 _PASSIVE_FIELDS: Dict[str, Dict[str, str]] = {
     "3000000": {"acc": "x"},                      # 精準強化：x=命中
@@ -60,6 +74,7 @@ _PASSIVE_FIELDS: Dict[str, Dict[str, str]] = {
     "3120005": {"mastery": "mastery", "acc": "x"},        # 弓術精通
     "2000001": {"mp": "x"},                       # 魔力强化：x=MaxMP 提升
     "2000000": {"mp_regen": "mp_regen"},          # 魔力恢复：合成表（WZ 无数值），提升自然回蓝
+    "2200000": {},                                # 魔力吸收：命中回蓝在 combat._absorb_mp 特判
 }
 
 # 未登记被动的通用回退字段（平坦键，不使用 x/y/prop/damage 等歧义字段）

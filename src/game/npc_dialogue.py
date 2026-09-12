@@ -38,7 +38,7 @@ from game.systems.script_api import make_globals
 from game.systems.shop import STORAGE_NPC, shops_of
 from game.render.windows.core.dialogs import Modal
 from game.core import travel
-from game.core.jobs import JOBS, job_for_trainer
+from game.core.jobs import JOBS, job_for_trainer, jobdef_for_advance_quest
 
 # 对话层「消费」某次点击后，game.py 不再把该事件交给商店/面板
 # 玩家走远超过该横坐标距离即自动收起对话
@@ -456,8 +456,12 @@ class NpcDialogueController:
         path = _CONTENT_DIR / f"{script_name}.lua"
         if not path.is_file():
             return False
-        host = self._host_ctx(npc, jobdef=job_for_trainer(
-            npc.npc_id, self.ctx.world.player.job))
+        # 转职任务带 qid（adv_<code>）：分支职业据此定位点击的那一系；NPC 自带
+        # talk() 脚本无 qid，回退导师单目标解析。
+        jobdef = jobdef_for_advance_quest(qid) if qid else None
+        if jobdef is None:
+            jobdef = job_for_trainer(npc.npc_id, self.ctx.world.player.job)
+        host = self._host_ctx(npc, jobdef=jobdef)
         ctx_view = make_ctx_view(host.player, npc.npc_id, npc.name,
                                  self.assets.map_id, jobdef=host.jobdef)
         try:
