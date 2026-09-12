@@ -122,7 +122,7 @@ class SkillWindow(Window):
         player_level = self.svc.player().level
         x, y = self.place(surface, (SKL_W, SKL_H))
         surface.blit(widgets.wz_surface(self.svc, SKL_BG), (x, y))
-        self.add_chrome(surface, x, y, SKL_W, 44, button=False)
+        self.add_chrome(surface, x, y, SKL_W, 44)
         # SP（本转结余，浅色标题条右侧 → 深字）
         sp = ft.render(f"{sp_group}", True,
                        (0, 0, 0) if sp_group > 0 else (0, 0, 0))

@@ -372,7 +372,7 @@ class InventoryWindow(Window):
 
         fs = self.svc.ui.font_small
         surface.blit(bg, (x, y))
-        self.add_chrome(surface, x, y, INV_W, 23, button=False)
+        self.add_chrome(surface, x, y, INV_W, 23)
 
         # 页签条（底图 y23~42 空带；原版汉字烤死在图内）：选中=enabled
         tx = x + 4
@@ -593,7 +593,7 @@ class EquipWindow(Window):
             return
 
         surface.blit(bg, (x, y))
-        self.add_chrome(surface, x, y, EQP_W, 30, button=False)
+        self.add_chrome(surface, x, y, EQP_W, 30)
         for slot in SLOT_ORDER:
             pos = EQP_SLOT_POS.get(slot)
             if pos is None:

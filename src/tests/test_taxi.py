@@ -155,6 +155,9 @@ class FakeWindows:
     def request_modal(self, modal):
         self.modals.append(modal.open())
 
+    def modal_open(self):
+        return bool(self.modals)
+
     def confirm_modal(self):
         """模拟点弹框「出发」：确认最新一个模态框。"""
         self.modals.pop().confirm()
@@ -201,6 +204,29 @@ def test_taxi_click_pays_and_warps():
     ctx.windows.confirm_modal()
     assert ctx.world.combat.meso == 500
     assert warps == ["103000000"]
+
+
+def test_confirm_modal_owns_click_over_still_open_menu():
+    """确认框弹出后，叠在菜单上的点击必须交给模态框，不被对话层吞掉。"""
+    ctrl, ctx, warps = _taxi_controller(1500)
+    ctrl.try_talk()
+    ctx.ui.conv.set_hit(0)
+    ctrl.consume_click((0, 0))          # 点目的地 → 弹确认框
+    assert ctx.windows.modal_open()
+    # 确认框按钮与菜单重叠：再次点击应落到模态框，而非误触下层菜单
+    assert ctrl.consume_click((0, 0)) is False
+    assert warps == []
+
+
+def test_modal_open_blocks_dialogue_keydown():
+    """确认框打开期间，Enter/Esc 交给模态框处理，对话层不消费。"""
+    ctrl, ctx, warps = _taxi_controller(1500)
+    ctrl.try_talk()
+    ctx.ui.conv.set_hit(0)
+    ctrl.consume_click((0, 0))
+    assert ctx.windows.modal_open()
+    assert ctrl.consume_keydown(pygame.K_RETURN) is False
+    assert ctrl.consume_keydown(pygame.K_ESCAPE) is False
 
 
 def test_taxi_click_without_money_refuses():

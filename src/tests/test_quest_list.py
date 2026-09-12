@@ -227,3 +227,15 @@ def test_show_folds_all_slots_into_state():
     assert panel.button_keys == ["yes", "no"] and not panel.terminal
     panel.show("T", [], [], [], True)
     assert panel.terminal and panel.button_keys == []
+
+
+def test_close_button_registered_and_hits():
+    """左下角注册官方「結束對話」热区，命中返回 close 键（点击等价 Esc）。"""
+    panel = ConvPanel(FakeAssets())
+    panel.show("T", ["你好"], [], [], False)
+    draw_panel(panel)
+    close = [rect for rect, key in panel.buttons if key == "close"]
+    assert len(close) == 1
+    assert panel.button_hit(close[0].center) == "close"
+    assert close[0].left < panel.rect.centerx        # 固定在左下（动作钮在右）
+    assert close[0].bottom <= panel.rect.bottom

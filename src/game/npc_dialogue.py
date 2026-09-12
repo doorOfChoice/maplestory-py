@@ -179,11 +179,24 @@ class NpcDialogueController:
             on_shop=self._request_shop)
 
     # ── 输入路由 ─────────────────────────────────────────────────────
+    def _modal_open(self) -> bool:
+        """全局模态框（如出租车乘车确认）打开时，对话层一律让路。
+
+        模态框叠在会话面板之上，若对话层先消费事件，就会出现「点弹窗按钮
+        被下层对话框吃掉」的 bug；让路后事件落到 WindowManager 的模态分发。
+        """
+        mgr = getattr(self.ctx, "windows", None)
+        check = getattr(mgr, "modal_open", None)
+        return bool(check()) if callable(check) else False
+
     def consume_click(self, pos: Tuple[int, int]) -> bool:
         """鼠标左键是否被对话层消费（返回 True 时 game.py 不再转交面板/商店）。
 
-        优先序：会话（链接 > 按钮 > 点外关闭）> 商店/仓库按钮 > 点击气泡关闭。
+        优先序：全局模态框 > 会话（链接 > 按钮 > 点外关闭）> 商店/仓库按钮 >
+        点击气泡关闭。
         """
+        if self._modal_open():
+            return False
         if self._conv is not None:
             idx = self.ctx.ui.conv.link_hit(pos)
             if idx is not None:
@@ -209,12 +222,16 @@ class NpcDialogueController:
 
     def consume_wheel(self, pos: Tuple[int, int], amount: int) -> bool:
         """滚轮是否被会话面板正文滚动消费（仅在指针悬于面板视口时）。"""
+        if self._modal_open():
+            return False
         if self._conv is not None:
             return self.ctx.ui.conv.handle_wheel(pos, amount)
         return False
 
     def consume_keydown(self, key: int) -> bool:
         """回车/空格/Esc/方向键/数字 是否被对话层消费；其余交回 game.py。"""
+        if self._modal_open():
+            return False
         if self._conv is not None:
             if key == pygame.K_ESCAPE:
                 self._conv.press("close")

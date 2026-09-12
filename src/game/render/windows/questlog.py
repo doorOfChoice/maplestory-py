@@ -251,7 +251,7 @@ class QuestLogWindow(Window):
             surface.blit(bg, (x, y))
         else:
             widgets.panel_frame(surface, pygame.Rect(x, y, LIST_W, LIST_H))
-        self.add_chrome(surface, x, y, LIST_W, 22, button=bg is None)
+        self.add_chrome(surface, x, y, LIST_W, 22)
 
         ids = self.quests_for_tab(self.tab)
         self._ensure_selection(ids)

@@ -36,6 +36,8 @@ WHEEL_STEP = LIST_ROW_H    # 滚轮每格滚动像素
 QUEST_LIST_BLUE = (51, 102, 204)
 QUEST_LIST_BLUE_HOVER = (120, 175, 250)
 
+CONV_CLOSE_W, CONV_CLOSE_H = 85, 19   # 官方 UtilDlgEx/BtClose「結束對話」原生尺寸
+
 
 def wrap_text(text: str, width: int, font: pygame.font.Font) -> List[str]:
     """按像素宽逐字换行；空串返回 ['']。"""
@@ -445,6 +447,27 @@ class ConvPanel:
             surface.blit(img, (bx, by))
             btns.append((pygame.Rect(bx, by, bw_, bh_), key))
             right -= bw_ + 10
+
+        # 左下角官方「結束對話」钮：点击等价 Esc（press("close")）
+        crect = pygame.Rect(x + 10, y + h - CONV_CLOSE_H - 10,
+                            CONV_CLOSE_W, CONV_CLOSE_H)
+        close_img = self._img("UIWindow.img", "UtilDlgEx/BtClose/normal/0")
+        if close_img is not None:
+            mx, my = pygame.mouse.get_pos()
+            hover = crect.collidepoint(mx * settings.VIEW_W // settings.WINDOW_W,
+                                       my * settings.VIEW_H // settings.WINDOW_H)
+            img = self._img(
+                "UIWindow.img",
+                f"UtilDlgEx/BtClose/{'mouseOver' if hover else 'normal'}/0")
+            surface.blit(img or close_img, crect.topleft)
+        else:                       # 素材缺失 → 自绘同尺寸绿底钮，关闭能力不丢
+            pygame.draw.rect(surface, (86, 146, 56), crect, border_radius=4)
+            pygame.draw.rect(surface, (54, 96, 36), crect, 1, border_radius=4)
+            label = self.font_small.render("结束对话", True, (250, 250, 245))
+            surface.blit(label, (crect.centerx - label.get_width() // 2,
+                                 crect.centery - label.get_height() // 2))
+        btns.append((crect, "close"))
+
         # 键盘焦点落在 yes/no 按钮上：金色描边提示「再按 Enter 生效」
         if len(self.links) <= self.focus < len(self.links) + len(self.button_keys):
             fk = self.button_keys[self.focus - len(self.links)]

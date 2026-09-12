@@ -101,16 +101,13 @@ class Window:
             self.close_rect.topleft = (x + w - 34, y + 3)
 
     # ── chrome（标题拖拽热区 + 原版关闭钮）──────────────────────────
-    def add_chrome(self, surface, x: int, y: int, w: int, title_h: int,
-                   button: bool = True) -> None:
-        """子类 blit 底板后调用：登记标题热区并画右上角关闭按钮。
+    def add_chrome(self, surface, x: int, y: int, w: int, title_h: int) -> None:
+        """子类 blit 底板后调用：登记标题热区并画右上角官方关闭按钮。
 
-        button=False 用于官方底板窗口（原版无自绘 CLOSE，关窗走 Esc/热键）。
+        关窗钮取官方 UIWindow/BtUIClose（缺素材回退自绘红 ×），所有面板
+        顶栏右侧统一可点。
         """
         self.title_rect = pygame.Rect(x, y, w, title_h)
-        if not button:
-            self.close_rect = None
-            return
         rect = pygame.Rect(x + w - 34, y + 3, 32, 15)
         img = widgets.ui_button_surface(self.svc, "BtUIClose", rect,
                                         self.svc.mouse())
