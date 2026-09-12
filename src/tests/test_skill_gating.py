@@ -177,6 +177,23 @@ def test_from_dict_legacy_derives_passives_from_levels():
     assert book.levels["3000001"] == 20
 
 
+def test_sp_learned_passive_survives_load_and_applies():
+    """花 SP 学的被动（魔力強化 2000001）读档后仍计入 passive_mods 且可继续学。"""
+    book = SkillBook(None, 2000, defs={"2000001": make_def("2000001", x=20)})
+    book.from_dict({"sp": 0, "levels": {"2000001": 5}, "passives": [],
+                    "hotkeys": {}})
+    assert book.passive_mods().get("mp") == 20
+    assert "2000001" in book.learnable()
+
+
+def test_from_dict_rebuilds_auto_passives_from_chain():
+    """读档按当前职业链重建附赠被动，丢弃旧档误记的法师被动（恢复为可学）。"""
+    book = SkillBook(None, 2000, defs={"2000001": make_def("2000001", x=20)})
+    book.from_dict({"sp": 0, "levels": {"2000001": 10},
+                    "passives": ["2000001"], "hotkeys": {}})
+    assert "2000001" in book.learnable()
+
+
 def test_gain_sp_for_level_routes_to_tier():
     """升级 SP 归入职业链中「解锁等级 ≤ 本等级」的最高一阶组。"""
     book = SkillBook(None, 3100, defs={})       # 链 = [弓箭手(10), 猎人(30)]

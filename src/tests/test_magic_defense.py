@@ -48,6 +48,9 @@ class _Player:
     def attack_range(self):
         return (100, 100)
 
+    def magic_attack_range(self, skill_mad=0, skill_mastery=0):
+        return (100, 100)
+
     def crit_rate(self) -> float:
         return 0.0
 

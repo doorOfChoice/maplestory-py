@@ -7,8 +7,8 @@ from game import settings
 from game.core.stats import (accuracy, allocate, attack, attack_range,
                              auto_allocate, base_stats, defense, evasion,
                              exp_to_next, hit_chance, magic_attack,
-                             magic_defense, max_hp, max_mp, roll_damage,
-                             wear_block)
+                             magic_attack_range, magic_defense, max_hp, max_mp,
+                             roll_damage, wear_block)
 
 
 def test_allocate_adds_stat_and_consumes_ap():
@@ -112,6 +112,21 @@ def test_magic_attack_formula():
     """魔法力 = (2×INT + LUK) × 武器 MAD / 100（经典法伤折算）。"""
     assert magic_attack({"str": 4, "dex": 4, "int": 100, "luk": 10}, 30) == 63
     assert magic_attack({"str": 4, "dex": 4, "int": 4, "luk": 4}, 0) == 0
+
+
+def test_magic_attack_range_includes_skill_mad_and_mastery():
+    """魔法攻击区间：技能 mad 并入武器 MAD；mastery 撑高下限。"""
+    stats = {"str": 4, "dex": 4, "int": 100, "luk": 10}
+    lo, hi = magic_attack_range(stats, 30, mastery=1.0)
+    assert (lo, hi) == (63, 63)                 # 满熟练：上下限重合
+    lo, hi = magic_attack_range(stats, 30, skill_mad=20, mastery=0.10)
+    assert hi == 105                            # (2×100+10)×(30+20)/100
+    assert lo == 10                             # 105 × 10%
+
+
+def test_magic_attack_range_floors_at_one():
+    """武器/技能 MAD 全为 0 时区间下限仍为 1，不出现 0 伤害。"""
+    assert magic_attack_range(base_stats(), 0) == (1, 1)
 
 
 def test_magic_defense_includes_int_and_equipment():

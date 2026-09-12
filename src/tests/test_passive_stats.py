@@ -11,7 +11,7 @@ from game.core.jobs import JobDef
 from game.core.stats import base_stats
 from game.entities.player import Player
 from game.systems.inventory import Inventory, Item
-from game.systems.skills import SkillBook, SkillDef
+from game.systems.skills import SkillBook, SkillDef, apply_synthesized
 
 
 class StubAssets:
@@ -94,6 +94,38 @@ def test_hp_passive_raises_max_hp(monkeypatch):
     }, [9999999])
     boosted.recalc_vitals()
     assert boosted.max_hp == plain.max_hp + 50
+
+
+def test_mp_passive_raises_max_mp(monkeypatch):
+    """魔力强化 x=20 → mp 词条 +20，重算上限后 max_mp 增加 20。"""
+    plain = make_player(monkeypatch, {}, [])
+    plain.recalc_vitals()
+    boosted = make_player(monkeypatch, {
+        "2000001": passive("2000001", "魔力强化", {"x": 20}),
+    }, [2000001])
+    boosted.recalc_vitals()
+    assert boosted.max_mp == plain.max_mp + 20
+
+
+def test_mp_recovery_passive_learned_with_sp_raises_regen(monkeypatch):
+    """魔力恢復需花 SP 学；合成每级 +2 点(0.1/s)，12 级 → 自然回蓝基础 +2.4/s。"""
+    player = make_player(monkeypatch, {
+        "2000000": passive("2000000", "魔力恢復", {"mp_regen": 2}),
+    }, [])
+    assert "2000000" in player.skills.learnable()
+    player.skills.add_sp(200, 12)
+    for _ in range(12):
+        player.skills.learn("2000000", 1)
+    assert player.mp_regen() == pytest.approx(settings.SKILL_MP_REGEN + 2.4)
+
+
+def test_apply_synthesized_fills_magic_recovery_levels():
+    """魔力恢復(2000000) 合成表：满级(16) mp_regen=32，覆盖 WZ 的空 hs 表。"""
+    defs = {"2000000": SkillDef("2000000", "魔力恢復", "", [{"hs": "h1"}], 1)}
+    apply_synthesized(defs, 2000)
+    d = defs["2000000"]
+    assert d.max_level == 16
+    assert d.stat(16, "mp_regen") == 32
 
 
 def test_crit_rate_capped_at_100(monkeypatch):

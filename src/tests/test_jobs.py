@@ -33,6 +33,24 @@ def test_can_advance_wrong_prejob():
     assert can_advance(SimpleNamespace(job=3000, level=30), JOBS[3000]) is False
 
 
+def test_magician_is_first_job_with_trainer_and_wand():
+    """法师 2000：前置新手、需 Lv10、技能树 200.img、导师汉斯、附赠木制短杖。"""
+    mage = JOBS[2000]
+    assert mage.tree_imgs == ["200.img"]
+    assert mage.prejob == 0
+    assert mage.advance_lv == 10
+    assert mage.trainer_npc == 1032001
+    assert mage.starter_weapon == "1372005"
+    assert can_advance(SimpleNamespace(job=0, level=9), mage) is False
+    assert can_advance(SimpleNamespace(job=0, level=10), mage) is True
+    assert job_for_trainer(1032001, player_job=0) is mage
+
+
+def test_magician_passives_are_not_auto_granted():
+    """法师 2000 的被动（魔力恢复/魔力强化）需花 SP 学，非转职附赠。"""
+    assert JOBS[2000].passive_ids == []
+
+
 def test_hunter_is_bowman_second_job():
     """猎人 3100：前置弓箭手 3000、需 Lv30、技能树 310.img。"""
     hunter = JOBS[3100]

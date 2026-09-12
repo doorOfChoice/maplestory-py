@@ -174,6 +174,7 @@ DEFAULT_EQUIPS = [
 # ── 技能 ─────────────────────────────────────────────────────────────
 SP_PER_LEVEL = 3                 # 每级获得 SP
 SKILL_MP_REGEN = 1.2             # MP 自然回复 / 秒
+MP_REGEN_MOD_SCALE = 0.1         # 被动 mp_regen 词条单位（点数 → 每秒 MP）
 SKILL_COOLDOWN: dict = {}        # 额外冷却覆盖表（秒，技能 id→秒）；WZ cooltime 优先
 SKILL_MAX_LEVEL = 30             # 技能最高等级（裁剪 WZ level 表；四转技能上限 30）
 SKILL_KEYDOWN_INTERVAL = 0.15    # 按住通道技（如暴風神射）两次补放的最小间隔（秒）
@@ -241,6 +242,14 @@ BOWMAN_JOB = 3000                # 弓箭手 1 转职业码
 BOWMAN_STARTER_BOW = "1452002"   # 转职附赠木弓（需求 Lv10；短弓 1452000 需 Lv25/DEX80）
 BOWMAN_TRAINER_NPC = "1012100"   # 导师赫丽娜
 TRAINER_SPAWN_MAP = "100010000"  # 出生图（弓箭手村东部小山；WZ 冒烟测试用作有效地图）
+
+# ── 魔法职业（法师 1 转）─────────────────────────────────────────────
+MAGICIAN_JOB = 2000              # 法师 1 转职业码
+MAGICIAN_STARTER_WAND = "1372005"  # 转职附赠木制短杖（需求 Lv8、无属性要求、MAD 23）
+MAGICIAN_TRAINER_NPC = "1032001"   # 导师汉斯（魔法图书馆 101000003）
+MAGIC_BASE_MASTERY = 0.10        # 法师基础熟练度（伤害下限比例）
+MAGIC_BALL_SPEED = 620.0         # 魔法弹飞行速度 px/s（比箭慢、比蜗牛快）
+MAGIC_BALL_LIFETIME = 0.5        # 魔法弹存活秒数
 
 # ── 远程弹道（直线快箭 + 穿透计数）──────────────────────────────────
 ARROW_SPEED = 900.0              # 箭矢飞行速度 px/s（瞄准后为合速）

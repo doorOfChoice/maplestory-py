@@ -64,6 +64,15 @@ JOBS: Dict[int, JobDef] = {
     # 蜗牛投掷术；该树只有图标占位，数值表由 skills.py 合成）
     0: JobDef(code=0, name="新手", tree_imgs=["1000.img"],
               skill_ids=["10001000"]),
+    # 法师 1 转：Skill.wz/200.img；被动 魔力恢复/魔力强化 为 SP 学习（非附赠）；
+    # 导师汉斯(1032001，魔法图书馆 101000003，经脚本门 enterMagiclibrar 直达)；
+    # 转职附赠木制短杖(1372005，需求 Lv8 无属性要求)；魔法伤害走独立魔法区间
+    # （见 player.magic_attack_range）。
+    2000: JobDef(
+        code=2000, name="法师", tree_imgs=["200.img"],
+        advance_lv=10, advance_sp=5, trainer_npc=1032001, starter_weapon="1372005",
+        hp_gain=12, mp_gain=20, auto_ap={"int": 4, "luk": 1},
+    ),
     # 弓箭手 1 转：Skill.wz/300.img；被动 精準強化/霸王箭/百步穿楊；
     # 导师赫丽娜(1012100)；转职附赠木弓(1452002，需求 Lv10 无属性要求，
     # 短弓 1452000 需求 Lv25/DEX80 转职时穿不上)

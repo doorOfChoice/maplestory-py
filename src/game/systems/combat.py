@@ -432,10 +432,11 @@ class Combat:
 
     def player_attack(self, player: Combatant,
                       monsters: List[CombatTarget]) -> None:
-        """玩家攻击：命中框与怪物碰撞盒相交则造成伤害 + 官方命中特效。
+        """玩家攻击：命中框（或瞬发魔法扇形）内怪物受伤 + 官方命中特效。
 
-        普攻：单目标、攻击力 100%；技能攻击按 level.damage 倍率、
-        range 扩大命中框、mobCount 限制最多命中数（取最近的 N 只）。
+        普攻/近战技能：命中框与怪物碰撞盒相交则命中，mobCount 限制最多命中数。
+        瞬发魔法（cone_attack，如魔法双击）：无弹道，改用与射箭相同的瞄准扇形
+        （朝向 ±ARROW_AIM_HALF_ANGLE_DEG、半径 ARROW_AIM_RADIUS）圈定目标。
         """
         if player.attack_hit_applied:
             return
@@ -448,18 +449,26 @@ class Combat:
         hit_frames = self.assets.skill_hit_frames(skill_id) if skill_id else []
         cx, cy = player.x, player.y
 
-        targets = [m for m in monsters if not m.dead and rect.colliderect(m.rect())]
         attack_count = 1
         if skill:
-            max_targets = max(1, skill["mob_count"])
-            targets.sort(key=lambda m: (m.x - cx) ** 2 + (m.cy - cy) ** 2)
-            targets = targets[:max_targets]
             mult = skill["damage"]
             attack_count = max(1, int(skill.get("attack_count", 1)))
         else:
             mult = 1.0
+        if skill and skill.get("cone_attack"):
+            targets = self._cone_targets(player, skill, monsters)
+        else:
+            targets = [m for m in monsters
+                       if not m.dead and rect.colliderect(m.rect())]
+            if skill:
+                targets.sort(key=lambda m: (m.x - cx) ** 2 + (m.cy - cy) ** 2)
+                targets = targets[:max(1, skill["mob_count"])]
         magic = bool(skill.get("magic")) if skill else False
-        atk_lo, atk_hi = player.attack_range()
+        if magic:
+            atk_lo, atk_hi = player.magic_attack_range(
+                skill.get("skill_mad", 0), skill.get("skill_mastery", 0))
+        else:
+            atk_lo, atk_hi = player.attack_range()
         player_level = player.level
         crit_rate = player.crit_rate()
         crit_mult = player.crit_mult()
@@ -507,6 +516,28 @@ class Combat:
             return None
         return (mob.x, cy), d2
 
+    def _cone_targets(self, player: Combatant, skill: dict,
+                      monsters) -> List[CombatTarget]:
+        """瞬发魔法扇形命中列表：瞄准扇形内按距离取最近的 mobCount 只。"""
+        if not monsters:
+            return []
+        facing = 1 if getattr(player, "facing_right", True) else -1
+        ref_y = player.y - 8.0
+        bonus = player.attack_range_bonus() if hasattr(
+            player, "attack_range_bonus") else 0.0
+        r2 = (settings.ARROW_AIM_RADIUS + bonus) ** 2
+        tan_half = math.tan(math.radians(settings.ARROW_AIM_HALF_ANGLE_DEG))
+        found: List[Tuple[float, CombatTarget]] = []
+        for mob in monsters:
+            hit = self._in_aim_cone(player, facing, mob, ref_y, tan_half, r2)
+            if hit is None:
+                continue
+            _point, d2 = hit
+            found.append((d2, mob))
+        preferred = self.preferred_mob
+        found.sort(key=lambda t: (t[1] is not preferred, t[0]))
+        return [mob for _d2, mob in found[:max(1, int(skill["mob_count"]))]]
+
     def _aim_point(self, player: Combatant, facing: int,
                    monsters) -> Optional[Tuple[float, float]]:
         """原版式瞄准 + 集火：优先「刚打到的那只」（圈内时），否则扇形内最近。
@@ -546,12 +577,12 @@ class Combat:
         crit_rate = player.crit_rate()
         crit_mult = player.crit_mult()
         player_level = player.level
-        atk_lo, atk_hi = player.attack_range()
         speed, life = settings.ARROW_SPEED, settings.ARROW_LIFETIME
         if skill_data is None:
             mult, attack_count = 1.0, 1
             n, mob_count = 1, 1
             magic = False
+            atk_lo, atk_hi = player.attack_range()
             frames = self.assets.normal_arrow_frames() if self.assets else []
             hit_frames: List = []
         else:
@@ -559,6 +590,12 @@ class Combat:
             mult = skill_data["damage"]
             attack_count = max(1, int(skill_data.get("attack_count", 1)))
             magic = bool(skill_data.get("magic"))
+            if magic:
+                atk_lo, atk_hi = player.magic_attack_range(
+                    skill_data.get("skill_mad", 0),
+                    skill_data.get("skill_mastery", 0))
+            else:
+                atk_lo, atk_hi = player.attack_range()
             n = max(1, int(skill_data.get("bullet_count", 1)))
             mob_count = max(1, skill_data["mob_count"])
             frames = self.assets.skill_ball_frames(sid) if self.assets else []
@@ -678,7 +715,7 @@ class Combat:
             guard = player.magic_defense_value() if hit.get("magic") \
                 else player.defense_value()
             amount = max(1, int(hit["amount"] * 100.0 / (100 + guard)))
-            player.damage(amount)
+            player.take_attack_damage(amount)
             self.numbers.append(DamageNumber(
                 player.x, player.y - 40, amount, "red"))
             for atk in hit.get("status_attacks", ()):

@@ -267,13 +267,32 @@ class Player:
             + self._buff_mod("def", with_buffs)
         return int(flat * self._buff_rate("pdd", with_buffs))
 
-    def magic_attack_value(self, with_buffs: bool = True) -> int:
-        """魔法力（面板）：(武器 MAD × (2×INT + LUK) / 100 + 被动/buff 魔攻) × 魔法藥%。"""
-        flat = stats_mod.magic_attack(self.total_stats(with_buffs),
-                                      self.inventory.stat_sum("incMAD")) \
+    def magic_attack_value(self, with_buffs: bool = True,
+                           skill_mad: int = 0) -> int:
+        """魔法力（面板上限端）：(武器 MAD × (2×INT + LUK) / 100 + 被动/buff 魔攻) × 魔法藥%。
+
+        skill_mad 为施放技能的 WZ mad 加成，并入武器 MAD 后参与折算。
+        """
+        return self.magic_attack_range(skill_mad=skill_mad,
+                                       with_buffs=with_buffs)[1]
+
+    def magic_attack_range(self, skill_mad: int = 0, skill_mastery: int = 0,
+                           with_buffs: bool = True) -> Tuple[int, int]:
+        """魔法攻击区间 (min, max)：供战斗按魔法公式结算。
+
+        上限 = ((武器 MAD + 技能 mad) × (2×INT + LUK) / 100 + 被动/buff 魔攻)
+              × 魔法藥%；下限 = 上限 × 熟练度。
+        熟练度 = 基础 MAGIC_BASE_MASTERY + (技能 mastery + 被动/buff mastery) 百分点。
+        """
+        mad = self.inventory.stat_sum("incMAD") + skill_mad
+        flat = stats_mod.magic_attack(self.total_stats(with_buffs), mad) \
             + self.skills.passive_mods().get("matk", 0) \
             + self._buff_mod("matk", with_buffs)
-        return int(flat * self._buff_rate("mad", with_buffs))
+        hi = max(1, int(flat * self._buff_rate("mad", with_buffs)))
+        points = skill_mastery + self.skills.passive_mods().get("mastery", 0) \
+            + self._buff_mod("mastery", with_buffs)
+        mastery = min(1.0, max(0.0, settings.MAGIC_BASE_MASTERY + points / 100.0))
+        return max(1, int(hi * mastery)), hi
 
     def magic_defense_value(self, with_buffs: bool = True) -> int:
         """魔法防御：(装备 MDD 总和 + INT//10 + 被动/buff 魔防) × 護甲藥%。"""
@@ -378,6 +397,11 @@ class Player:
             + self.buffs.mod_sum("jump")
         return settings.JUMP_VELOCITY * (1.0 + self._equip_speed_bonus("incJump")
                                          + points / 100.0)
+
+    def mp_regen(self) -> float:
+        """每秒 MP 自然回复：基础 + 被动「魔力恢復」加成（mod 单位 0.1/s）。"""
+        bonus = self.skills.passive_mods().get("mp_regen", 0)
+        return settings.SKILL_MP_REGEN + bonus * settings.MP_REGEN_MOD_SCALE
 
     def recalc_vitals(self) -> None:
         """按 等级/职业/装备 + 被动/buff 平坦 hp/mp 词条 重算上限，并将当前值钳入。"""
@@ -546,6 +570,20 @@ class Player:
     def damage(self, amount: int) -> None:
         self.hp = max(0, self.hp - amount)
 
+    def take_attack_damage(self, amount: int) -> Tuple[int, int]:
+        """受到怪物攻击：按魔法盾（magic_guard%）把伤害转扣 MP，MP 不足回落 HP。
+
+        返回 (实际扣 HP, 实际扣 MP)。仅怪物接触/技能伤害走此入口；坠落、中毒
+        等环境伤害仍直接走 damage()，不受魔法盾影响。
+        """
+        pct = min(100, max(0, self.buffs.mod_sum("magic_guard")))
+        redirect = int(amount * pct / 100.0)
+        mp_pay = min(int(self.mp), redirect)
+        self.mp -= mp_pay
+        hp_dmg = amount - mp_pay
+        self.damage(hp_dmg)
+        return hp_dmg, mp_pay
+
     def hurt(self, from_x: float) -> bool:
         """被怪物击中：击退小跳 + 硬直 + 短暂无敌。无敌期间忽略伤害。"""
         if self.invuln_timer > 0:
@@ -576,7 +614,7 @@ class Player:
         # 技能冷却 / MP 自然回复
         self.skills.tick(dt)
         if self.mp < self.max_mp:
-            self.mp = min(self.max_mp, self.mp + settings.SKILL_MP_REGEN * dt)
+            self.mp = min(self.max_mp, self.mp + self.mp_regen() * dt)
 
         # buff / 状态异常计时（中毒本帧伤害直接扣血）
         self.buffs.tick(dt)

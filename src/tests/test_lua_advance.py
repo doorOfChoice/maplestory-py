@@ -73,3 +73,17 @@ def test_already_advanced_job_shows_plain_notice():
     """已是目标职业：单句陈述终态。"""
     conv, _ = _conv(10, job=3000)
     assert "已经是一名" in conv.current().lines[0]
+
+
+def test_magician_advance_uses_jobdef_name_and_code():
+    """法师转职：advance.lua 通用，按 jobdef 显示「法师」并在 yes 时 advance_to(2000)。"""
+    p, calls = fake_player(10)
+    jobdef = JOBS[2000]
+    host = SimpleNamespace(player=p, jobdef=jobdef, assets=None,
+                           npc_name="汉斯", advanced=False)
+    env = make_globals(host)
+    ctx = make_ctx_view(p, "1032001", "汉斯", 101000003, jobdef=jobdef)
+    conv = Conversation.from_source(_SRC, env, ctx)
+    assert "法师" in "".join(conv.current().lines)
+    conv.press("yes")
+    assert calls == [2000]

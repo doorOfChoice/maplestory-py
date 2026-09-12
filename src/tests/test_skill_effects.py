@@ -45,6 +45,17 @@ def test_buff_sharp_eyes_maps_xy_to_crit():
         {"crit": 15, "crit_mult": 140}
 
 
+def test_buff_magic_guard_maps_x_to_redirect():
+    """魔法盾(2001002)：x=80（伤害转 MP 比例）→ magic_guard。"""
+    assert buff_mods("2001002", stat_of({"x": 80, "time": 600})) == \
+        {"magic_guard": 80}
+
+
+def test_buff_magic_armor_uses_generic_pdd():
+    """魔法铠甲(2001003)：通用字段 pdd → def。"""
+    assert buff_mods("2001003", stat_of({"pdd": 40, "time": 400})) == {"def": 40}
+
+
 def test_passive_curated_field_semantics():
     """逐技能被动：霸王箭 prop/damage、疾風步 speed、精準之弓 mastery/x、百步穿楊 range。"""
     assert passive_mods("3000001", stat_of({"prop": 40, "damage": 200})) == \
@@ -60,6 +71,16 @@ def test_passive_curated_field_semantics():
 def test_passive_final_attack_has_no_effect():
     """終極之弓(3100001) 是触发式追击，未实现 → 不产出 crit/crit_mult 等错误词条。"""
     assert passive_mods("3100001", stat_of({"prop": 60, "damage": 250})) == {}
+
+
+def test_passive_magic_mp_boost_maps_x_to_mp():
+    """魔力强化(2000001)：x=20（MaxMP 提升）→ mp。"""
+    assert passive_mods("2000001", stat_of({"x": 20, "y": 10})) == {"mp": 20}
+
+
+def test_passive_mp_recovery_maps_mp_regen():
+    """魔力恢复(2000000)：合成 mp_regen（0.1/s 点数，满级 32 → +3.2/s）。"""
+    assert passive_mods("2000000", stat_of({"mp_regen": 32})) == {"mp_regen": 32}
 
 
 def test_passive_unregistered_falls_back_to_generic_flat_fields():

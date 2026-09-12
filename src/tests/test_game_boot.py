@@ -182,6 +182,47 @@ def test_advancement_flow_uses_script(game):
     game._draw()   # 转职后正常出帧
 
 
+def test_far_clicked_advance_conversation_survives_distance(game):
+    """鼠标远处点开导师→选转职：子会话不得因玩家远离而被走远逻辑当帧销毁。"""
+    _boot(game)
+    player = game.ctx.world.player
+    player.job = 0
+    player.level = 10
+    player.x = 5000.0
+    npc = SimpleNamespace(npc_id="1032001", name="汉斯",
+                          rect=lambda: pygame.Rect(0, 0, 40, 80))
+    game.ctx.world.npcs.append(npc)
+    dlg = game._dialogue
+    assert dlg.try_talk_at(20, 40)
+    assert dlg._conv is not None
+    dlg._conv.click_link(0)          # 转职：法师
+    dlg._after_turn()
+    assert dlg._conv is not None
+    dlg.update()                     # 下一帧距离检查
+    assert dlg._conv is not None, "远处点开的转职会话被距离逻辑销毁"
+    assert dlg._conv.current().buttons == ["yes", "no"]
+
+
+def test_near_talk_conversation_closes_when_walking_away(game):
+    """近距对话保持走远收起：转职子会话在玩家走远后应被销毁。"""
+    _boot(game)
+    player = game.ctx.world.player
+    player.job = 0
+    player.level = 10
+    player.x = 20.0
+    npc = SimpleNamespace(npc_id="1032001", name="汉斯",
+                          rect=lambda: pygame.Rect(0, 0, 40, 80))
+    game.ctx.world.npcs.append(npc)
+    dlg = game._dialogue
+    assert dlg.try_talk_at(20, 40)
+    dlg._conv.click_link(0)
+    dlg._after_turn()
+    assert dlg._conv is not None
+    player.x = 5000.0
+    dlg.update()
+    assert dlg._conv is None
+
+
 def test_open_shop_via_script(game):
     """talk() 链接调 open_shop()：会话关闭并打开该 NPC 商店面板。"""
     pytest.importorskip("lupa")

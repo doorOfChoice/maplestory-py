@@ -103,7 +103,10 @@ class NpcDialogueController:
         self._talk_npc: Optional[object] = None        # 当前寒暄气泡的 NPC
         # 统一会话状态：talk() 脚本会话 / 默认菜单 / 任务子会话
         self._conv: Optional[Conversation] = None
-        self._conv_npc: Optional[object] = None        # 会话锚点 NPC（距离收起）
+        self._conv_npc: Optional[object] = None        # 会话锚点 NPC（立绘/引用）
+        # 距离收起锚点：远处鼠标点开的会话为 None（整场会话含子会话都不收起）
+        self._conv_anchor: Optional[object] = None
+        self._conv_detached: bool = False              # 远处点开：子会话不重新锚定
         self._conv_host: Optional[Any] = None          # 脚本会话宿主 ctx
         self._conv_qid: Optional[str] = None           # 脚本会话所属任务（转职善后）
         self._next_warp: Optional[str] = None          # 会话登记的传送意图
@@ -116,6 +119,7 @@ class NpcDialogueController:
     # ── 入口：找 NPC 并路由 ─────────────────────────────────────────
     def try_talk(self) -> None:
         """与脚下 NPC 对话：找玩家碰撞框内的第一个 NPC，交 `_talk_to` 路由。"""
+        self._conv_detached = False       # 近距对话重新锚定（走远会收起）
         for npc in self.ctx.world.npcs:
             if npc.rect().colliderect(
                     pygame.Rect(int(self.ctx.world.player.x - 20),
@@ -127,7 +131,8 @@ class NpcDialogueController:
         """鼠标点中世界坐标 (wx, wy) 处的 NPC 即对话（不限玩家距离）。
 
         从最上层（绘制序反向）命中第一个 NPC 并路由；无 NPC 返回 False。
-        远处点开时解除「走远收起」锚点，否则会话当帧就会被距离逻辑销毁。
+        远处点开时标记为 detached：整场会话（含任务/转职子会话）都不受走远收起，
+        避免「点开菜单→选转职→当帧被距离逻辑销毁」。
         """
         for npc in reversed(self.ctx.world.npcs):
             if npc.rect().collidepoint(int(wx), int(wy)):
@@ -135,7 +140,9 @@ class NpcDialogueController:
                 if self._conv_npc is npc and abs(
                         self.ctx.world.player.x
                         - npc.rect().centerx) > TALK_RANGE:
+                    self._conv_detached = True
                     self._conv_npc = None
+                    self._conv_anchor = None
                 return True
         return False
 
@@ -265,9 +272,9 @@ class NpcDialogueController:
             if abs(player.x - self._talk_npc.rect().centerx) > TALK_RANGE:
                 self.ctx.ui.hide_dialog()
                 self._talk_npc = None
-        # 统一会话：按锚点 NPC 距离收起
-        if self._conv is not None and self._conv_npc is not None:
-            if abs(player.x - self._conv_npc.rect().centerx) > TALK_RANGE:
+        # 统一会话：按锚点 NPC 距离收起（远处点开的 detached 会话不收起）
+        if self._conv is not None and self._conv_anchor is not None:
+            if abs(player.x - self._conv_anchor.rect().centerx) > TALK_RANGE:
                 self._close_conv()
 
     # ── 绘制 / 清理 / 查询 ──────────────────────────────────────────
@@ -316,6 +323,8 @@ class NpcDialogueController:
         """装载新会话（替换当前 `_conv` 及其宿主绑定）并立即渲染；关掉寒暄气泡。"""
         self._conv = conv
         self._conv_npc = npc
+        # 远处点开的会话整场不收起：子会话继承 detached，不重新锚定
+        self._conv_anchor = None if self._conv_detached else npc
         self._conv_host = host
         self._conv_qid = qid
         self.ctx.ui.hide_dialog()
@@ -341,6 +350,8 @@ class NpcDialogueController:
         self.ctx.ui.conv.hide()
         self._conv = None
         self._conv_npc = None
+        self._conv_anchor = None
+        self._conv_detached = False
         self._conv_host = None
         self._conv_qid = None
         self._menu_npc = None

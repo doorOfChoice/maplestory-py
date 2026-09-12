@@ -121,6 +121,10 @@ class _HitPlayer:
     def damage(self, amount: int) -> None:
         self.dealt.append(amount)
 
+    def take_attack_damage(self, amount: int):
+        self.damage(amount)
+        return amount, 0
+
     def defense_value(self) -> int:
         return 0
 

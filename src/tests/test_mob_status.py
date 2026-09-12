@@ -73,6 +73,9 @@ class FakePlayer:
     def damage(self, amount):
         pass
 
+    def take_attack_damage(self, amount):
+        return amount, 0
+
     def defense_value(self):
         return 0
 

@@ -12,6 +12,7 @@ WZ 的 level 表字段语义随技能而异，无法用一张表覆盖全部：
 · buff 的平坦命中/回避用 acc_flat/eva_flat：特效药已占用 acc/eva 表百分比。
 · 百分比：speed/jump（面板移速/跳跃）、crit（暴击率）、crit_mult（暴伤）、
   stat_pct（四维全属性）、mastery（熟练度百分点）。
+· mp_regen：MP 自然回复加成（单位 0.1/s，玩家 mp_regen() 换算）。
 """
 
 from __future__ import annotations
@@ -43,6 +44,8 @@ _BUFF_OVERRIDES: Dict[str, Dict[str, str]] = {
     "3111005": {},   # 銀鷹召喚：pad 为召唤物攻击，非玩家增益
     "3121006": {},   # 召喚鳳凰：pad 为召唤物攻击，非玩家增益
     "3121007": {},   # 牽制射擊：debuff 技，非自身 buff
+    "2001002": {"magic_guard": "x"},   # 魔法盾：x=伤害转 MP 比例
+    # 魔法铠甲(2001003) 走通用字段 pdd→def，无需覆盖
 }
 
 # ── 被动逐技能声明（mod 键 → WZ 字段）────────────────────────────────
@@ -55,6 +58,8 @@ _PASSIVE_FIELDS: Dict[str, Dict[str, str]] = {
     "3110000": {"speed": "speed"},                # 疾風步
     "3110001": {"crit": "prop", "crit_mult": "damage"},   # 致命箭
     "3120005": {"mastery": "mastery", "acc": "x"},        # 弓術精通
+    "2000001": {"mp": "x"},                       # 魔力强化：x=MaxMP 提升
+    "2000000": {"mp_regen": "mp_regen"},          # 魔力恢复：合成表（WZ 无数值），提升自然回蓝
 }
 
 # 未登记被动的通用回退字段（平坦键，不使用 x/y/prop/damage 等歧义字段）
@@ -90,3 +95,8 @@ def passive_mods(skill_id: str, stat: StatFn) -> Dict[str, int]:
     """被动技能 → mod 词条（已登记走逐技能声明，未知走通用回退）。"""
     fields = _PASSIVE_FIELDS.get(str(skill_id), _PASSIVE_FALLBACK)
     return _collect(fields, stat)
+
+
+def is_passive(skill_id: str) -> bool:
+    """技能是否为被动类型（已登记被动语义）：效果计入 passive_mods、不可落键施放。"""
+    return str(skill_id) in _PASSIVE_FIELDS

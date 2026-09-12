@@ -149,8 +149,21 @@ def defense(stats: Mapping[str, int], equip_pdd: int) -> int:
 
 
 def magic_attack(stats: Mapping[str, int], mad: int) -> int:
-    """魔法力（面板）：武器 MAD × (2×INT + LUK) / 100（经典法伤折算）。"""
+    """魔法力（面板上限端）：武器 MAD × (2×INT + LUK) / 100（经典法伤折算）。"""
     return int((2 * stats["int"] + stats["luk"]) * mad / 100.0)
+
+
+def magic_attack_range(stats: Mapping[str, int], mad: int, skill_mad: int = 0,
+                       mastery: float = 0.10) -> Tuple[int, int]:
+    """魔法攻击区间 (min, max)：技能 mad 并入武器 MAD 再折算。
+
+    Max = (2×INT + LUK) × (武器 MAD + 技能 mad) / 100；
+    Min = Max × mastery（熟练度比例，Magician 基础约 10%，技能 mastery 抬高）。
+    两端至少 1，避免 MAD 全 0 时出现 0 伤害。
+    """
+    hi = int((2 * stats["int"] + stats["luk"]) * (mad + skill_mad) / 100.0)
+    lo = int(hi * min(1.0, max(0.0, mastery)))
+    return max(1, lo), max(1, hi)
 
 
 def magic_defense(stats: Mapping[str, int], equip_mdd: int) -> int:

@@ -29,22 +29,32 @@ from game.core.localize import to_simplified
 # 按同系新手技能的量级合成 3 级数值（100%→120%，MP 消耗固定 4）。
 _SNAIL_LEVELS = [{"mpCon": 4, "damage": 100 + 10 * i} for i in range(3)]
 
+# 魔力恢復(2000000)：v113 的 200.img level 表只有 hs 字符串、无数值字段，
+# 按原版「自然回蓝随等级提升」合成 mp_regen（0.1/s 点数，每级 +2 → 满级 16 级 +3.2/s）。
+_MAGIC_RECOVERY_SKILL_ID = "2000000"
+_MAGIC_RECOVERY_LEVELS = [{"mp_regen": 2 * (i + 1)} for i in range(16)]
+
+
+def _install(defn: "SkillDef", levels: list) -> None:
+    defn.levels = [dict(lv) for lv in levels]
+    defn.max_level = len(levels)
+
 
 def apply_synthesized(defs: Dict[str, "SkillDef"], job: int) -> None:
-    """把合成数值表并入技能定义（WZ 有名有图标、缺数值的新手树）。
+    """把合成数值表并入技能定义（WZ 有名有图标、缺数值的技能）。
 
-    树里已有占位节点（职业链含新手、从 WZ 加载到）→ 补数值；
+    树里已有占位节点（从 WZ 加载到）→ 补数值；
     新手期无 WZ（纯逻辑测试）→ 直接创建；其他职业的显式 defs 不受污染。
     """
     sid = settings.SNAIL_THROW_SKILL_ID
     if sid in defs:
-        d = defs[sid]
-        d.levels = [dict(lv) for lv in _SNAIL_LEVELS]
-        d.max_level = len(d.levels)
+        _install(defs[sid], _SNAIL_LEVELS)
     elif job == 0:
         defs[sid] = SkillDef(sid, "蜗牛投掷术", "消耗MP向怪物投掷蜗牛。",
                              [dict(lv) for lv in _SNAIL_LEVELS],
                              len(_SNAIL_LEVELS))
+    if _MAGIC_RECOVERY_SKILL_ID in defs:
+        _install(defs[_MAGIC_RECOVERY_SKILL_ID], _MAGIC_RECOVERY_LEVELS)
 
 
 class SkillDef:
@@ -52,7 +62,7 @@ class SkillDef:
                  levels: List[dict], max_level: int,
                  req: Optional[Dict[str, int]] = None,
                  char_level: int = 0, invisible: bool = False,
-                 repeat: bool = False):
+                 repeat: bool = False, has_ball: bool = False):
         self.id = skill_id
         self.name = name
         self.desc = desc
@@ -60,8 +70,9 @@ class SkillDef:
         self.max_level = max_level
         self.req = req or {}                # 前置技能 {skill_id: 所需等级}
         self.char_level = char_level        # 学习所需人物等级
-        self.invisible = invisible          # 职业自动附赠被动（不可手学）
+        self.invisible = invisible          # WZ 原版 UI 隐藏标记（不挡学习）
         self.repeat = repeat                # WZ 带 keydown 通道技（按住连发）
+        self.has_ball = has_ball            # WZ 带 ball 节点：弹道技（非瞬发）
 
     def lv(self, level: int) -> dict:
         """第 level 级数值表（越界取最高级）。"""
@@ -154,6 +165,9 @@ def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
                 # WZ 带 keydown 动画节点 = 通道技（原版按住键以 keydown 帧连发，
                 # 如暴風神射 3121004）；本项目用固定补放间隔模拟该行为
                 repeat = node.get("keydown") is not None
+                # WZ 带 ball 节点 = 发射弹道（魔法弹）；无 ball 的魔法攻击（双击）
+                # 命中即结算、不生成飞行物
+                has_ball = node.get("ball") is not None
                 name, desc = f"技能 {sid}", ""
                 if s_root is not None:
                     sn = s_root.get(sid)
@@ -165,7 +179,8 @@ def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
                 max_lv = min(len(levels), settings.SKILL_MAX_LEVEL)
                 defs[sid] = SkillDef(sid, name, desc, levels[:max_lv], max_lv,
                                      req=req, char_level=char_lv,
-                                     invisible=invisible, repeat=repeat)
+                                     invisible=invisible, repeat=repeat,
+                                     has_ball=has_ball)
     except Exception:
         pass
     return defs
@@ -275,12 +290,15 @@ class SkillBook:
     def passive_mods(self) -> Dict[str, int]:
         """已学被动技能的聚合属性修正（跨转累加、确定性）。
 
-        逐技能语义映射见 core/skill_effects（WZ 的 x/y/prop/damage 含义随技能而异）。
+        收集两类：转职附赠被动（_passive_ids）与花 SP 学会的被动类型技能
+        （skill_effects.is_passive）。逐技能语义映射见 core/skill_effects。
         多数词条各来源求和；crit_mult（暴伤 %）取最强来源（避免多被动互相覆盖）。
         player.total_stats / attack_value / defense_value / crit_rate 等读取本表。
         """
+        ids = set(self._passive_ids)
+        ids.update(sid for sid in self.levels if skill_effects.is_passive(sid))
         mods: Dict[str, int] = {}
-        for pid in sorted(self._passive_ids):
+        for pid in sorted(ids):
             d = self.defs.get(pid)
             lv = self.levels.get(pid, 0)
             if d is None or lv <= 0:
@@ -325,6 +343,9 @@ class SkillBook:
             return None
         if self.cooldowns.get(skill_id, 0.0) > 0.0:
             return None
+        # 魔法攻击技：该级有 mad 加成且非持续 buff（time>0 的是魔法盾/铠甲）。
+        # 这类技能 WZ 无 damage 倍率，伤害由玩家魔法区间（含 skill_mad/mastery）决定。
+        magic = d.stat(lv, "mad", 0) > 0 and d.stat(lv, "time", 0) == 0
         data = {
             "id": skill_id,
             "def": d,
@@ -339,11 +360,23 @@ class SkillBook:
             # WZ 官方冷却字段为 cooltime（秒）；换算成毫秒供 start_cooldown 统一处理
             "cooldown_ms": d.stat(lv, "cooltime", 0) * 1000,
             "repeat": d.repeat,                  # 通道技：按住可连发
+            "magic": magic,                      # 魔法伤害走 mdd 与魔法区间
+            "skill_mad": d.stat(lv, "mad", 0),
+            "skill_mastery": d.stat(lv, "mastery", 0),
         }
         if skill_id == settings.SNAIL_THROW_SKILL_ID:
             data["projectile"] = True                  # 弹道技：不进近战命中框
             data["speed"] = settings.SNAIL_THROW_SPEED
             data["life"] = settings.SNAIL_THROW_LIFETIME
+        elif magic and d.has_ball:
+            # 有 ball 节点的魔法攻击（魔法弹）：发射弹道
+            data["projectile"] = True
+            data["speed"] = settings.MAGIC_BALL_SPEED
+            data["life"] = settings.MAGIC_BALL_LIFETIME
+        elif magic:
+            # 无 ball 的魔法攻击（魔法双击）：瞬发、无弹道，
+            # 命中射箭同款瞄准扇形内的怪
+            data["cone_attack"] = True
         return data
 
     def start_cooldown(self, skill_id: str, cooldown_ms: int = 0) -> None:
@@ -377,13 +410,16 @@ class SkillBook:
 
     def from_dict(self, data: dict) -> None:
         self.levels = dict(data.get("levels", {}))
-        passives = data.get("passives")
-        if passives is not None:
-            self._passive_ids = {str(p) for p in passives}
-        else:                                   # 旧档未存被动集：按职业链反推
-            self._passive_ids = {str(pid) for jd in job_chain(self.job)
-                                 for pid in jd.passive_ids
-                                 if str(pid) in self.levels}
+        # 附赠被动以当前职业链为准重建（存档的 passives 字段仅历史用途，忽略之）：
+        # 新增的附赠被动对旧档生效，被移出附赠集合的技能（如法师 SP 被动）恢复可学。
+        self._passive_ids = set()
+        for jd in job_chain(self.job):
+            for pid in jd.passive_ids:
+                pid = str(pid)
+                self._passive_ids.add(pid)
+                d = self.defs.get(pid)
+                if d is not None:
+                    self.levels[pid] = d.max_level
         raw_sp = data.get("sp_by_job")
         if raw_sp is not None:
             self.sp_by_job = {int(k): int(v) for k, v in raw_sp.items()}
@@ -403,7 +439,8 @@ def assign_skill_to_key(book: SkillBook, bindings, skill_id: str,
     被占键的让位由 KeyBindings.set 的顶替语义完成（占用者解绑）；未学 / 被动 /
     槽满 / Esc 一律拒绝且不留脏状态。
     """
-    if skill_id not in book.levels or skill_id not in book.learnable():
+    if (skill_id not in book.levels or skill_id not in book.learnable()
+            or skill_effects.is_passive(skill_id)):
         return False
     slot = next((k for k, v in book.hotkeys.items() if v == skill_id), None)
     if slot is None:

@@ -75,6 +75,16 @@ def test_unknown_skill_rejected():
     assert kb.key_of("skill_1") == pygame.K_1
 
 
+def test_passive_skill_cannot_be_bound():
+    """被动类型技能（魔力強化 2000001）即使已学也不能落键。"""
+    defs = {"2000001": SkillDef("2000001", "魔力強化", "", [{"mp": 20}], 3)}
+    book = SkillBook(assets=None, job=2000, defs=defs)
+    book.add_sp(sp_group_of_skill("2000001"), 3)
+    assert book.learn("2000001", 1)
+    kb = KeyBindings()
+    assert not assign_skill_to_key(book, kb, "2000001", pygame.K_q)
+
+
 def test_full_hotkeys_block_unassigned_skill():
     """12 槽全被别的技能占着且拖入技未上键：拒绝且不动绑定表。"""
     sids = [f"30010{i:02d}" for i in range(13)]
