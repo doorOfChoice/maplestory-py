@@ -548,6 +548,37 @@ class Assets:
             return to_simplified(str(name))
         except Exception:
             return f"NPC {npc_id}"
+
+    def npc_info(self, npc_id: str) -> Dict[str, Any]:
+        """读取 NPC 视觉开关：hide_name(info/hideName) / float(info/float)。
+
+        沿 info/link 追一层影像复用目标（如仓库 1012110 → 9010005），
+        两个来源任一标记即生效。
+        """
+        out = {"hide_name": False, "float": False}
+        try:
+            image = self.wz["Npc"].root.get(f"{str(int(npc_id)).zfill(7)}.img")
+            if image is None:
+                return out
+            roots = [image.parse()]
+            link = roots[0].get("info/link")
+            if link is not None:
+                target = str(link.value).strip()
+                if target.isdigit():
+                    timg = self.wz["Npc"].root.get(f"{int(target):07d}.img")
+                    if timg is not None:
+                        roots.append(timg.parse())
+            for root in roots:
+                info = root.get("info")
+                if info is None:
+                    continue
+                if info.get("hideName") is not None:
+                    out["hide_name"] = True
+                if info.get("float") is not None:
+                    out["float"] = True
+        except Exception:
+            pass
+        return out
     def _mob_action_canvases(self, mob_id: str, action: str) -> List[WzCanvasProperty]:
         try:
             root, _src = self.mob_renderer._mob_root(mob_id)

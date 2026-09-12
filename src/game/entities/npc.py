@@ -5,8 +5,11 @@
 
 from __future__ import annotations
 
+import math
+
 import pygame
 
+from game import settings
 from game.core.animation import Animation
 from game.core.fonts import load_cjk_font
 from game.render.assets import Assets
@@ -48,6 +51,10 @@ class NPC:
         frames = assets.npc_frames(self.npc_id, "stand")
         self.anim = Animation(frames, loop=True)
         self.origin = assets.npc_origin(self.npc_id, "stand") or (0, 0)
+        info = assets.npc_info(self.npc_id)
+        self.show_name = not info.get("hide_name")
+        self.floating = bool(info.get("float"))
+        self._float_phase = 0.0
         self.talking = False
         # 任务指示灯（由 Game 每帧传入 marker）
         self._marker = -1
@@ -59,6 +66,15 @@ class NPC:
     def update(self, dt: float) -> None:
         self.anim.advance(dt)
         self._marker_timer += dt * 1000.0
+        if self.floating:
+            self._float_phase += dt
+
+    def float_offset(self) -> float:
+        """悬空 NPC 的垂直偏移（正弦）；非悬空恒 0。"""
+        if not self.floating:
+            return 0.0
+        return math.sin(self._float_phase * settings.NPC_FLOAT_SPEED) \
+            * settings.NPC_FLOAT_AMPLITUDE
 
     def rect(self) -> pygame.Rect:
         img = self.anim.surface
@@ -73,9 +89,10 @@ class NPC:
         if img is None:
             return
         sx, sy = camera.to_screen(self.x, self.cy)
+        sy += self.float_offset()
         top_left = (sx - self.origin[0], sy - self.origin[1])
         surface.blit(img, (int(top_left[0]), int(top_left[1])))
-        if self.name:
+        if self.name and self.show_name:
             plate = _npc_name_surface(self.name)
             surface.blit(plate, (int(sx - plate.get_width() / 2),
                                  int(sy - plate.get_height() / 2)))
@@ -90,6 +107,7 @@ class NPC:
         idx = Animation.frame_at(frames, self._marker_timer)
         img = frames[idx][0]
         sx, sy = camera.to_screen(self.x, self.cy)
+        sy += self.float_offset()
         w, h = img.get_size()
         # 画在 NPC 头顶：以 sprite 顶边为基准再抬高一点
         top = sy - self.origin[1] - h + 6

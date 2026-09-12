@@ -264,6 +264,11 @@ MINIMAP_MOB_COLOR = (230, 70, 60)          # 怪物
 MINIMAP_NPC_COLOR = (245, 215, 60)         # NPC
 MINIMAP_PORTAL_COLOR = (90, 220, 100)      # 传送门
 
+# ── NPC ──────────────────────────────────────────────────────────────
+# info/float NPC（魔法石/妖精等）的悬空浮动：正弦上下偏移
+NPC_FLOAT_AMPLITUDE = 4.0      # 上下浮动幅度（px）
+NPC_FLOAT_SPEED = 2.5          # 浮动角速度（rad/s）
+
 # ── 任务系统 ─────────────────────────────────────────────────────────
 # 任务池不再手工白名单：启动时全量解析 Quest.wz，并按 Map.wz 真实出现的
 # NPC / 怪物过滤（见 core.life_index + systems.quests.filter_world_quest_defs）。
