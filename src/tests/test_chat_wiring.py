@@ -49,8 +49,9 @@ def game(monkeypatch, tmp_path):
     yield g
 
 
-def _key(game: Game, key: int) -> None:
-    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key, unicode=""))
+def _key(game: Game, key: int, mod: int = 0) -> None:
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key, unicode="",
+                                         mod=mod))
     game._handle_input()
 
 
@@ -90,6 +91,33 @@ def test_focused_chat_swallows_game_keys(game):
     assert not game.ctx.world.player.attacking
     _text(game, "a")
     assert game.chat.text == "a"
+
+
+def test_ctrl_v_pastes_clipboard_text(game, monkeypatch):
+    """聚焦时 Ctrl+V 把系统剪贴板文本整段粘进缓冲。"""
+    monkeypatch.setattr("game.game._read_clipboard", lambda: "粘贴的文本")
+    _key(game, pygame.K_RETURN)
+    _key(game, pygame.K_v, mod=pygame.KMOD_CTRL)
+    assert game.chat.text == "粘贴的文本"
+
+
+def test_cmd_v_pastes_on_mac(game, monkeypatch):
+    """macOS 用 Command+V 粘贴，同样生效。"""
+    monkeypatch.setattr("game.game._read_clipboard", lambda: "命令键粘贴")
+    _key(game, pygame.K_RETURN)
+    _key(game, pygame.K_v, mod=pygame.KMOD_GUI)
+    assert game.chat.text == "命令键粘贴"
+
+
+def test_paste_without_ctrl_does_not_read_clipboard(game, monkeypatch):
+    """裸按 V 不触发粘贴（走 TEXTINPUT 正常录入）。"""
+    calls = []
+    monkeypatch.setattr("game.game._read_clipboard",
+                        lambda: calls.append(1) or "不该出现")
+    _key(game, pygame.K_RETURN)
+    _key(game, pygame.K_v)
+    assert game.chat.text == ""
+    assert calls == []
 
 
 def test_esc_clears_and_closes_chat(game):

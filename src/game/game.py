@@ -41,6 +41,28 @@ from game.render.windows.core.manager import to_view_pos
 from game.context import GameContext
 from game.core.fonts import load_cjk_font, render_text
 
+# 粘贴修饰键：Windows/Linux 用 Ctrl，macOS 用 Command（GUI/META）
+_PASTE_MODS = pygame.KMOD_CTRL | pygame.KMOD_GUI | pygame.KMOD_META
+
+
+def _read_clipboard() -> Optional[str]:
+    """读取系统剪贴板文本；scrap 不可用（无显示/平台不支持）时返回 None。
+
+    macOS 下 SDL 注册的类型是 text/plain;charset=utf-8 而非 SCRAP_TEXT 的
+    text/plain，故按平台常见类型依次尝试，取第一个非空结果。
+    """
+    try:
+        if not pygame.scrap.get_init():
+            pygame.scrap.init()
+        for mime in ("text/plain;charset=utf-8", pygame.SCRAP_TEXT):
+            raw = pygame.scrap.get(mime)
+            if raw:
+                return raw.decode("utf-8", "ignore").replace("\x00", "")
+    except pygame.error:
+        return None
+    return None
+
+
 # 输入对象（把 pygame 按键抽象成 Player.update 需要的形状）
 class _Keys:
     left = False
@@ -293,6 +315,11 @@ class Game:
                         self.chat.close()
                     elif event.key == pygame.K_BACKSPACE:
                         self.chat.backspace()
+                    elif (event.key == pygame.K_v
+                          and getattr(event, "mod", 0) & _PASTE_MODS):
+                        pasted = _read_clipboard()
+                        if pasted:
+                            self.chat.type(pasted)
                     continue
                 # 窗口内录入态（商店数量框等）优先吃键，模态期间屏蔽动作
                 if self.ctx.windows.dispatch_key(event.key):
