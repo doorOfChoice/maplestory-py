@@ -281,7 +281,7 @@ def test_teleport_horizontal_snaps_to_platform(monkeypatch):
     p = _make_player(monkeypatch)
     ph = make_physics()
     p.cur_fh = ph.surface_under(p.x, p.y + settings.FEET_OFFSET)
-    assert p.teleport(150, ph) is True
+    assert p.teleport(150, ph, direction=1) is True
     assert abs(p.x - 350.0) < 1e-6
     assert p.on_ground and abs(p.y - (100 - settings.FEET_OFFSET)) < 1e-6
 
@@ -301,5 +301,5 @@ def test_teleport_horizontal_over_void_stays(monkeypatch):
     ph = make_physics()
     p.cur_fh = ph.surface_under(p.x, p.y + settings.FEET_OFFSET)
     before_x = p.x
-    assert p.teleport(60, ph) is False
+    assert p.teleport(60, ph, direction=1) is False
     assert p.x == before_x and p.on_ground is True

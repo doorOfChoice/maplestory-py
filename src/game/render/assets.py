@@ -860,6 +860,10 @@ class Assets:
         """升级特效 Effect.wz/BasicEff.img/LevelUp。"""
         return self.effect_frames("Effect", "BasicEff.img", "LevelUp")
 
+    def teleport_frames(self) -> List:
+        """快速移动特效 Effect.wz/BasicEff.img/Teleport（起/落点各播一次）。"""
+        return self.effect_frames("Effect", "BasicEff.img", "Teleport")
+
     def quest_icon_frames(self, index: int) -> List[Tuple[pygame.Surface, int]]:
         """NPC 头顶任务指示灯（UIWindow/QuestIcon/<i> 动画帧）。"""
         key = f"qicon:{index}"

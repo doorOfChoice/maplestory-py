@@ -103,16 +103,47 @@ def test_vertical_down_onto_stair_riser_not_embedded(monkeypatch):
     assert p.x >= 200.0 + R - 0.01          # 身体在 riser 右侧，不嵌入
 
 
-# ── 水平瞬移：同层吸附 / 撞墙 / 跨沟坠落 ────────────────────────────
+# ── 水平瞬移：方向以按键为准 / 同层吸附 / 撞墙 / 落点必在平台 ────────
 def test_horizontal_snaps_to_same_layer_slope(monkeypatch):
     """水平落在同层「更低一段」的坡面（小落差）→ 吸附贴地，不悬空。"""
     ph = Physics([fh(1, 0, 0, 200, 100, 200),
                   fh(2, 0, 100, 210, 400, 210)], [])
     p = make_player(monkeypatch, ph, 50, 200 - settings.FEET_OFFSET,
                     layer=0, cur=at(1, ph))
-    assert p.teleport(130, ph) is True
+    assert p.teleport(130, ph, direction=1) is True
     assert p.on_ground is True and p.cur_fh.fid == 2
     assert p.y + settings.FEET_OFFSET == 210.0
+
+
+def test_horizontal_direction_follows_left_key(monkeypatch):
+    """水平方向以按下的方向键为准：面朝右按 ← 也向左位移，并转向。"""
+    ph = Physics([fh(1, 0, 0, 200, 400, 200)], [])
+    p = make_player(monkeypatch, ph, 300, 200 - settings.FEET_OFFSET,
+                    layer=0, cur=at(1, ph))
+    assert p.teleport(130, ph, direction=-1) is True
+    assert abs(p.x - 170.0) < 1e-6
+    assert p.facing_right is False
+
+
+def test_horizontal_without_direction_stays(monkeypatch):
+    """未按方向键（direction=0）→ 不位移，即使落点在平台上也不触发。"""
+    ph = Physics([fh(1, 0, 0, 200, 400, 200)], [])
+    p = make_player(monkeypatch, ph, 50, 200 - settings.FEET_OFFSET,
+                    layer=0, cur=at(1, ph))
+    before = (p.x, p.y)
+    assert p.teleport(130, ph, direction=0) is False
+    assert (p.x, p.y) == before
+
+
+def test_teleport_on_rope_stays(monkeypatch):
+    """挂在绳/梯上时不能快速移动 → 原地不动，即使落点在平台上。"""
+    ph = Physics([fh(1, 0, 0, 200, 400, 200)], [])
+    p = make_player(monkeypatch, ph, 50, 200 - settings.FEET_OFFSET,
+                    layer=0, cur=at(1, ph))
+    p.climbing = True
+    before = (p.x, p.y)
+    assert p.teleport(130, ph, direction=1) is False
+    assert (p.x, p.y) == before
 
 
 def test_horizontal_lands_on_overlapping_layer_ground(monkeypatch):
@@ -121,7 +152,7 @@ def test_horizontal_lands_on_overlapping_layer_ground(monkeypatch):
                   fh(2, 1, 100, 200, 400, 200)], [])
     p = make_player(monkeypatch, ph, 50, 200 - settings.FEET_OFFSET,
                     layer=0, cur=at(1, ph))
-    assert p.teleport(130, ph) is True
+    assert p.teleport(130, ph, direction=1) is True
     assert p.on_ground is True and p.cur_fh.fid == 2
     assert p.ground_layer == 1
 
@@ -133,19 +164,20 @@ def test_horizontal_blocked_by_wall_not_embedded(monkeypatch):
                   fh(3, 0, 250, 100, 400, 100)], [])
     p = make_player(monkeypatch, ph, 50, 200 - settings.FEET_OFFSET,
                     layer=0, cur=at(1, ph))
-    assert p.teleport(300, ph) is True
+    assert p.teleport(300, ph, direction=1) is True
     assert p.x == 250.0 - R
     assert p.on_ground is True and p.y + settings.FEET_OFFSET == 200.0
 
 
-def test_horizontal_over_gap_falls(monkeypatch):
-    """水平瞬移到缺口上方、下方有更低的平台 → 腾空（交由重力坠落）。"""
+def test_horizontal_over_gap_lands_on_lower_platform(monkeypatch):
+    """水平瞬移到缺口上方、下方有更低的平台 → 吸附到低平台落下，不以悬空结束。"""
     ph = Physics([fh(1, 0, 0, 200, 100, 200),
                   fh(2, 0, 150, 500, 400, 500)], [])
     p = make_player(monkeypatch, ph, 50, 200 - settings.FEET_OFFSET,
                     layer=0, cur=at(1, ph))
-    assert p.teleport(300, ph) is True
-    assert p.on_ground is False and p.x == 350.0
+    assert p.teleport(300, ph, direction=1) is True
+    assert p.on_ground is True and p.x == 350.0
+    assert p.y + settings.FEET_OFFSET == 500.0
 
 
 def test_horizontal_over_void_stays(monkeypatch):
@@ -154,8 +186,50 @@ def test_horizontal_over_void_stays(monkeypatch):
     p = make_player(monkeypatch, ph, 50, 200 - settings.FEET_OFFSET,
                     layer=0, cur=at(1, ph))
     before = (p.x, p.y)
-    assert p.teleport(300, ph) is False
+    assert p.teleport(300, ph, direction=1) is False
     assert (p.x, p.y) == before and p.on_ground is True
+
+
+def test_airborne_horizontal_lands_on_adjacent_platform(monkeypatch):
+    """悬空水平瞬移落到相邻（同高容差内）平台 → 落地，不平移悬空。"""
+    ph = Physics([fh(1, 0, 0, 200, 400, 200)], [])
+    p = make_player(monkeypatch, ph, 50, 200 - settings.FEET_OFFSET,
+                    layer=0, cur=None, on_ground=False)
+    assert p.teleport(100, ph, direction=1) is True
+    assert p.on_ground is True and abs(p.x - 150.0) < 1e-6
+    assert p.y + settings.FEET_OFFSET == 200.0
+
+
+def test_airborne_horizontal_only_platform_out_of_range_stays(monkeypatch):
+    """悬空水平瞬移终点的平台超出瞬移范围 → 不触发、不平移掉落。"""
+    ph = Physics([fh(1, 0, 0, 200, 100, 200),
+                  fh(2, 0, 150, 500, 400, 500)], [])
+    p = make_player(monkeypatch, ph, 50, 200 - settings.FEET_OFFSET,
+                    layer=0, cur=None, on_ground=False)
+    before = (p.x, p.y)
+    assert p.teleport(200, ph, direction=1) is False
+    assert (p.x, p.y) == before and p.on_ground is False
+
+
+def test_horizontal_lands_on_far_higher_platform(monkeypatch):
+    """水平瞬移终点无同高平台、但范围内有更高平台 → 落到高平台，不以悬空结束。"""
+    ph = Physics([fh(1, 0, 0, 200, 100, 200),
+                  fh(2, 0, 150, 100, 400, 100)], [])
+    p = make_player(monkeypatch, ph, 50, 200 - settings.FEET_OFFSET,
+                    layer=0, cur=at(1, ph))
+    assert p.teleport(300, ph, direction=1) is True
+    assert p.on_ground is True and p.x == 350.0
+    assert p.y + settings.FEET_OFFSET == 100.0
+
+
+def test_airborne_horizontal_lands_on_far_higher_platform(monkeypatch):
+    """悬空水平瞬移终点有范围内更高平台 → 落到高平台，不以悬空结束。"""
+    ph = Physics([fh(1, 0, 150, 100, 400, 100)], [])
+    p = make_player(monkeypatch, ph, 50, 200 - settings.FEET_OFFSET,
+                    layer=0, cur=None, on_ground=False)
+    assert p.teleport(300, ph, direction=1) is True
+    assert p.on_ground is True and p.x == 350.0
+    assert p.y + settings.FEET_OFFSET == 100.0
 
 
 def test_horizontal_follows_linked_stairs(monkeypatch):
@@ -168,7 +242,7 @@ def test_horizontal_follows_linked_stairs(monkeypatch):
     ph = Physics(segs, [])
     p = make_player(monkeypatch, ph, 5, 196 - settings.FEET_OFFSET,
                     layer=0, cur=at(1, ph))
-    assert p.teleport(130, ph) is True
+    assert p.teleport(130, ph, direction=1) is True
     assert abs(p.x - 135.0) < 1.0
     assert p.on_ground is True and p.cur_fh.fid == 5
     assert abs((p.y + settings.FEET_OFFSET) - ph.by_id[5].y_at(p.x)) < 1.0
@@ -182,7 +256,7 @@ def test_horizontal_slope_wall_stops_outside(monkeypatch):
     ph = Physics(segs, [])
     p = make_player(monkeypatch, ph, 20, ph.by_id[1].y_at(20) - settings.FEET_OFFSET,
                     layer=0, cur=at(1, ph))
-    assert p.teleport(140, ph) is True
+    assert p.teleport(140, ph, direction=1) is True
     assert p.x <= 100.0 - R + 0.01
     assert p.on_ground is True and p.cur_fh.fid == 1
 
@@ -195,6 +269,6 @@ def test_horizontal_edge_wall_not_tunneled(monkeypatch):
     ph = Physics(segs, [])
     p = make_player(monkeypatch, ph, 95, 200 - settings.FEET_OFFSET,
                     layer=0, cur=at(1, ph))
-    assert p.teleport(8, ph) is True
+    assert p.teleport(8, ph, direction=1) is True
     assert p.x <= 100.0 - R + 0.01
 

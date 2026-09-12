@@ -264,6 +264,22 @@ class Physics:
                 best, best_y = f, y_a
         return best
 
+    def nearest_surface_in_range(self, x: float, feet: float,
+                                 distance: float) -> Optional[Foothold]:
+        """瞬移落点兜底：x 处距脚底 distance 内、上/下最近的平台（不含同高脚底）。
+
+        水平瞬移终点没有同高/链接平台时用它找可落面——更高或更低的平台都算，
+        取垂直距离最近的一侧，保证瞬移必定以站在平台上结束。"""
+        below = self.teleport_vertical_surface(x, feet, distance, up=False)
+        above = self.teleport_vertical_surface(x, feet, distance, up=True)
+        if below is None:
+            return above
+        if above is None:
+            return below
+        below_d = below.y_at(x) - feet
+        above_d = feet - above.y_at(x)
+        return below if below_d <= above_d else above
+
     def top_landing(self, x: float, feet: float,
                     max_rise: float = 34.0) -> Optional[Foothold]:
         """绳/梯顶端出绳：找 x 处位于脚底上方 max_rise 内（或平齐）的支撑面，
@@ -424,11 +440,6 @@ class Physics:
         if self.vr_left is None:
             return x
         return min(max(x, self.vr_left), self.vr_right)
-
-    def has_ground_below(self, x: float, feet: float) -> bool:
-        """x 处脚底及以下是否还有可行走面（落点兜底：判定是否为无底深渊）。"""
-        return any(not f.is_wall and f.covers(x) and f.y_at(x) >= feet - 1.0
-                   for f in self.footholds)
 
     def wall_overlap_clamp(self, x: float, feet: float, direction: int,
                            layer: Optional[int] = None) -> float:

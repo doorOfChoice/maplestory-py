@@ -543,14 +543,25 @@ class Game:
             self.ctx.windows.flash(f"{name}：MP 不足（需 {data['mp_con']}）")
             return
         if data.get("form") == "teleport":
-            # 快速移动：按方向键（↑/↓）或朝向水平瞬移 range px，不进入攻击流程。
-            # 位移失败（如无可落平台/落点是无底深渊）则原地不动、不扣 MP、不写冷却。
+            # 快速移动：必须按住方向键才触发。←/→ 为水平方向（以按键为准，非朝向），
+            # ↑/↓ 优先于水平；三者皆无则视为无效施放。位移失败（无可落平台/
+            # 落点无底深渊/悬空无相邻平台）则原地不动、不扣 MP、不写冷却。
+            h_dir = (1 if self.keys.right and not self.keys.left
+                     else -1 if self.keys.left and not self.keys.right else 0)
+            up = self.keys.up and not self.keys.down
+            down = self.keys.down and not self.keys.up
+            if not (h_dir or up or down):
+                return
             if player.teleport(data.get("range", 0), self.ctx.world.physics,
-                               up=self.keys.up and not self.keys.down,
-                               down=self.keys.down and not self.keys.up):
+                               up=up, down=down, direction=h_dir):
                 player.mp -= data["mp_con"]
                 player.skills.start_cooldown(sid, data.get("cooldown_ms", 0))
                 self.ctx.audio.play_skill_cast(sid, player.equips)
+                # 落点播一次官方 Teleport 特效（按 WZ origin 对齐 navel）
+                tp = self.assets.teleport_frames()
+                if tp:
+                    self.ctx.world.combat.effects.append(Effect(
+                        tp, player.x, player.y, use_origin=True))
             return
         if not player.start_attack(data):
             return

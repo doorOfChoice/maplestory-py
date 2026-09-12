@@ -77,12 +77,41 @@ def test_vertical_teleport_without_landing_costs_nothing(game):
 
 
 def test_horizontal_teleport_deducts_mp_and_moves(game):
-    """水平瞬移成功：扣 MP、按朝向位移，不进入攻击流程。"""
+    """按住方向键水平瞬移成功：扣 MP、按方向位移，不进入攻击流程。"""
     _arm_teleport(game)
     game.keys.up, game.keys.down = False, False
+    game.keys.right, game.keys.left = True, False
     player = game.ctx.world.player
     player.facing_right = True
     game._try_cast(1)
     assert player.x == 130.0
     assert player.mp == 500 - 13
     assert player.attacking is False
+
+
+def test_successful_teleport_spawns_effect_at_destination(game):
+    """瞬移成功：只在落点播一次官方 Teleport 特效。"""
+    _arm_teleport(game)
+    frame = (pygame.Surface((2, 2)), (0, 0), 100)
+    game.assets.teleport_frames = lambda: [frame]
+    game.keys.up, game.keys.down = False, False
+    game.keys.right, game.keys.left = True, False
+    effects = game.ctx.world.combat.effects
+    before = len(effects)
+    game._try_cast(1)
+    spawned = effects[before:]
+    assert len(spawned) == 1
+    assert spawned[0].x == 130.0
+
+
+def test_teleport_without_direction_key_costs_nothing(game):
+    """未按方向键施放快速移动 → 不位移、不扣 MP、不写冷却。"""
+    _arm_teleport(game)
+    game.keys.up, game.keys.down = False, False
+    game.keys.right, game.keys.left = False, False
+    player = game.ctx.world.player
+    before = (player.x, player.y)
+    game._try_cast(1)
+    assert (player.x, player.y) == before
+    assert player.mp == 500
+    assert TELEPORT not in player.skills.cooldowns

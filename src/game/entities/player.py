@@ -476,19 +476,24 @@ class Player:
             self.feather.consume()
 
     def teleport(self, distance: float, physics: Optional[Physics],
-                 up: bool = False, down: bool = False) -> bool:
-        """快速移动：朝指定方向瞬移 distance px，落点吸附最近可行走地面。
+                 up: bool = False, down: bool = False,
+                 direction: int = 0) -> bool:
+        """快速移动：朝按下的方向键瞬移 distance px，落点必定吸附到平台。
 
-        水平：按朝向沿 foothold 链接以极小步长推进（爬坡/下坡随地形起伏），
-        被实墙挡住即停在墙外；落点下方有地面则腾空坠落，无底深渊则原地不动。
+        direction 为水平方向（1 右 / -1 左 / 0 不水平）；up/down 为垂直方向，
+        优先于水平。未给任何方向则原地不动（由施放流程保证一定有方向）。
+        水平：沿 foothold 链接以极小步长推进（爬坡/下坡随地形起伏），被实墙
+        挡住即停在墙外；终点必须落到平台上——先就近吸附（同高/链接），否则取
+        范围内最近平台落下（更高或更低都算），找不到则不触发，绝不以悬空结束。
         垂直：↑/↓ 找 range 内最近的平台落下；range 内无平台则原地不动
         （不穿墙、不掉出世界）。
         地面按「最近」判定，与 layer 无关：链可在 layer 间穿行，同高的前后景
         平台同样是可行走面（与行走语义一致）。落点会把 ground_layer 同步到
         所站平台，墙体碰撞随之切换。
+        挂在绳/梯上（climbing）时不可瞬移，直接返回 False。
         返回是否成功位移（供施放流程决定是否扣 MP/写冷却）。
         """
-        if physics is None or distance <= 0:
+        if physics is None or distance <= 0 or self.climbing:
             return False
         feet = self.y + settings.FEET_OFFSET
         if up or down:
@@ -499,23 +504,28 @@ class Player:
             self._teleport_land(fh)
             # 竖直落点无「来向」，按最近侧把身体推出台阶 riser 等实墙外
             self.x = physics.deembed_walls(self.x, self.feet_y, fh.layer)
-        else:
-            if not self._teleport_walk(distance, physics):
+        elif direction:
+            if not self._teleport_walk(distance, physics, direction):
                 return False
+            self.facing_right = direction > 0
+        else:
+            return False
         self.vx = 0.0
         self.drop_layers.clear()
         if not self.attacking:
             self._load_anim(POSE_IDLE if self.on_ground else POSE_JUMP)
         return True
 
-    def _teleport_walk(self, distance: float, physics: Physics) -> bool:
-        """水平瞬移：按下朝向以极小步长推进到 distance 处。
+    def _teleport_walk(self, distance: float, physics: Physics,
+                       direction: int) -> bool:
+        """水平瞬移：朝 direction（1 右 / -1 左）以极小步长推进到 distance 处。
 
-        逐段沿 foothold 链接「走」过去（含楼梯/斜坡，脚随地形起伏），到无链接
-        的断崖边缘即转为腾空；路径上被实墙挡住就停在墙外。步长很小，既不埋进
-        上升坡体，也不会被墙豁免规则送进墙里（落点再用 wall_overlap_clamp 兜底）。
-        最终腾空且落点下方是无底深渊时原地不动、返回 False（不掉出世界）。"""
-        direction = 1 if self.facing_right else -1
+        逐段沿 foothold 链接「走」过去（含楼梯/斜坡，脚随地形起伏），脱离链接
+        后继续水平推进并在终点找落点；路径上被实墙挡住就停在墙外。步长很小，
+        既不埋进上升坡体，也不会被墙豁免规则送进墙里（落点再用 wall_overlap_clamp
+        兜底）。终点必须落在平台上：先就近吸附（同高容差 / 链接续段），否则在
+        终点取 distance 内最近的平台落下（更高或更低都算）。找不到落点则返回
+        False、原地不动（不掉出世界、不以悬空结束）。"""
         target = self.x + direction * distance
         x = self.x
         feet = self.y + settings.FEET_OFFSET
@@ -554,8 +564,8 @@ class Player:
         # 落点贴地 → 以真实脚高再推离一次墙（途中脚高可能与落点不同），
         # 推离后地面可能变，故最多迭代几次直到既不嵌墙又有地面。
         for _ in range(3):
-            if grounded:
-                surf = physics.walk_surface(fh, x, 0) if fh is not None else None
+            if grounded and fh is not None:
+                surf = physics.walk_surface(fh, x, 0)
                 if surf is None:
                     surf = physics.spawn_surface(
                         x, feet, tol=settings.TELEPORT_SNAP_TOL)
@@ -571,13 +581,17 @@ class Player:
                 return True
             x = cx
             fh = surf
-        if not physics.has_ground_below(x, feet):
-            return False                                # 深渊：不位移
-        self.x = x
-        self.on_ground = False
-        self.cur_fh = None
-        self.y = feet - settings.FEET_OFFSET
-        return True
+            grounded = True
+        # 未就近吸附到平台：在终点取 distance 内最近的平台落下（更远/更高的
+        # 平台也算），确保瞬移必定以站在平台上结束；实在找不到则原地不动。
+        surf = physics.nearest_surface_in_range(x, feet, distance)
+        if surf is not None:
+            self.x = x
+            self._teleport_land(surf)
+            self.x = physics.wall_overlap_clamp(self.x, self.feet_y,
+                                                direction, surf.layer)
+            return True
+        return False
 
     def _teleport_land(self, fh) -> None:
         """瞬移落点吸附到平台：脚贴面、清竖直速度、重置地面状态。"""
