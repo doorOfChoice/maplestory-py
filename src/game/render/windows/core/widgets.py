@@ -93,11 +93,11 @@ def _stretch_menu_top(t: pygame.Surface, W: int) -> pygame.Surface:
         return t
     lw, rw = 18, 8
     if W < lw + rw + 1:
-        return pygame.transform.smoothscale(t, (W, th))
+        return pygame.transform.scale(t, (W, th))
     out = pygame.Surface((W, th), pygame.SRCALPHA)
     out.blit(t.subsurface(pygame.Rect(0, 0, lw, th)), (0, 0))
     mid = t.subsurface(pygame.Rect(lw, 0, tw - lw - rw, th))
-    out.blit(pygame.transform.smoothscale(mid, (W - lw - rw, th)), (lw, 0))
+    out.blit(pygame.transform.scale(mid, (W - lw - rw, th)), (lw, 0))
     out.blit(t.subsurface(pygame.Rect(tw - rw, 0, rw, th)), (W - rw, 0))
     return out
 
@@ -112,12 +112,12 @@ def draw_menu_bg(surface, svc: WindowServices, rect: pygame.Rect) -> bool:
     W, H = rect.size
     th, sh = t.get_height(), s.get_height()
     top = _stretch_menu_top(t, W)
-    bot = s if W == s.get_width() else pygame.transform.smoothscale(s, (W, sh))
+    bot = s if W == s.get_width() else pygame.transform.scale(s, (W, sh))
     surface.blit(top, rect.topleft)
     surface.blit(bot, (rect.x, rect.bottom - sh))
     mid_h = max(0, H - th - sh)
     if mid_h > 0:
-        surface.blit(pygame.transform.smoothscale(c, (W, mid_h)),
+        surface.blit(pygame.transform.scale(c, (W, mid_h)),
                      (rect.x, rect.y + th))
     return True
 

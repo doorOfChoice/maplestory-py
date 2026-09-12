@@ -808,7 +808,7 @@ class ShopWindow(Window):
         if selected:
             sel = self._wz("select")
             if sel is not None:
-                fit = pygame.transform.smoothscale(sel, (rect.w, rect.h + 4))
+                fit = pygame.transform.scale(sel, (rect.w, rect.h + 4))
                 surface.blit(fit, (rect.x, rect.y - 3))
         icon = self._icon(item_id)
         name_c = (60, 52, 44) if selected else (80, 72, 62)
@@ -832,7 +832,7 @@ class ShopWindow(Window):
         if selected:
             sel = self._wz("select")
             if sel is not None:
-                fit = pygame.transform.smoothscale(sel, (rect.w, rect.h + 4))
+                fit = pygame.transform.scale(sel, (rect.w, rect.h + 4))
                 surface.blit(fit, (rect.x, rect.y - 3))
         _src, item = entry
         icon = self._icon(item.id)

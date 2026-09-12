@@ -149,7 +149,7 @@ class MiniMap:
         pygame.draw.rect(surface, (8, 10, 16, settings.MINIMAP_BG_ALPHA), panel)
         src = self.src_rect(player_x, player_y)
         view = self.base_layer.subsurface(src)
-        scaled = pygame.transform.smoothscale(
+        scaled = pygame.transform.scale(
             view, (settings.MINIMAP_W, settings.MINIMAP_H))
         surface.blit(scaled, panel.topleft)
 

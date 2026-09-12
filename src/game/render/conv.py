@@ -127,9 +127,9 @@ def draw_dlg_frame(surface, assets, x: int, y: int, w: int, content_h: int) -> N
     if t is None or c is None or s is None:
         return
     if w != t.get_width():
-        t = pygame.transform.smoothscale(t, (w, t.get_height()))
-        c = pygame.transform.smoothscale(c, (w, c.get_height()))
-        s = pygame.transform.smoothscale(s, (w, s.get_height()))
+        t = pygame.transform.scale(t, (w, t.get_height()))
+        c = pygame.transform.scale(c, (w, c.get_height()))
+        s = pygame.transform.scale(s, (w, s.get_height()))
     surface.blit(t, (x, y))
     ny = y + t.get_height()
     remaining = max(0, content_h)
@@ -311,7 +311,7 @@ class ConvPanel:
             return
         scale = min(1.0, box_w / img.get_width(), box_h / img.get_height())
         if scale < 1.0:
-            img = pygame.transform.smoothscale(
+            img = pygame.transform.scale(
                 img, (max(1, int(img.get_width() * scale)),
                       max(1, int(img.get_height() * scale))))
         surface.blit(img, (left + (box_w - img.get_width()) // 2,

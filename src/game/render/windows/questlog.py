@@ -427,7 +427,7 @@ class QuestLogWindow(Window):
         box_w, box_h = 100, 84
         scale = min(1.0, box_w / img.get_width(), box_h / img.get_height())
         if scale < 1.0:
-            img = pygame.transform.smoothscale(
+            img = pygame.transform.scale(
                 img, (max(1, int(img.get_width() * scale)),
                       max(1, int(img.get_height() * scale))))
         bx = dx + 190 + (DET_W - 190 - 8 - box_w) // 2

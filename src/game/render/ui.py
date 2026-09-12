@@ -464,15 +464,15 @@ class UI:
         surf.blit(parts["sw"], (0, h - parts["sw"].get_height()))
         surf.blit(parts["se"], (w - parts["se"].get_width(),
                                 h - parts["se"].get_height()))
-        surf.blit(pygame.transform.smoothscale(parts["n"], (inner_w, parts["n"].get_height())),
+        surf.blit(pygame.transform.scale(parts["n"], (inner_w, parts["n"].get_height())),
                   (parts["nw"].get_width(), 0))
-        surf.blit(pygame.transform.smoothscale(parts["s"], (inner_w, parts["s"].get_height())),
+        surf.blit(pygame.transform.scale(parts["s"], (inner_w, parts["s"].get_height())),
                   (parts["sw"].get_width(), h - parts["s"].get_height()))
-        surf.blit(pygame.transform.smoothscale(parts["w"], (parts["w"].get_width(), inner_h)),
+        surf.blit(pygame.transform.scale(parts["w"], (parts["w"].get_width(), inner_h)),
                   (0, parts["nw"].get_height()))
-        surf.blit(pygame.transform.smoothscale(parts["e"], (parts["e"].get_width(), inner_h)),
+        surf.blit(pygame.transform.scale(parts["e"], (parts["e"].get_width(), inner_h)),
                   (w - parts["e"].get_width(), parts["ne"].get_height()))
-        surf.blit(pygame.transform.smoothscale(parts["c"], (inner_w, inner_h)),
+        surf.blit(pygame.transform.scale(parts["c"], (inner_w, inner_h)),
                   (parts["nw"].get_width(), parts["nw"].get_height()))
         # 原版运行时把白色九宫格乘上 ChatBalloon/npc/clr = 0x80000000（半透黑）
         surf.fill((0, 0, 0, 128), special_flags=pygame.BLEND_RGBA_MULT)

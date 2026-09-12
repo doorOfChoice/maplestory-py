@@ -63,7 +63,7 @@ class CombatLogView:
         scale = ICON_BOX / max(surf.get_size())
         w = max(1, int(surf.get_width() * scale))
         h = max(1, int(surf.get_height() * scale))
-        return pygame.transform.smoothscale(surf, (w, h))
+        return pygame.transform.scale(surf, (w, h))
 
     # ── 文本 ─────────────────────────────────────────────────────────
     def entry_text(self, entry: CombatLogEntry) -> str:

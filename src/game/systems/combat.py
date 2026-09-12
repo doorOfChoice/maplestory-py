@@ -240,7 +240,7 @@ class DropItem:
                 t = min(self._attract_elapsed / settings.PICKUP_ATTRACT_TIME, 1.0)
                 scale = 1.0 + 0.25 * t
                 sw, sh = int(w * scale), int(h * scale)
-                scaled = pygame.transform.smoothscale(img, (sw, sh))
+                scaled = pygame.transform.scale(img, (sw, sh))
                 surface.blit(scaled, (int(sx - sw / 2), int(sy - sh / 2)))
             else:
                 surface.blit(img, (int(sx - w / 2), int(sy - h / 2)))
