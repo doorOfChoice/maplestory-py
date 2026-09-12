@@ -52,6 +52,11 @@ DROP_THROUGH_TIME = 0.30         # 下跳穿过平台的无碰撞秒数
 WALL_SLIDE_SPEED = 140.0         # 空中贴着墙按住方向键下落时的限速
 WALL_JUMP_VX = 260.0             # 蹬墙跳水平弹开速度
 WALL_JUMP_LOCK = 0.15            # 蹬墙跳后朝原墙方向输入的失控时长
+# 游泳（info/swim=1 的整图水域，原版式 8 向游动）
+SWIM_SPEED = 220.0               # 水中水平/下潜游动速度 px/s
+SWIM_JUMP_SPEED = 420.0          # 水中按跳跃键的向上冲量（略大于游动速度的一次划水）
+SWIM_DRAG = 4.0                  # 松手后速度每秒摩擦衰减系数（缓慢滑停）
+SWIM_SINK_SPEED = 90.0           # 无输入时的缓慢下沉速度（探底）
 
 # 角色 navel → 脚底偏移（像素，实测 stand1 约 20px）
 FEET_OFFSET = 20.0

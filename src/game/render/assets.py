@@ -127,6 +127,7 @@ class Assets:
         self.map_surface: Optional[pygame.Surface] = None
         self.minimap_base: Optional[pygame.Surface] = None
         self.back_layers: List[BackLayer] = []
+        self.swim: bool = False          # 当前地图 info/swim：整图水域
         self.load_map(map_id)
 
         # 后台预热各类常用素材，避免首次使用时主线程卡顿
@@ -197,7 +198,7 @@ class Assets:
         """后台预热玩家常驻姿态帧（站/走/跳/爬/攻，两种朝向）。"""
         equips = list(settings.DEFAULT_EQUIPS)
         for pose in ("stand1", "walk1", "jump", "ladder", "rope",
-                     "swingO1", "swingO2"):
+                     "swingO1", "swingO2", "fly"):
             try:
                 self.character_frames(equips, pose, False)
                 self.character_frames(equips, pose, True)
@@ -217,6 +218,7 @@ class Assets:
         self.ropes = self.map_desc["ropes"]
         self.portals = self.map_desc["portals"]
         self.life = self.map_desc["life"]
+        self.swim = bool(self.map_desc.get("swim"))
         if entry is not None and entry.get("img") is not None:
             self.map_surface = pil_to_surface(entry["img"])
             self.minimap_base = pil_to_surface(entry["img_bg"])
@@ -414,6 +416,7 @@ class Assets:
         self.ropes = desc["ropes"]
         self.portals = desc["portals"]
         self.life = desc["life"]
+        self.swim = bool(desc.get("swim"))
         self.map_width = self.bounds["width"]
         self.map_height = self.bounds["height"]
         self.map_surface = pil_to_surface(result["img"])

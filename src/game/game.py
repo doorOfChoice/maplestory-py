@@ -68,8 +68,7 @@ class Game:
         except pygame.error:
             self.screen = pygame.display.set_mode(
                 (settings.WINDOW_W, settings.WINDOW_H))
-        pygame.display.set_caption(
-            f"Maplestory 113 · {settings.MAP_ID} · pygame")
+        self._set_caption(settings.MAP_ID)
         self.canvas = pygame.Surface((settings.VIEW_W, settings.VIEW_H))
         self.clock = pygame.time.Clock()
         self.running = True
@@ -195,6 +194,7 @@ class Game:
         self._attack_buffer = 0.0
         self.spawn_grace = settings.SPAWN_GRACE
         self.fade = 1.0        # 开屏进入游戏时黑场淡入
+        self._set_caption(self.assets.map_id)
 
         self.ctx.audio.play_bgm()
         self._show_banner()
@@ -332,7 +332,10 @@ class Game:
                         self.ctx.world.player.drop_through(self.ctx.world.physics)
                     # ↑ 不再触发跳跃，仅用于传送门和爬绳（爬绳由 update 中 keys.up 驱动）
                 elif action == "jump":
-                    if self.keys.down:
+                    if self.ctx.world.player.in_water:
+                        # 水中跳跃键=划水上浮，不被 ↓ 的下跳逻辑吞掉
+                        self.ctx.world.player.jump()
+                    elif self.keys.down:
                         self.ctx.world.player.drop_through(self.ctx.world.physics)
                     elif self.ctx.world.player.climbing:
                         self.ctx.audio.play("Jump", 0.5)
@@ -603,6 +606,7 @@ class Game:
         """后台线程完成后，在主线程恢复游戏状态。"""
         bgm_path = self.assets.finish_load_map()
         _map_id, portal_name = self._pending_map
+        self._set_caption(self.assets.map_id)
         self.ctx.audio.bgm_path = bgm_path
         self.ctx.world.finish_loading(portal_name)
         self.ctx.audio.play_bgm()
@@ -610,6 +614,10 @@ class Game:
         self._loading = False
         self._pending_map = None
         self.fade = 1.0        # 黑场淡入新地图
+
+    def _set_caption(self, map_id: str) -> None:
+        """窗口标题显示当前所在地图 code。"""
+        pygame.display.set_caption(f"Maplestory 113 · {map_id} · pygame")
 
     def _show_banner(self) -> None:
         """切图横幅：主标题地图名 + 副标题街道名，随 fade 淡入淡出。"""

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import List, Optional, Tuple
 
 import pygame
@@ -30,6 +31,7 @@ POSE_RUN = "walk1"
 POSE_JUMP = "jump"
 POSE_LADDER = "ladder"
 POSE_ROPE = "rope"
+POSE_SWIM = "fly"        # 资产无 swim sprite，泳姿复用 fly
 
 # 技能 WZ level 表字段 → buff 词条（game/buffs.py 的 mods 键）
 BUFF_MOD_MAP = {"attack": "atk", "dex": "dex",
@@ -386,6 +388,11 @@ class Player:
             return
         if self.attacking:
             return   # 攻击硬直中不起跳（原地挥击）
+        if self.in_water and not self.on_ground:
+            # 水中划水：跳跃键给一次向上冲量（不是起跳初速度）
+            self.vy = -settings.SWIM_JUMP_SPEED
+            self.feather.consume()
+            return
         if self.on_ground or self.feather.coyote > 0.0:
             self.vy = self.jump_velocity()
             self.on_ground = False
@@ -403,6 +410,8 @@ class Player:
             self.feather.consume()
 
     def drop_through(self, physics: Optional[Physics] = None) -> None:
+        if self.in_water:
+            return   # 水中没有「下跳穿平台」语义
         if self.on_ground and self.cur_fh is not None:
             # 下方没有其他平台时不允许下跳（如底层主路），否则会掉出地图
             if physics is not None:
@@ -546,6 +555,12 @@ class Player:
                 self._load_anim(POSE_IDLE if self.on_ground else POSE_JUMP)
         else:
             self._tick_frame(dt, loop=True)
+
+        # 水中且离地：走泳态分支（无重力 / 8 向游动 / fly 姿态）；
+        # 一旦落到水底/平台（on_ground）则走常规步行逻辑，角色恢复站立/行走。
+        if self.in_water and not self.on_ground:
+            self._update_swim(dt, keys, physics)
+            return
 
         # 水平移动输入（攻击/受击硬直过程中不能主动移动）
         if self.wall_lock > 0:
@@ -738,6 +753,80 @@ class Player:
             else:
                 self._switch_if_needed(POSE_IDLE)
 
+    def _update_swim(self, dt: float, keys, physics: Physics) -> None:
+        """水图泳态：无重力、8 向游动；水平仍挡墙，下沉碰到水底即贴住但保持泳姿。
+
+        方向键只驱动水平与下潜；上浮由跳跃键的一次向上冲量给出（见
+        :meth:`_try_jump`），↑ 在水中不产生任何作用。松手水平滑停、
+        竖直缓慢下沉探底（原版「松手缓慢滑停」的手感）。
+        """
+        self.on_ground = False
+        self.cur_fh = None
+        self.climbing = False
+        self.wall_dir = 0
+        self.wall_lock = 0.0
+        self.ground_layer = None
+
+        if self.attacking:
+            self.vx = friction(self.vx, dt, settings.ATTACK_MOVE_FRICTION)
+            self.vy = friction(self.vy, dt, settings.ATTACK_MOVE_FRICTION)
+        elif self.statuses.locked():
+            self.stop_move()
+            self.vy = 0.0
+        elif self.hurt_timer > 0:
+            self.vx *= max(0.0, 1 - 6.0 * dt)
+            self.vy *= max(0.0, 1 - 6.0 * dt)
+        else:
+            dx = (1 if keys.right and not keys.left
+                  else -1 if keys.left and not keys.right else 0)
+            dy = 1 if keys.down else 0    # 上浮只由跳跃键的冲量驱动，↑ 在水中无效
+            if dx:
+                self.facing_right = dx > 0
+            if dx or dy:
+                length = math.hypot(dx, dy)
+                self.vx = dx / length * settings.SWIM_SPEED
+                if dy:
+                    self.vy = dy / length * settings.SWIM_SPEED
+                else:
+                    # 只有水平输入时不清零纵向速度：保留跳跃冲量并缓慢衰减，
+                    # 否则「边横向游动边按跳跃」会把向上冲量抹成 0。
+                    self.vy += (settings.SWIM_SINK_SPEED - self.vy) * min(
+                        1.0, settings.SWIM_DRAG * dt)
+            else:
+                self.vx = friction(self.vx, dt, settings.SWIM_DRAG)
+                self.vy += (settings.SWIM_SINK_SPEED - self.vy) * min(
+                    1.0, settings.SWIM_DRAG * dt)
+
+        prev_x = self.x
+        prev_feet = self.y + settings.FEET_OFFSET
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        self.x = physics.wall_block(prev_x, self.x, prev_feet,
+                                    self.y + settings.FEET_OFFSET,
+                                    self.cur_fh, layer=self.ground_layer)
+        now_feet = self.y + settings.FEET_OFFSET
+
+        # 下沉碰到水底 foothold：落到水底转入常规步行（站立/行走），不再游泳
+        if self.vy > 0:
+            fh = physics.landing_candidate(self.x, prev_feet, now_feet,
+                                           prev_x=prev_x)
+            if fh is not None:
+                self.y = fh.y_at(self.x) - settings.FEET_OFFSET
+                self.vy = 0.0
+                self.on_ground = True
+                self.cur_fh = fh
+                self.ground_layer = fh.layer
+        # 兜底：无 foothold 时钳在水图 VR 底边，避免沉出地图（仍在水中悬浮）
+        bounds = getattr(self.assets, "bounds", None)
+        if bounds:
+            bottom = float(bounds["bottom"]) - settings.FEET_OFFSET
+            if self.y > bottom:
+                self.y = bottom
+                self.vy = 0.0
+
+        if not self.attacking and not self.on_ground:
+            self._switch_if_needed(POSE_SWIM)
+
     def _switch_if_needed(self, pose: str) -> None:
         if self.pose != pose or self.anim_flip != self.facing_right:
             self._load_anim(pose)
@@ -750,6 +839,11 @@ class Player:
     @property
     def _animation_done(self) -> bool:
         return False
+
+    @property
+    def in_water(self) -> bool:
+        """当前地图是否为整图水域（WZ info/swim=1）。"""
+        return bool(getattr(self.assets, "swim", False))
 
     @property
     def feet_y(self) -> float:

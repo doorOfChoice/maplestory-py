@@ -42,6 +42,7 @@ class FakeAssets:
         self.map_width = 1600
         self.map_height = 1000
         self.bounds = {"left": -800, "top": -500, "right": 800, "bottom": 500}
+        self.swim = False
         self.footholds: List[Dict] = [{
             "id": 1, "layer": 0, "platform": 0,
             "x1": -800, "y1": 0, "x2": 800, "y2": 0, "prev": -1, "next": -1,

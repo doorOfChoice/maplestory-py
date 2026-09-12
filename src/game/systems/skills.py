@@ -293,7 +293,8 @@ class SkillBook:
         return mods
 
     def on_advance(self, jobdef) -> None:
-        """转职：本职业附赠被动满级（累加进 passive），重排全部主动快捷键。"""
+        """转职：附赠 SP 进本职业组池、附赠被动满级（累加进 passive）、重排快捷键。"""
+        self.add_sp(job_sp_group(jobdef.code), jobdef.advance_sp)
         for p in jobdef.passive_ids:
             pid = str(p)
             self._passive_ids.add(pid)

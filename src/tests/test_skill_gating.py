@@ -103,6 +103,26 @@ def test_on_advance_grants_passives_and_hotkeys():
     assert book.hotkeys == {1: "3001004"}   # 学会才自动补最小空键
 
 
+def test_on_advance_grants_bonus_sp_to_new_group():
+    """转职附赠 SP 直接进新职业组池：一转即有 5 点可加。"""
+    book = book_with(make_def("3001003"))
+    book.on_advance(JOBS[3000])
+    assert book.sp_for_group(300) == 5
+    assert book.learn("3001003", player_level=10) is True
+
+
+def test_second_advance_grants_bonus_to_own_group():
+    """二转附赠 SP（原版 4 点）只进二转池，不吃/不并其他组。"""
+    old = book_with(make_def("3001003"))
+    old.on_advance(JOBS[3000])
+    new = SkillBook(None, 3100, defs={"3001003": make_def("3001003"),
+                                      "3101005": make_def("3101005")})
+    new.inherit(old)
+    new.on_advance(JOBS[3100])
+    assert new.sp_for_group(310) == 4
+    assert new.sp_for_group(300) == 5       # 一转结余原样隔离
+
+
 def test_cast_returns_bullet_count():
     """施放数据带 bulletCount（默认 1）。"""
     book = book_with(make_def("3001004", mpCon=7, damage=190),

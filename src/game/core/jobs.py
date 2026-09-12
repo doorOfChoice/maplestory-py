@@ -49,6 +49,7 @@ class JobDef:
     skill_ids: Optional[List[str]] = None
     passive_ids: List[int] = field(default_factory=list)  # 转职附赠满级的被动
     advance_lv: int = 0                                   # 转职所需人物等级
+    advance_sp: int = 0                                   # 转职附赠 SP（进本职业组池，原版 5/4/4）
     prejob: int = 0                                       # 转职前置职业（新手）
     trainer_npc: Optional[int] = None
     starter_weapon: Optional[str] = None
@@ -69,7 +70,7 @@ JOBS: Dict[int, JobDef] = {
     3000: JobDef(
         code=3000, name="弓箭手", tree_imgs=["300.img"],
         passive_ids=[3000000, 3000001, 3000002],
-        advance_lv=10, trainer_npc=1012100, starter_weapon="1452002",
+        advance_lv=10, advance_sp=5, trainer_npc=1012100, starter_weapon="1452002",
         hp_gain=20, mp_gain=12, auto_ap={"dex": 1},
     ),
     # 弓箭手 2 转：猎人。Skill.wz/310.img；被动 精準之弓/終極之弓；
@@ -77,14 +78,14 @@ JOBS: Dict[int, JobDef] = {
     3100: JobDef(
         code=3100, name="猎人", tree_imgs=["310.img"],
         passive_ids=[3100000, 3100001],
-        advance_lv=30, prejob=3000, trainer_npc=1012100,
+        advance_lv=30, advance_sp=4, prejob=3000, trainer_npc=1012100,
         hp_gain=20, mp_gain=12, auto_ap={"dex": 1},
     ),
     # 弓箭手 3 转：神射手。Skill.wz/311.img；被动 疾风步/致命箭；门槛 Lv70。
     3110: JobDef(
         code=3110, name="神射手", tree_imgs=["311.img"],
         passive_ids=[3110000, 3110001],
-        advance_lv=70, prejob=3100, trainer_npc=1012100,
+        advance_lv=70, advance_sp=4, prejob=3100, trainer_npc=1012100,
         hp_gain=20, mp_gain=12, auto_ap={"dex": 1},
     ),
 }

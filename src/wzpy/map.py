@@ -444,6 +444,7 @@ class MapRenderer:
                 "street": street,
                 "bounds": self._bounds(root).as_dict(),
                 "returnMap": _int(root.get("info/returnMap")),
+                "swim": bool(_int(root.get("info/swim"))),
                 "layers": layers,
                 "counts": {
                     "tiles": tile_total,
