@@ -18,7 +18,9 @@ class Recorder:
 def make_ctx(warp_result=("system", "正在传送")):
     return GmContext(warp=Recorder(warp_result), heal=Recorder(("system", "已恢复")),
                      meso=Recorder(("system", "金币已增加")),
-                     add_level=Recorder(("system", "等级已提升")))
+                     add_level=Recorder(("system", "等级已提升")),
+                     advance=Recorder(("system", "已转职")),
+                     add_sp=Recorder(("system", "SP 已增加")))
 
 
 # ── 前缀识别 ────────────────────────────────────────────────────────
@@ -126,6 +128,59 @@ def test_add_level_without_arg_shows_usage():
     assert "/addlevel <等级数>" in lines[0][1]
 
 
+# ── /job ────────────────────────────────────────────────────────────
+
+def test_job_parses_code():
+    ctx = make_ctx()
+    execute("/job 2200", ctx)
+    assert ctx.advance.calls == [(2200,)]
+
+
+def test_job_rejects_non_numeric():
+    ctx = make_ctx()
+    lines = execute("/job 法师", ctx)
+    assert ctx.advance.calls == []
+    assert lines[0][0] == "error"
+
+
+def test_job_without_arg_shows_usage():
+    ctx = make_ctx()
+    lines = execute("/job", ctx)
+    assert ctx.advance.calls == []
+    assert lines[0][0] == "error"
+    assert "/job <职业码>" in lines[0][1]
+
+
+# ── /sp ─────────────────────────────────────────────────────────────
+
+def test_sp_parses_amount():
+    ctx = make_ctx()
+    execute("/sp 10", ctx)
+    assert ctx.add_sp.calls == [(10,)]
+
+
+def test_sp_rejects_bad_amount():
+    ctx = make_ctx()
+    lines = execute("/sp abc", ctx)
+    assert ctx.add_sp.calls == []
+    assert lines[0][0] == "error"
+
+
+def test_sp_rejects_negative_and_zero():
+    ctx = make_ctx()
+    assert execute("/sp -3", ctx)[0][0] == "error"
+    assert execute("/sp 0", ctx)[0][0] == "error"
+    assert ctx.add_sp.calls == []
+
+
+def test_sp_without_arg_shows_usage():
+    ctx = make_ctx()
+    lines = execute("/sp", ctx)
+    assert ctx.add_sp.calls == []
+    assert lines[0][0] == "error"
+    assert "/sp <数量>" in lines[0][1]
+
+
 # ── 通用 ────────────────────────────────────────────────────────────
 
 def test_unknown_command_reports_name():
@@ -145,5 +200,5 @@ def test_help_lists_all_commands():
     """多空格分隔容错；/help 输出覆盖全部已注册指令名。"""
     lines = execute("/help", make_ctx())
     text = "\n".join(t for _, t in lines)
-    for name in ("warp", "heal", "meso", "addlevel", "help"):
+    for name in ("warp", "heal", "meso", "addlevel", "job", "sp", "help"):
         assert name in text

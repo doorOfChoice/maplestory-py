@@ -19,6 +19,7 @@ from game import settings
 from game import features
 from game.core.chat import Chat
 from game.core.keybindings import KeyBindings, item_id_of_action
+from game.core.jobs import JOBS, job_sp_group
 from game.core import travel
 from game.render.assets import Assets
 from game.render.chat import ChatView
@@ -206,7 +207,8 @@ class Game:
         self.combat_log_view = CombatLogView()
         self.gm_ctx = GmContext(warp=self._gm_warp, heal=self._gm_heal,
                                 meso=self._gm_meso, add_level=self._gm_add_level,
-                                drop_rate=self._gm_drop_rate)
+                                drop_rate=self._gm_drop_rate,
+                                advance=self._gm_advance, add_sp=self._gm_add_sp)
         self._dialogue = NpcDialogueController(self.ctx, self.quest_defs)
         # 出租车菜单点选目的地 → 走与传送门同一套切图加载（落目标图出生门）
         self._dialogue.warp = lambda map_id: self._enter_map(map_id, None)
@@ -491,6 +493,20 @@ class Game:
     def _gm_drop_rate(self, mult: int) -> Tuple[str, str]:
         set_equip_drop_mult(mult)
         return ("system", f"装备掉落率已调整为 {mult} 倍")
+
+    def _gm_advance(self, code: int) -> Tuple[str, str]:
+        jobdef = JOBS.get(code)
+        if jobdef is None:
+            return ("error", f"职业 {code} 不存在")
+        p = self.ctx.world.player
+        p.advance_to(code, self.assets)
+        return ("system", f"已转职为 {jobdef.name}（#{code}）")
+
+    def _gm_add_sp(self, amount: int) -> Tuple[str, str]:
+        p = self.ctx.world.player
+        group = job_sp_group(p.job)
+        p.skills.add_sp(group, amount)
+        return ("system", f"当前职业 SP +{amount}（结余 {p.skills.sp_for_group(group)}）")
 
     def _cast_skill(self, hotkey: int) -> None:
         """按技能槽施放（键位经 KeyBindings 解析成槽号）。

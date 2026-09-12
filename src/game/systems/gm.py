@@ -25,6 +25,10 @@ class GmContext:
         lambda _n: ("system", "等级已提升")      # 加 N 级（正整数）→ 反馈
     drop_rate: Callable[[int], Tuple[str, str]] = \
         lambda _n: ("system", "装备掉落率已调整")      # 装备掉落倍率（正整数）→ 反馈
+    advance: Callable[[int], Tuple[str, str]] = \
+        lambda _c: ("system", "已转职")          # 职业码 → 反馈
+    add_sp: Callable[[int], Tuple[str, str]] = \
+        lambda _n: ("system", "SP 已增加")        # SP 数量（正整数）→ 反馈
 
 
 @dataclass(frozen=True)
@@ -68,6 +72,18 @@ def _cmd_drop_rate(args: Sequence[str], ctx: GmContext) -> Lines:
     return [ctx.drop_rate(int(args[0]))]
 
 
+def _cmd_job(args: Sequence[str], ctx: GmContext) -> Lines:
+    if len(args) != 1 or not args[0].isdigit():
+        return _bad_usage(COMMANDS["job"])
+    return [ctx.advance(int(args[0]))]
+
+
+def _cmd_sp(args: Sequence[str], ctx: GmContext) -> Lines:
+    if len(args) != 1 or not args[0].isdigit() or int(args[0]) <= 0:
+        return _bad_usage(COMMANDS["sp"])
+    return [ctx.add_sp(int(args[0]))]
+
+
 def _cmd_help(args: Sequence[str], ctx: GmContext) -> Lines:
     return [("system", f"/{c.name}" + (f" {c.usage}" if c.usage else "")
              + f" —— {c.desc}") for c in COMMANDS.values()]
@@ -80,6 +96,8 @@ COMMANDS: Dict[str, CommandDef] = {
         CommandDef("meso", "<数量>", "增加金币", _cmd_meso),
         CommandDef("addlevel", "<等级数>", "在当前等级基础上加 N 级", _cmd_add_level),
         CommandDef("droprate", "<倍率>", "临时提高装备掉落率（1 恢复）", _cmd_drop_rate),
+        CommandDef("job", "<职业码>", "直接转职为指定职业", _cmd_job),
+        CommandDef("sp", "<数量>", "给当前职业的 SP 池增加 N 点", _cmd_sp),
         CommandDef("help", "", "列出全部指令", _cmd_help),
     )
 }
