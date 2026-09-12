@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import random
 
-from game.systems.drops import OfficialDropTable
+from game.systems.drops import OfficialDropTable, parse_chance_text
+
+
+def test_parse_chance_text_converts_percent_to_millionths():
+    """掉率文本：整数、小数、极小值都换算为百万分比整数。"""
+    assert parse_chance_text("36%") == 360_000
+    assert parse_chance_text("0.03%") == 300
+    assert parse_chance_text("100%") == 1_000_000
 
 
 def test_full_chance_item_always_drops_with_count_in_range():

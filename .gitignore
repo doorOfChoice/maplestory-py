@@ -1,5 +1,6 @@
 # resources/wz 目录本身入库（.gitkeep 占位），但其中的 WZ 文件不提交
 resources/wz/*
+resources/wz_113/*
 !resources/wz/.gitkeep
 saves/
 

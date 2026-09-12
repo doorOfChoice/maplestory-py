@@ -1,19 +1,20 @@
-"""官方掉落表（drop_data）运行时数据。
+"""079 掉落表（drops.csv）运行时数据。
 
-数据源：台服 v113 服务端 SQL 的 drop_data 表，经 src/scripts/import_official_drops.py
-提取为 resources/content/drops.json，按 mob 分组，每行
-{item, min, max, chance[, quest]}：item 为 "0" 表示金币行，chance 为百万分比
-（个别行 >1000000，按必掉处理）；quest 为任务限定行专属，表示需进行中该任务
-（quest_id）才会掉。
+数据源：冒险岛 079 小册子（mxd079.dvg.cn）的掉落数据，经
+src/scripts/import_drops_079.py 抓取、src/scripts/build_drops_csv.py 编译为
+resources/content/drops.csv，列：mob_id, item_id, chance_text, min, max,
+questid。运行时按 mob 分组为 {item, min, max, chance[, quest]}：item 为 "0"
+表示金币行，chance 为百万分比（由 chance_text 如 "36%" / "0.03%" 换算）；
+quest 为任务限定行专属，表示需进行中该任务（quest_id）才会掉。
 
-掷骰模型与服务端一致：逐行独立 roll，命中则在 [min, max] 均匀取数量；
-一行都不中则无掉落。金币行命中后合并为一堆。任务限定行只在调用方传入的
-进行中任务集（active_quests）含该任务时参与掷骰。
+掷骰模型：逐行独立 roll，命中则在 [min, max] 均匀取数量；一行都不中则
+无掉落。金币行命中后合并为一堆。任务限定行只在调用方传入的进行中任务集
+（active_quests）含该任务时参与掷骰。
 """
 
 from __future__ import annotations
 
-import json
+import csv
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -57,8 +58,16 @@ def _canon_mob_id(mob_id: Any) -> str:
         return str(mob_id)
 
 
+def parse_chance_text(text: str) -> int:
+    """把 "36%" / "0.03%" 换算为百万分比整数（36% → 360000）。"""
+    s = str(text).strip()
+    if not s.endswith("%"):
+        raise ValueError(f"无法解析掉率文本: {text!r}")
+    return round(float(s[:-1]) * 10_000)
+
+
 class OfficialDropTable:
-    """mob_id → 官方掉落行列表 的只读掷骰表。"""
+    """mob_id → 掉落行列表 的只读掷骰表。"""
 
     def __init__(self, rows_by_mob: Dict[str, List[Dict[str, Any]]]) -> None:
         self._rows: Dict[str, List[Dict[str, Any]]] = {}
@@ -71,7 +80,21 @@ class OfficialDropTable:
 
     @classmethod
     def load(cls, path: Path) -> "OfficialDropTable":
-        return cls(json.loads(Path(path).read_text(encoding="utf-8")))
+        """读 drops.csv（列 mob_id,item_id,chance_text,min,max,questid）。"""
+        rows_by_mob: Dict[str, List[Dict[str, Any]]] = {}
+        with Path(path).open(newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                entry: Dict[str, Any] = {
+                    "item": str(int(row["item_id"])),
+                    "min": int(row["min"]),
+                    "max": int(row["max"]),
+                    "chance": parse_chance_text(row["chance_text"]),
+                }
+                quest = int(row.get("questid") or 0)
+                if quest > 0:
+                    entry["quest"] = quest
+                rows_by_mob.setdefault(row["mob_id"], []).append(entry)
+        return cls(rows_by_mob)
 
     def has_mob(self, mob_id: str) -> bool:
         return _canon_mob_id(mob_id) in self._rows
@@ -104,11 +127,11 @@ _CACHE: Optional[OfficialDropTable] = None
 
 
 def load_official_table(path: Optional[Path] = None) -> OfficialDropTable:
-    """加载 resources/content/drops.json（缺文件时空表），进程内缓存。"""
+    """加载 resources/content/drops.csv（缺文件时空表），进程内缓存。"""
     global _CACHE
     if path is None and _CACHE is not None:
         return _CACHE
-    file = Path(path) if path is not None else settings.RESOURCE_DIR / "content" / "drops.json"
+    file = Path(path) if path is not None else settings.RESOURCE_DIR / "content" / "drops.csv"
     table = OfficialDropTable.load(file) if file.exists() else OfficialDropTable({})
     if path is None:
         _CACHE = table
