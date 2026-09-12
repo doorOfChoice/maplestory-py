@@ -44,18 +44,23 @@ INV_CELL_W, INV_CELL_H = 36, 34
 INV_COLS = len(INV_CELL_X)
 INV_SLOTS = INV_COLS * len(INV_CELL_Y)          # 24
 
-# 装备：175×304 纸娃娃底板，5 列 × 7 行凹槽（仅 21 格有效）
+# 装备：175×304 纸娃娃底板，5 列 × 7 行凹槽，对齐底图烘焙的中文栏位标签
 EQP_BG = "Equip/backgrnd"
 EQP_W, EQP_H = 175, 304
 EQP_CELL_X = [4, 38, 71, 104, 137]
 EQP_CELL_Y = [34, 68, 101, 134, 167, 200, 233]
 EQP_CELL_W, EQP_CELL_H = 33, 33
-EQP_SLOT_POS = {                                 # slot → (col, row)
-    "cap": (1, 0), "face": (2, 0),
-    "earr": (0, 1), "weapon": (1, 1), "cape": (3, 1), "ring": (4, 1),
-    "top": (2, 2), "shield": (3, 2),
-    "glove": (0, 3), "overall": (2, 3),
-    "pants": (2, 4), "shoes": (1, 4),
+# slot → (col, row)，逐一对照 Equip/backgrnd 的标签：帽子/额饰/耳饰/上衣/裤裙/
+# 鞋子/手套/披风/指环/盾牌/武器；套服与上衣互斥（见 Inventory.equip），同格显示。
+EQP_SLOT_POS = {
+    "cap": (1, 0),
+    "face": (1, 1),
+    "earr": (3, 2),
+    "top": (1, 3), "overall": (1, 3),
+    "pants": (1, 4), "shoes": (2, 5),
+    "glove": (0, 4), "cape": (0, 3),
+    "ring": (3, 0),
+    "shield": (4, 3), "weapon": (3, 3),
 }
 
 # 页签（带原版汉字，宽 26~27 高 16）：游戏内 3 页 → 原版 装备/消耗/其他
