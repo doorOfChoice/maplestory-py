@@ -39,17 +39,18 @@ DETAIL_W, DETAIL_H = 184, 203
 DETAIL_ROW_Y = {"atk": 15, "pdd": 33, "mad": 51, "mdd": 69,
                 "acc": 87, "eva": 105, "spd": 123, "move": 141, "jump": 160}
 DETAIL_VALUE_X = 176                 # 数值右缘（右对齐）
-# 九行 → (自绘兜底中文标签, Player 面板 getter)
-DETAIL_ROWS: Tuple[Tuple[str, str, str], ...] = (
-    ("atk", "攻击力", "attack_value"),
-    ("pdd", "物理防御", "defense_value"),
-    ("mad", "魔法力", "magic_attack_value"),
-    ("mdd", "魔法防御", "magic_defense_value"),
-    ("acc", "命中率", "accuracy_value"),
-    ("eva", "回避率", "evasion_value"),
-    ("spd", "攻击速度", "attack_speed_value"),
-    ("move", "移动速度", "move_speed_display"),
-    ("jump", "跳跃力", "jump_power_display"),
+DETAIL_BUFF_COLOR = (200, 20, 20)    # buff 加成后缀 (+N) 红色
+# 九行 → (自绘兜底中文标签, Player 面板 getter, 是否含 buff)
+DETAIL_ROWS: Tuple[Tuple[str, str, str, bool], ...] = (
+    ("atk", "攻击力", "attack_value", True),
+    ("pdd", "物理防御", "defense_value", True),
+    ("mad", "魔法力", "magic_attack_value", True),
+    ("mdd", "魔法防御", "magic_defense_value", True),
+    ("acc", "命中率", "accuracy_value", True),
+    ("eva", "回避率", "evasion_value", True),
+    ("spd", "攻击速度", "attack_speed_value", False),
+    ("move", "移动速度", "move_speed_display", True),
+    ("jump", "跳跃力", "jump_power_display", True),
 )
 
 FB_W, FB_H = 210, 250                # 素材缺失时的自绘窗尺寸
@@ -193,21 +194,37 @@ class StatWindow(Window):
             self._draw_detail_fallback(surface, player, fs, dx, dy)
             return
         surface.blit(bg, (dx, dy))
-        for key, _label, getter in DETAIL_ROWS:
+        for key, _label, getter, buff_aware in DETAIL_ROWS:
+            total = getattr(player, getter)()
+            base = getattr(player, getter)(with_buffs=False) \
+                if buff_aware else total
             self._draw_detail_value(surface, fs, dx, dy,
-                                    DETAIL_ROW_Y[key], getattr(player, getter)())
+                                    DETAIL_ROW_Y[key], base, total - base)
 
     def _draw_detail_value(self, surface, fs, dx: int, dy: int,
-                           ry: int, val: int) -> None:
-        """详情弹窗单行数值（右对齐、垂直居中于标签行）。"""
-        text = str(val)
+                           ry: int, base: int, bonus: int) -> None:
+        """详情弹窗单行数值（右对齐）；buff 加成 (+N) 用同一像素字体染红。"""
         right = dx + DETAIL_VALUE_X
+        suffix = f"(+{bonus})" if bonus else ""
+        sw = self.numbers.width(suffix, DETAIL_BUFF_COLOR) if bonus else 0
+        if sw is None:
+            sw = fs.size(suffix)[0]
+        gap = 2 if bonus else 0
+        text = str(base)
         w = self.numbers.width(text, (40, 40, 40))
+        start = right - sw - gap
         if w is not None:
-            self.numbers.draw(surface, text, right - w, dy + ry)
+            self.numbers.draw(surface, text, start - w, dy + ry)
         else:
             t = fs.render(text, True, (40, 40, 40))
-            surface.blit(t, (right - t.get_width(), dy + ry - t.get_height() // 2))
+            surface.blit(t, (start - t.get_width(),
+                             dy + ry - t.get_height() // 2))
+        if bonus and self.numbers.draw(
+                surface, suffix, right - sw, dy + ry,
+                DETAIL_BUFF_COLOR) is None:
+            b = fs.render(suffix, True, DETAIL_BUFF_COLOR)
+            surface.blit(b, (right - b.get_width(),
+                             dy + ry - b.get_height() // 2))
 
     def _swallow_detail(self, _surface) -> None:
         """详情弹窗打开时把本窗命中矩形并到弹窗，使 manager 能路由弹窗点击。"""
@@ -215,12 +232,20 @@ class StatWindow(Window):
             self.rect = self.rect.union(self._detail_popup_rect)
 
     def _draw_detail_fallback(self, surface, player, fs, dx: int, dy: int) -> None:
-        """素材缺失时的自绘详情弹窗（同九行，逐行「标签 数值」）。"""
+        """素材缺失时的自绘详情弹窗（同九行，逐行「标签 数值」+ 红色 buff 加成）。"""
         widgets.panel_frame(surface, pygame.Rect(dx, dy, DETAIL_W, DETAIL_H))
         ty = dy + 10
-        for _key, label, getter in DETAIL_ROWS:
-            surface.blit(fs.render(f"{label}  {getattr(player, getter)()}",
-                                   True, (230, 225, 210)), (dx + 12, ty))
+        for _key, label, getter, buff_aware in DETAIL_ROWS:
+            total = getattr(player, getter)()
+            base = getattr(player, getter)(with_buffs=False) \
+                if buff_aware else total
+            prefix = f"{label}  {base}"
+            surface.blit(fs.render(prefix, True, (230, 225, 210)), (dx + 12, ty))
+            bonus = total - base
+            if bonus:
+                px = dx + 12 + fs.size(prefix)[0]
+                surface.blit(fs.render(f"(+{bonus})", False, DETAIL_BUFF_COLOR),
+                             (px, ty))
             ty += 20
 
     def _draw_fallback(self, surface, player, fs) -> None:

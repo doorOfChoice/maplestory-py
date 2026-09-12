@@ -444,6 +444,10 @@ def draw_toast(surface, svc: WindowServices, text: str, y: int = 34) -> None:
 class PixelNumbers:
     """数字串的原版像素字体绘制：白 glyph × 染色缓存；不可绘时回退文本。"""
 
+    # 原版 number 字体里可直接取到的符号 glyph 名（'+'、'('、')' 另行自绘）
+    _SYMBOL_PATH = {"/": "slash"}
+    _CHARS = set("0123456789()/+")
+
     def __init__(self, svc: WindowServices) -> None:
         self.svc = svc
         self._cache: dict = {}
@@ -454,20 +458,49 @@ class PixelNumbers:
         hit = self._cache.get(key)
         if hit is not None:
             return hit
-        path = "number/slash" if ch == "/" else f"number/{ch}"
-        src = wz_surface(self.svc, path, img="StatusBar.img")
-        if src is None:
+        if ch in "+()":
+            img = self._sign_glyph(ch, color)
+        else:
+            name = self._SYMBOL_PATH.get(ch, ch)
+            src = wz_surface(self.svc, f"number/{name}", img="StatusBar.img")
+            if src is None:
+                return None
+            img = src.copy()
+            img.fill((*color, 255), special_flags=pygame.BLEND_RGBA_MULT)
+        if img is None:
             return None
-        tinted = src.copy()
-        tinted.fill((*color, 255), special_flags=pygame.BLEND_RGBA_MULT)
-        self._cache[key] = tinted
-        return tinted
+        self._cache[key] = img
+        return img
+
+    def _sign_glyph(self, ch: str, color: Tuple[int, int, int]
+                    ) -> Optional[pygame.Surface]:
+        """自绘与原版数字同高的 '+' / '(' / ')'（number 字体无这些 glyph）。"""
+        base = self.glyph("0", color)
+        if base is None:
+            return None
+        h = base.get_height()
+        col = (*color, 255)
+        if ch == "+":
+            surf = pygame.Surface((h, h), pygame.SRCALPHA)
+            mid = h // 2
+            pygame.draw.line(surf, col, (0, mid), (h - 1, mid))
+            pygame.draw.line(surf, col, (mid, 0), (mid, h - 1))
+            return surf
+        surf = pygame.Surface((2, h + 2), pygame.SRCALPHA)
+        edge = 0 if ch == "(" else 1        # 括号外弧侧的竖笔
+        for y in range(1, h + 1):
+            surf.set_at((edge, y), col)
+        surf.set_at((1 - edge, 0), col)
+        surf.set_at((1 - edge, h + 1), col)
+        return surf
 
     def width(self, text: str, color: Tuple[int, int, int]) -> Optional[int]:
         """像素数字串总宽；含不可绘制字符时 None（调用方回退字体）。"""
         w = 0
         for ch in text:
-            img = self.glyph(ch, color) if (ch.isdigit() or ch == "/") else None
+            if ch not in self._CHARS:
+                return None
+            img = self.glyph(ch, color)
             if img is None:
                 return None
             w += img.get_width() + 1

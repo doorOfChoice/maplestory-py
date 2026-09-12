@@ -72,6 +72,27 @@ def test_buff_pad_adds_flat_attack(monkeypatch):
     assert player.attack_value() == before + 26
 
 
+def test_attack_base_value_excludes_buff(monkeypatch):
+    """详情弹窗基础值：with_buffs=False 不含 buff 加成，差值即 buff 贡献。"""
+    player = make_player(monkeypatch)
+    base = player.attack_value(with_buffs=False)
+    d = make_skill("3121008", "念力集中", time=240, pad=26)
+    assert player.start_attack(make_cast("3121008", d, mp_con=10)) is True
+    assert player.attack_value(with_buffs=False) == base
+    assert player.attack_value() - base == 26
+
+
+def test_stat_pct_buff_excluded_from_base_stats(monkeypatch):
+    """楓葉祝福的 stat_pct 同属 buff：基础四维不含它，差值即 buff 贡献。"""
+    player = make_player(monkeypatch)
+    player.stats["dex"] = 100
+    base = player.total_stats(with_buffs=False)["dex"]
+    d = make_skill("3121000", "楓葉祝福", time=900, x=50)
+    assert player.start_attack(make_cast("3121000", d, mp_con=30)) is True
+    assert player.total_stats(with_buffs=False)["dex"] == base
+    assert player.total_stats()["dex"] - base == int(base * 1.5) - base
+
+
 def test_buff_accuracy_adds_flat_accuracy(monkeypatch):
     """集中術(3001003)：acc=20（WZ）作为平坦命中入面板。"""
     player = make_player(monkeypatch)

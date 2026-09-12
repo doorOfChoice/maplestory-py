@@ -12,6 +12,11 @@ from tests.windows_harness import (draw_once, make_manager, make_services,
 
 
 # ── 测试数据助手 ───────────────────────────────────────────────────
+def _stat(total: int):
+    """面板 getter 桩：无 buff 基础值比总值低 5，供详情行验证 buff 后缀。"""
+    return lambda with_buffs=True: total if with_buffs else total - 5
+
+
 def make_player(ap: int = 0, alloc_ok: bool = True, auto_ok: bool = True):
     """假玩家：allocate_ap / auto_allocate_ap 记录调用并可控返回值。"""
     calls: List[str] = []
@@ -27,11 +32,12 @@ def make_player(ap: int = 0, alloc_ok: bool = True, auto_ok: bool = True):
     return SimpleNamespace(
         ap=ap, level=12, hp=77.5, max_hp=120, mp=31.25, max_mp=60,
         exp=1234, exp_to_next=lambda: 4321,
-        attack_value=lambda: 120, defense_value=lambda: 45,
-        magic_attack_value=lambda: 88, magic_defense_value=lambda: 30,
-        accuracy_value=lambda: 95, evasion_value=lambda: 12,
-        attack_speed_value=lambda: 4, move_speed_display=lambda: 100,
-        jump_power_display=lambda: 100,
+        attack_value=_stat(120), defense_value=_stat(45),
+        magic_attack_value=_stat(88), magic_defense_value=_stat(30),
+        accuracy_value=_stat(95), evasion_value=_stat(12),
+        attack_speed_value=lambda: 4,
+        move_speed_display=_stat(100),
+        jump_power_display=_stat(100),
         total_stats=lambda: {"str": 25, "dex": 20, "int": 4, "luk": 6},
         inventory=SimpleNamespace(bonus=lambda st: 3 if st == "str" else 0),
         job=next(iter(JOBS)),
@@ -123,16 +129,24 @@ def test_detail_button_toggles_popup_open_close():
 
 
 def test_detail_popup_reads_all_nine_rows():
-    """详情弹窗打开时，逐行读取全部九项战斗数值；关闭时一概不读。"""
-    seen: List[str] = []
+    """详情弹窗打开时逐行读取九项数值；buff 行额外读取不含 buff 的基础值。"""
+    seen: List[tuple] = []
     player = make_player(ap=8)
-    for _key, _label, getter in DETAIL_ROWS:
-        setattr(player, getter, lambda g=getter: (seen.append(g), 1)[1])
+    for _key, _label, getter, _aware in DETAIL_ROWS:
+        def probe(with_buffs=True, g=getter):
+            seen.append((g, with_buffs))
+            return 1
+        setattr(player, getter, probe)
     win, mgr = open_stat(player)
     assert seen == []                       # 关闭时不读战斗数值
     press(mgr, win._detail_rect.center)     # 打开详情
     draw_once(mgr)                          # 重建热区并绘制弹窗
-    assert seen == [g for _k, _l, g in DETAIL_ROWS]
+    expected: List[tuple] = []
+    for _key, _label, getter, aware in DETAIL_ROWS:
+        expected.append((getter, True))
+        if aware:
+            expected.append((getter, False))
+    assert seen == expected
 
 
 def test_detail_popup_click_consumed_without_action():
