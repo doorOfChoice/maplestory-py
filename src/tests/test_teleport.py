@@ -90,6 +90,19 @@ def test_vertical_down_without_platform_stays(monkeypatch):
     assert (p.x, p.y) == before
 
 
+def test_vertical_down_onto_stair_riser_not_embedded(monkeypatch):
+    """竖直下瞬移恰好落在台阶下层、身体压在 riser 上时，应被推到墙外，不嵌墙。"""
+    ph = Physics([fh(1, 0, 0, 200, 400, 200),        # 下层地面
+                  fh(2, 0, 0, 100, 400, 100),        # 上层地面
+                  fh(3, 0, 200, 200, 200, 150)], [])  # 台阶 riser（落地实墙）
+    p = make_player(monkeypatch, ph, 206, 100 - settings.FEET_OFFSET,
+                    layer=0, cur=at(2, ph))
+    assert p.teleport(300, ph, down=True) is True
+    assert p.on_ground is True
+    assert p.y + settings.FEET_OFFSET == 200.0
+    assert p.x >= 200.0 + R - 0.01          # 身体在 riser 右侧，不嵌入
+
+
 # ── 水平瞬移：同层吸附 / 撞墙 / 跨沟坠落 ────────────────────────────
 def test_horizontal_snaps_to_same_layer_slope(monkeypatch):
     """水平落在同层「更低一段」的坡面（小落差）→ 吸附贴地，不悬空。"""

@@ -497,6 +497,8 @@ class Player:
             if fh is None:
                 return False
             self._teleport_land(fh)
+            # 竖直落点无「来向」，按最近侧把身体推出台阶 riser 等实墙外
+            self.x = physics.deembed_walls(self.x, self.feet_y, fh.layer)
         else:
             if not self._teleport_walk(distance, physics):
                 return False
@@ -593,7 +595,7 @@ class Player:
             if physics is not None:
                 feet = self.feet_y
                 has_below = any(
-                    f.x1 != f.x2 and f.covers(self.x)
+                    not f.is_wall and f.covers(self.x)
                     and f.y_at(self.x) > feet + 4.0
                     for f in physics.footholds
                 )

@@ -20,6 +20,7 @@ from game.core import stats as stats_mod
 from game.core.animation import Animation
 from game.core.combat_log import CombatLog
 from game.core.equip_roll import roll_drop_bonus
+from game.core.physics import is_wall_foothold
 from game.render.assets import Assets
 from game.render.effects import Effect
 from game.systems.drops import OfficialDropTable, load_official_table
@@ -441,7 +442,8 @@ class Combat:
         best_d = 30.0
         for f in self.assets.footholds:
             x1, x2 = f["x1"], f["x2"]
-            if x1 == x2 or not (min(x1, x2) - 1.0 <= x <= max(x1, x2) + 1.0):
+            if is_wall_foothold(x1, f["y1"], x2, f["y2"]) \
+                    or not (min(x1, x2) - 1.0 <= x <= max(x1, x2) + 1.0):
                 continue
             y = f["y1"] + (f["y2"] - f["y1"]) * (x - x1) / (x2 - x1)
             d = abs(y - ref_y)
@@ -462,7 +464,8 @@ class Combat:
         best: Optional[float] = None
         for f in self.assets.footholds:
             x1, x2 = f["x1"], f["x2"]
-            if x1 == x2 or not (min(x1, x2) - 1.0 <= x <= max(x1, x2) + 1.0):
+            if is_wall_foothold(x1, f["y1"], x2, f["y2"]) \
+                    or not (min(x1, x2) - 1.0 <= x <= max(x1, x2) + 1.0):
                 continue
             y = f["y1"] + (f["y2"] - f["y1"]) * (x - x1) / (x2 - x1)
             if y >= ref_y - 2.0 and (best is None or y < best):

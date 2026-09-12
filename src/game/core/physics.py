@@ -25,6 +25,18 @@ from typing import Any, Dict, List, Optional, Tuple
 from game import settings
 
 
+def is_wall_foothold(x1: float, y1: float, x2: float, y2: float) -> bool:
+    """该 foothold 是否为墙：纯竖直，或斜率过大的近垂直斜段。
+
+    地图常把立面误写成 1~7px 宽的极陡斜段（斜率可达 4~12），若当坡走会单帧
+    垂直瞬移。阈值取 FOOTHOLD_WALL_SLOPE，只吃掉真正的立面，普通台阶（~1.9）不受影响。
+    """
+    dx = abs(x2 - x1)
+    if dx == 0:
+        return True
+    return abs(y2 - y1) >= settings.FOOTHOLD_WALL_SLOPE * dx
+
+
 class Foothold:
     """一条可行走线段。y_at(x) 做线性插值（竖直线段返回最小值）。"""
 
@@ -40,6 +52,16 @@ class Foothold:
         self.y2 = int(data["y2"])
         self.prev = int(data.get("prev") or -1)
         self.next = int(data.get("next") or -1)
+
+    @property
+    def is_wall(self) -> bool:
+        """墙：不可站立、不贴坡，只做水平阻挡。"""
+        return is_wall_foothold(self.x1, self.y1, self.x2, self.y2)
+
+    @property
+    def is_vertical(self) -> bool:
+        """纯竖直（x1==x2）：作者显式写的梯级/墙，可被链接续段穿过。"""
+        return self.x1 == self.x2
 
     @property
     def xmin(self) -> float:
@@ -99,18 +121,18 @@ class Physics:
             self.vr_left = self.vr_right = None
         # 地图边缝缺口：VR bounds 常宽于最外侧可行走 foothold，两者之间的
         # 边缝没有任何地面，走到即坠出世界。把可行走 vr 边界收紧到最外侧
-        # 非竖直 foothold 边缘、再内缩一个贴图半宽，令身体边缘贴平台边即停
+        # 非墙 foothold 边缘、再内缩一个贴图半宽，令身体边缘贴平台边即停
         # （原版此处是墙，且边缝处没有墙体贴图可遮悬出的半身）。
         if self.vr_left is not None:
-            horiz = [f for f in self.footholds if f.x1 != f.x2]
+            horiz = [f for f in self.footholds if not f.is_wall]
             if horiz:
                 m = settings.PLAYER_VISUAL_HALF_W
                 self.vr_left = max(self.vr_left,
                                    min(f.xmin for f in horiz) + m)
                 self.vr_right = min(self.vr_right,
                                     max(f.xmax for f in horiz) - m)
-        # 竖直墙（x1==x2）：不可站立/落点，只用于水平阻挡。
-        # 按 (layer, x) 分组合并成墙链，每层各自按 x 排序供二分查询。
+        # 竖直墙（纯竖直 + 近垂直斜段）：不可站立/落点，只用于水平阻挡。
+        # 按 (layer, 代表 x) 分组合并成墙链，每层各自按 x 排序供二分查询。
         self.chains: List[WallChain] = self._build_chains()
         self.chains_by_layer: Dict[int, List[WallChain]] = {}
         for w in self.chains:
@@ -131,10 +153,12 @@ class Physics:
         return self.chains, self.wall_xs
 
     def _build_chains(self) -> List[WallChain]:
-        groups: Dict[Tuple[int, int], List[Tuple[float, float]]] = {}
+        groups: Dict[Tuple[int, float], List[Tuple[float, float]]] = {}
         for f in self.footholds:
-            if f.x1 == f.x2:
-                groups.setdefault((f.layer, f.x1), []).append((f.ymin, f.ymax))
+            if f.is_wall:
+                # 近垂直斜段取其宽度中点作代表 x（纯竖直时两边相同）
+                wx = (f.x1 + f.x2) / 2.0
+                groups.setdefault((f.layer, wx), []).append((f.ymin, f.ymax))
         chains: List[WallChain] = []
         for (layer, x), spans in groups.items():
             spans.sort()
@@ -158,24 +182,27 @@ class Physics:
         ignore_layers: 下跳期间要忽略的平台 layer 集合。
         prev_x / band: 水平大位移（如受击击退）上坡方向受击时，坡面随 x
         抬升快过垂直下落，当前 x 的垂直穿线带会一直错过线（等 vy>=0 时脚已
-        深陷坡体）。故当带 prev_x 时补一条"沿迹穿越"判定：上帧脚在该面线上、
-        本帧已到线下方 → 判穿过。此判定不含方向假设，空中每帧都可安全运行
-        （普通跳台是脚从下方上穿，不满足"上方→下方"，不会误接）。band=False
-        时只用沿迹判定、跳过垂直带（上升帧专用，避免把跳台途中吸附）。
+        深陷坡体）。故当带 prev_x 时补一条"沿迹穿越"判定：面相对脚追上来
+        （脚从面上方穿到下方）→ 判穿过；从下方上升掠过（脚上升快过面，如跳跃
+        截断）不接。band=False 时只用沿迹判定、跳过垂直带（上升帧专用）。
         """
         ignore = ignore_layers or set()
         best: Optional[Foothold] = None
         best_y: Optional[float] = None
         lo, hi = (prev_feet - 1.0, now_feet + 1.0)
         for f in self.footholds:
-            if f.x1 == f.x2 or f.layer in ignore or not f.covers(x):
+            if f.is_wall or f.layer in ignore or not f.covers(x):
                 continue
             y_a = f.y_at(x)
             hit = band and lo <= y_a <= hi
             if not hit and prev_x is not None and prev_x != x:
                 xp = min(max(prev_x, f.xmin), f.xmax)
-                hit = (prev_feet <= f.y_at(xp) + 1.0
-                       and now_feet >= y_a - 1.0)
+                y_prev = f.y_at(xp)
+                # 沿迹穿越只在「面相对脚追上来 / 脚从面上方穿到下方」时成立；
+                # 从下方上升掠过（脚上升快过面）不得被吸附，否则跳跃会被截断。
+                hit = (prev_feet <= y_prev + 1.0
+                       and now_feet >= y_a - 1.0
+                       and now_feet - y_a >= prev_feet - y_prev)
             if hit and (best is None or y_a < best_y):
                 best, best_y = f, y_a
         return best
@@ -185,7 +212,7 @@ class Physics:
         best: Optional[Foothold] = None
         best_y: Optional[float] = None
         for f in self.footholds:
-            if f.x1 == f.x2 or not f.covers(x):
+            if f.is_wall or not f.covers(x):
                 continue
             y_a = f.y_at(x)
             d = y_a - feet
@@ -203,7 +230,7 @@ class Physics:
         best: Optional[Foothold] = None
         best_d: Optional[float] = None
         for f in self.footholds:
-            if f.x1 == f.x2 or not f.covers(x):
+            if f.is_wall or not f.covers(x):
                 continue
             d = abs(f.y_at(x) - feet)
             if d <= lim and (best is None or d < best_d):
@@ -222,7 +249,7 @@ class Physics:
         best: Optional[Foothold] = None
         best_y: Optional[float] = None
         for f in self.footholds:
-            if f.x1 == f.x2 or not f.covers(x):
+            if f.is_wall or not f.covers(x):
                 continue
             y_a = f.y_at(x)
             if up:
@@ -244,7 +271,7 @@ class Physics:
         best: Optional[Foothold] = None
         best_y: Optional[float] = None
         for f in self.footholds:
-            if f.x1 == f.x2 or not f.covers(x):
+            if f.is_wall or not f.covers(x):
                 continue
             y_a = f.y_at(x)
             if feet - max_rise <= y_a <= feet + 2.0:
@@ -258,7 +285,7 @@ class Physics:
         best: Optional[Foothold] = None
         best_d = tol
         for f in self.footholds:
-            if f.x1 == f.x2 or not f.covers(x):
+            if f.is_wall or not f.covers(x):
                 continue
             d = abs(f.y_at(x) - y)
             if d <= best_d:
@@ -282,9 +309,11 @@ class Physics:
             nxt = self.by_id.get(d)
             if nxt is None or nxt.fid == came_from:
                 return None
-            if nxt.x1 != nxt.x2:
+            if not nxt.is_wall:
                 return nxt
-            # 竖直段：从 came_from 那端进入，从另一端穿出
+            if not nxt.is_vertical:
+                return None          # 近垂直斜段=墙：链接中断（拦住/走空）
+            # 纯竖直梯级：从 came_from 那端进入，从另一端穿出
             if nxt.prev == came_from:
                 came_from, d = nxt.fid, nxt.next
             elif nxt.next == came_from:
@@ -398,7 +427,7 @@ class Physics:
 
     def has_ground_below(self, x: float, feet: float) -> bool:
         """x 处脚底及以下是否还有可行走面（落点兜底：判定是否为无底深渊）。"""
-        return any(f.x1 != f.x2 and f.covers(x) and f.y_at(x) >= feet - 1.0
+        return any(not f.is_wall and f.covers(x) and f.y_at(x) >= feet - 1.0
                    for f in self.footholds)
 
     def wall_overlap_clamp(self, x: float, feet: float, direction: int,
@@ -424,6 +453,28 @@ class Physics:
             else:
                 hit = max(hit, cand)
         return self._vr_clamp(x if hit is None else hit)
+
+    def deembed_walls(self, x: float, feet: float,
+                      layer: Optional[int] = None) -> float:
+        """把已嵌进阻挡墙的身体推到最近一侧墙外（竖直瞬移落点兜底）。
+
+        与 wall_overlap_clamp 的「按来向推回近侧」不同：竖直/无方向的落点没有
+        来向，故按身体中心相对墙面的位置取更近的一侧推出（x 在墙左侧推左、
+        右侧推右），多面墙迭代到不再重叠。"""
+        chains, _ = self._layer_chains(layer)
+        r = settings.PLAYER_BODY_HALF_W
+        for _ in range(4):
+            moved = False
+            for w in chains:
+                if not self._blocks(w, feet):
+                    continue
+                if not (w.x - r < x < w.x + r):
+                    continue
+                x = w.x - r if x <= w.x else w.x + r
+                moved = True
+            if not moved:
+                break
+        return self._vr_clamp(x)
 
     def touching_wall(self, x: float, feet_y: float, direction: int,
                       layer: Optional[int] = None) -> Optional[float]:
