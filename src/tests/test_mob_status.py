@@ -67,6 +67,9 @@ class FakePlayer:
         self.x = 100.0
         self.y = 100.0
 
+    def is_invulnerable(self):
+        return False
+
     def hurt(self, from_x):
         return True
 

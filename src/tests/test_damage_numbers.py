@@ -32,6 +32,13 @@ def test_zero_amount_shows_miss():
     assert n.digits == ["Miss"]
 
 
+def test_blue_miss_uses_set_that_ships_miss_glyph():
+    """怪物打玩家 MISS（蓝字）也必须显示：蓝字集无 Miss 字形，须回退有字形的集。"""
+    n = DamageNumber(0, 0, 0, kind="blue")
+    assert n.set_name == DamageNumber.MISS_SET
+    assert n.digits == ["Miss"]
+
+
 def test_motion_holds_then_rises_and_fades():
     """动画曲线：前 400ms 原地全亮，之后 600ms 上升 30px 并淡出。"""
     n = DamageNumber(0, 0, 100)

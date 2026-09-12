@@ -104,6 +104,7 @@ BASE_WEAPON_PAD = 10             # 空手面板攻击（须低于新手武器 PA
 # ── 玩家受击（原版行为：击退小跳 + 短暂无敌闪烁）───────────────────
 HURT_STUN = 0.30                 # 受击硬直秒数（期间锁移动/攻击）
 HURT_INVULN = 1.20               # 受击后无敌秒数（闪烁）
+MISS_COOLDOWN = HURT_INVULN      # 回避成功后接触冷却（与受击无敌同长，防 MISS 刷屏）
 HURT_KNOCKBACK = 200.0           # 击退水平初速度 px/s
 HURT_HOP_VY = -170.0             # 受击小跳初速度
 

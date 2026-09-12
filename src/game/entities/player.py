@@ -72,6 +72,7 @@ class Player:
         self.drop_timer = 0.0
         self.hurt_timer = 0.0
         self.invuln_timer = 0.0
+        self.contact_cooldown = 0.0   # 回避成功后接触冷却（不击退，仅防重复判定）
         # 跳跃手感：按压缓冲 + 土狼时间
         self.feather = JumpFeather(settings.JUMP_BUFFER_TIME,
                                    settings.COYOTE_TIME)
@@ -584,6 +585,14 @@ class Player:
         self.damage(hp_dmg)
         return hp_dmg, mp_pay
 
+    def is_invulnerable(self) -> bool:
+        """是否处于接触免疫（受击无敌闪烁，或回避成功后的接触冷却）。"""
+        return self.invuln_timer > 0 or self.contact_cooldown > 0
+
+    def on_dodge(self) -> None:
+        """回避成功：进入接触冷却，期间怪物接触不再判定（不击退/不硬直）。"""
+        self.contact_cooldown = settings.MISS_COOLDOWN
+
     def hurt(self, from_x: float) -> bool:
         """被怪物击中：击退小跳 + 硬直 + 短暂无敌。无敌期间忽略伤害。"""
         if self.invuln_timer > 0:
@@ -605,9 +614,11 @@ class Player:
             if self.drop_timer <= 0:
                 self.drop_layers.clear()
 
-        # 受击硬直 / 无敌计时
+        # 受击硬直 / 无敌 / 回避冷却计时
         if self.invuln_timer > 0:
             self.invuln_timer -= dt
+        if self.contact_cooldown > 0:
+            self.contact_cooldown -= dt
         if self.hurt_timer > 0:
             self.hurt_timer -= dt
 

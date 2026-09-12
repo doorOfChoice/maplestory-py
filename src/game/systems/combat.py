@@ -77,6 +77,9 @@ class DamageNumber:
     """
 
     KIND_SETS = {"red": "NoRed", "violet": "NoViolet", "blue": "NoBlue"}
+    # 官方 Miss 字形只在 NoRed0 / NoViolet0 的小号集里（NoBlue 各集无此字形），
+    # 故 0 伤害一律回退 NoRed0，避免蓝字 MISS 取不到贴图而整条不显示。
+    MISS_SET = "NoRed0"
     FONT = None
     HOLD = 0.4            # 原地停留时长（秒）
     FADE = 0.6            # 上升淡出时长（秒）
@@ -93,6 +96,8 @@ class DamageNumber:
 
     @property
     def set_name(self) -> str:
+        if self.amount <= 0:
+            return self.MISS_SET
         base = self.KIND_SETS.get(self.kind, "NoRed")
         return base + ("1" if (self.big or self.amount >= 1000) else "0")
 
@@ -697,20 +702,25 @@ class Combat:
         return True if not found_api else False
 
     def apply_mob_hits(self, player, hits: List[dict]) -> None:
-        """怪物接触伤害队列 → 玩家扣血（受击硬直 + 无敌内忽略）。
+        """怪物接触伤害队列 → 玩家扣血（无敌帧忽略、回避成功不进入受击态）。
 
+        顺序：接触免疫 → 回避掷骰（MISS 飘蓝字 + 进入接触冷却，但不击退）→
+        hurt（硬直+击退+无敌）→ 防御减伤后扣血。命中与 MISS 同受冷却间隔约束。
         防御减伤：伤害 × 100 / (100 + 防御力)，至少保留 1 点。
         附带异常：命中后按各 status_attack 的概率触发毒/晕/减速。
         """
         for hit in hits:
-            if not player.hurt(hit["x"]):
+            if player.is_invulnerable():
                 continue
             acc = hit.get("acc")
             if acc is not None and self.rng.random() >= stats_mod.hit_chance(
                     acc, player.evasion_value(),
                     hit.get("level", player.level) - player.level):
+                player.on_dodge()          # 进入接触冷却，避免连续 MISS 刷屏
                 self.numbers.append(DamageNumber(
                     player.x, player.y - 40, 0, "blue"))
+                continue
+            if not player.hurt(hit["x"]):
                 continue
             guard = player.magic_defense_value() if hit.get("magic") \
                 else player.defense_value()

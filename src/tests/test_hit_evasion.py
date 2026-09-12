@@ -114,9 +114,21 @@ class _HitPlayer:
     def __init__(self, evasion: int = 0):
         self.evasion = evasion
         self.dealt: list = []
+        self.hurt_calls = 0
+        self.dodges = 0
+        self.invulnerable = False
 
     def hurt(self, from_x) -> bool:
+        self.hurt_calls += 1
+        self.invulnerable = True
         return True
+
+    def on_dodge(self) -> None:
+        self.dodges += 1
+        self.invulnerable = True
+
+    def is_invulnerable(self) -> bool:
+        return self.invulnerable
 
     def damage(self, amount: int) -> None:
         self.dealt.append(amount)
@@ -150,7 +162,42 @@ def test_mob_contact_hits_player_when_no_evasion():
     player = _HitPlayer(evasion=0)
     c.apply_mob_hits(player, [{"x": 0.0, "amount": 20, "acc": 30}])
     assert player.dealt == [20]
+    assert player.hurt_calls == 1
     assert c.numbers == [] or all(n.amount > 0 for n in c.numbers)
+
+
+def test_dodge_grants_contact_cooldown_without_hurt():
+    """回避成功（MISS）：飘蓝字、不触发 hurt（不击退/不硬直），但进入接触冷却。"""
+    c = Combat(None, rng=random.Random(2))          # 首次 random() ≈ 0.954
+    player = _HitPlayer(evasion=10 ** 6)
+    c.apply_mob_hits(player, [{"x": 0.0, "amount": 20, "acc": 30}])
+    assert player.dealt == []
+    assert player.hurt_calls == 0                   # MISS 不击退
+    assert player.dodges == 1
+    assert player.is_invulnerable()                 # 但获得接触冷却
+    assert [(n.amount, n.kind) for n in c.numbers] == [(0, "blue")]
+
+
+def test_dodge_cooldown_suppresses_repeat_contact():
+    """MISS 后的冷却期内：下一次接触不再判定（不重复 MISS、不掉血）。"""
+    c = Combat(None, rng=random.Random(2))
+    player = _HitPlayer(evasion=10 ** 6)
+    c.apply_mob_hits(player, [{"x": 0.0, "amount": 20, "acc": 30}])
+    c.apply_mob_hits(player, [{"x": 0.0, "amount": 20, "acc": 30}])
+    assert player.dealt == []
+    assert player.dodges == 1
+    assert [(n.amount, n.kind) for n in c.numbers] == [(0, "blue")]
+
+
+def test_invulnerable_player_absorbs_hit_without_hurt():
+    """无敌帧内：命中被静默忽略（不触发 hurt、不掉血、无伤害数字）。"""
+    c = Combat(None, rng=random.Random(1))
+    player = _HitPlayer(evasion=0)
+    player.invulnerable = True
+    c.apply_mob_hits(player, [{"x": 0.0, "amount": 20, "acc": 30}])
+    assert player.dealt == []
+    assert player.hurt_calls == 0
+    assert c.numbers == []
 
 
 def test_contact_hit_without_acc_field_always_lands():
