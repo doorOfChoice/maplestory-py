@@ -29,6 +29,9 @@ class _StubSkills:
     def tick(self, dt):
         pass
 
+    def passive_mods(self):
+        return {}
+
 
 def _stub_init(self, assets, quest_defs=None):
     from game.systems.inventory import Inventory

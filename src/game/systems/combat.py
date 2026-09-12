@@ -259,17 +259,30 @@ class Arrow:
     def __init__(self, x: float, y: float, vx: float, vy: float,
                  frames: list, hit_frames: list, dmg: int,
                  mob_count: int = 1, life: float = 0.6,
-                 crit: bool = False):
+                 crit: bool = False,
+                 atk_lo: Optional[int] = None, atk_hi: Optional[int] = None,
+                 mult: float = 1.0, crit_rate: float = 0.0,
+                 crit_mult: float = settings.CRIT_MULT, player_level: int = 0,
+                 attack_count: int = 1):
         self.x = x
         self.y = y
         self.vx = vx
         self.vy = vy
         self.frames = frames            # [(Surface, origin, delay_ms)]
         self.hit_frames = hit_frames
-        self.dmg = dmg
+        self.dmg = dmg                  # 固定伤害（无 atk 参数直构 Arrow 时用）+ 预览
         self.mob_count = max(1, mob_count)
         self.life = life
-        self.crit = crit                # 命中时按暴击结算：大号紫字，否则普攻红字
+        self.crit = crit
+        # 命中时按近战同一公式结算（stats.roll_damage）：逐目标/逐段 roll，
+        # 吃等级差与怪防、每段独立暴击；atk_lo=None 时退回固定 dmg/crit。
+        self.atk_lo = atk_lo
+        self.atk_hi = atk_hi
+        self.mult = mult
+        self.crit_rate = crit_rate
+        self.crit_mult = crit_mult
+        self.player_level = player_level
+        self.attack_count = max(1, attack_count)
         self.age = 0.0
         self.hit_ids: set = set()
         self.dead = False
@@ -278,6 +291,15 @@ class Arrow:
 
     def rect(self) -> pygame.Rect:
         return pygame.Rect(int(self.x - 6), int(self.y - 6), 12, 12)
+
+    def _roll(self, mob, rng) -> Tuple[int, bool]:
+        """本次命中伤害；有攻击参数走统一公式，否则用固定 dmg/crit。"""
+        if self.atk_lo is None:
+            return self.dmg, self.crit
+        return stats_mod.roll_damage(
+            self.atk_lo, self.atk_hi, self.mult, mob.pd,
+            self.player_level, mob.level, rng,
+            self.crit_rate, self.crit_mult)
 
     def update(self, dt: float, monsters, combat, player=None) -> None:
         if self.dead:
@@ -299,20 +321,22 @@ class Arrow:
                 combat.numbers.append(DamageNumber(
                     mob.x, mob.cy - mob.sprite_h, 0))
             else:
-                luk = player.luk if player is not None else 0
-                dmg = max(1, self.dmg - int(mob.pd * (1 - luk / 100.0)))
-                combat.numbers.append(DamageNumber(
-                    mob.x, mob.cy - mob.sprite_h, dmg,
-                    "violet" if self.crit else "red", big=self.crit))
                 if self.hit_frames:
                     combat.effects.append(Effect(
                         self.hit_frames, mob.x,
                         mob.cy - mob.sprite_h * 0.45,
-                        flip=self.vx < 0))
+                        flip=self.vx > 0))
                 combat.preferred_mob = mob
-                died = mob.take_hit(dmg, from_x=self.x)
-                if died and player is not None:
-                    combat._on_kill(player, mob)
+                for _ in range(self.attack_count):
+                    dmg, crit = self._roll(mob, combat.rng)
+                    combat.numbers.append(DamageNumber(
+                        mob.x, mob.cy - mob.sprite_h, dmg,
+                        "violet" if crit else "red", big=crit))
+                    died = mob.take_hit(dmg, from_x=self.x)
+                    if died:
+                        if player is not None:
+                            combat._on_kill(player, mob)
+                        break
             if len(self.hit_ids) >= self.mob_count:
                 self.dead = True
                 return
@@ -323,10 +347,11 @@ class Arrow:
         if not self.frames:
             return
         if abs(self.vy) > 1e-6:
-            # 斜射弹道：贴图按速度方向旋转（角度量化缓存）
+            # 斜射弹道：贴图按速度方向旋转（角度量化缓存）。
+            # 素材朝左（基准 180°），换算应转的角度 = 目标角 - 180°。
             idx = Animation.frame_at(self.frames, self.age * 1000.0)
             img, _, _ = self.frames[idx]
-            deg = math.degrees(math.atan2(-self.vy, self.vx))
+            deg = math.degrees(math.atan2(-self.vy, self.vx)) - 180.0
             q = int(round(deg / 5.0) * 5)
             key = (idx, q)
             rot = self._rot_cache.get(key)
@@ -337,7 +362,7 @@ class Arrow:
             surface.blit(rot, rot.get_rect(center=(int(sx), int(sy))))
             return
         frames = self.frames
-        if self.vx < 0:
+        if self.vx > 0:
             if self._flipped is None:
                 self._flipped = [
                     (pygame.transform.flip(s, True, False),
@@ -401,11 +426,13 @@ class Combat:
         cx, cy = player.x, player.y
 
         targets = [m for m in monsters if not m.dead and rect.colliderect(m.rect())]
+        attack_count = 1
         if skill:
             max_targets = max(1, skill["mob_count"])
             targets.sort(key=lambda m: (m.x - cx) ** 2 + (m.cy - cy) ** 2)
             targets = targets[:max_targets]
             mult = skill["damage"]
+            attack_count = max(1, int(skill.get("attack_count", 1)))
         else:
             mult = 1.0
         atk_lo, atk_hi = player.attack_range()
@@ -420,21 +447,23 @@ class Combat:
                 self.numbers.append(DamageNumber(
                     mob.x, mob.cy - mob.sprite_h, 0))
                 continue
-            dmg, crit = stats_mod.roll_damage(
-                atk_lo, atk_hi, mult, mob.pd,
-                player_level, mob.level, random,
-                crit_rate, crit_mult)
-            self.numbers.append(DamageNumber(
-                mob.x, mob.cy - mob.sprite_h, dmg,
-                "violet" if crit else "red", big=crit))
             if hit_frames:
                 self.effects.append(Effect(
                     hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45,
-                    flip=not getattr(player, "facing_right", True)))
+                    flip=getattr(player, "facing_right", True)))
             self.preferred_mob = mob
-            died = mob.take_hit(dmg, from_x=player.x)
-            if died:
-                self._on_kill(player, mob)
+            for _ in range(attack_count):
+                dmg, crit = stats_mod.roll_damage(
+                    atk_lo, atk_hi, mult, mob.pd,
+                    player_level, mob.level, random,
+                    crit_rate, crit_mult)
+                self.numbers.append(DamageNumber(
+                    mob.x, mob.cy - mob.sprite_h, dmg,
+                    "violet" if crit else "red", big=crit))
+                died = mob.take_hit(dmg, from_x=player.x)
+                if died:
+                    self._on_kill(player, mob)
+                    break
 
     # ── 远程弹道 ───────────────────────────────────────────────────
     def _in_aim_cone(self, player, facing, mob, ref_y, tan_half, r2):
@@ -462,7 +491,9 @@ class Combat:
         if not monsters:
             return None
         ref_y = player.y - 8.0
-        r2 = settings.ARROW_AIM_RADIUS ** 2
+        bonus = player.attack_range_bonus() if hasattr(
+            player, "attack_range_bonus") else 0.0
+        r2 = (settings.ARROW_AIM_RADIUS + bonus) ** 2
         tan_half = math.tan(math.radians(settings.ARROW_AIM_HALF_ANGLE_DEG))
         best: Optional[Tuple[float, float]] = None
         best_d = float("inf")
@@ -493,23 +524,24 @@ class Combat:
         atk_lo, atk_hi = player.attack_range()
         speed, life = settings.ARROW_SPEED, settings.ARROW_LIFETIME
         if skill_data is None:
-            dmg, crit = stats_mod.roll_damage(
-                atk_lo, atk_hi, 1.0, 0, player_level, 0, random,
-                crit_rate, crit_mult)
+            mult, attack_count = 1.0, 1
             n, mob_count = 1, 1
             frames = self.assets.normal_arrow_frames() if self.assets else []
             hit_frames: List = []
         else:
             sid = skill_data["id"]
-            dmg, crit = stats_mod.roll_damage(
-                atk_lo, atk_hi, skill_data["damage"], 0, player_level, 0,
-                random, crit_rate, crit_mult)
+            mult = skill_data["damage"]
+            attack_count = max(1, int(skill_data.get("attack_count", 1)))
             n = max(1, int(skill_data.get("bullet_count", 1)))
             mob_count = max(1, skill_data["mob_count"])
             frames = self.assets.skill_ball_frames(sid) if self.assets else []
             hit_frames = self.assets.skill_hit_frames(sid) if self.assets else []
             speed = skill_data.get("speed", speed)
             life = skill_data.get("life", life)
+        # 被动射程（百步穿楊等）：延长箭矢存活，使其能飞到扩大的瞄准圈
+        range_bonus = player.attack_range_bonus() if hasattr(
+            player, "attack_range_bonus") else 0.0
+        life += range_bonus / speed
         facing = 1 if player.facing_right else -1
         aim = self._aim_point(player, facing, monsters)
         for i in range(n):
@@ -524,8 +556,10 @@ class Combat:
             self.arrows.append(Arrow(
                 x=ax, y=ay, vx=vx, vy=vy,
                 frames=frames, hit_frames=hit_frames,
-                dmg=dmg, mob_count=mob_count, crit=crit,
-                life=life))
+                dmg=atk_hi, mob_count=mob_count, life=life,
+                atk_lo=atk_lo, atk_hi=atk_hi, mult=mult,
+                crit_rate=crit_rate, crit_mult=crit_mult,
+                player_level=player_level, attack_count=attack_count))
 
     def update_arrows(self, dt: float, monsters, player=None) -> None:
         for a in self.arrows:

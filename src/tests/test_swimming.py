@@ -40,6 +40,9 @@ class _StubSkills:
     def tick(self, dt):
         pass
 
+    def passive_mods(self):
+        return {}
+
 
 class StubAssets:
     def __init__(self, swim: bool = True):

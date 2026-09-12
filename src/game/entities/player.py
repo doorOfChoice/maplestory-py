@@ -14,6 +14,7 @@ import pygame
 from game import settings
 from game.core import stats as stats_mod
 from game.core import consumables
+from game.core import skill_effects
 from game.core.consumables import WarpFn
 from game.core.animation import Animation
 from game.render.assets import Assets
@@ -22,6 +23,7 @@ from game.core.physics import Physics
 from game.systems.inventory import Inventory, make_item
 from game.core.jobs import JOBS, is_ranged_weapon
 from game.systems.skills import SkillBook
+from game.systems import skills as skills_mod
 from game.core.stats import base_stats
 from game.systems.quests import QuestLog
 from game.core.motion import friction, JumpFeather
@@ -32,10 +34,6 @@ POSE_JUMP = "jump"
 POSE_LADDER = "ladder"
 POSE_ROPE = "rope"
 POSE_SWIM = "fly"        # 资产无 swim sprite，泳姿复用 fly
-
-# 技能 WZ level 表字段 → buff 词条（game/buffs.py 的 mods 键）
-BUFF_MOD_MAP = {"attack": "atk", "dex": "dex",
-                "criticalrate": "crit", "hp": "hp"}
 
 
 class Player:
@@ -196,57 +194,64 @@ class Player:
         return int(flat * self._buff_rate("pad"))
 
     def attack_range(self) -> Tuple[int, int]:
-        """物理攻击区间 (min, max)：供战斗按 AyumiLove 公式结算。"""
+        """物理攻击区间 (min, max)：供战斗按 AyumiLove 公式结算。
+
+        下限随武器熟练度（mastery 被动/buff）抬高；被动/buff 的平坦物攻两端同加，
+        力藥（pad）按百分比乘在最后。
+        """
         pad = self.inventory.attack() or settings.BASE_WEAPON_PAD
-        lo, hi = stats_mod.attack_range(self.total_stats(), pad, self.is_ranged())
+        lo, hi = stats_mod.attack_range(self.total_stats(), pad, self.is_ranged(),
+                                        mastery=self.attack_mastery())
         bonus = self.skills.passive_mods().get("atk", 0) + self.buffs.mod_sum("atk")
         rate = self._buff_rate("pad")
         return max(1, int((lo + bonus) * rate)), max(1, int((hi + bonus) * rate))
 
+    def attack_mastery(self) -> float:
+        """武器熟练度（伤害下限比例）：默认 0.9 + 被动/buff mastery 百分点，封顶 1.0。"""
+        points = self.skills.passive_mods().get("mastery", 0) \
+            + self.buffs.mod_sum("mastery")
+        return min(1.0, stats_mod.DEFAULT_MASTERY + points / 100.0)
+
+    def attack_range_bonus(self) -> float:
+        """射程加成（px）：被动（如百步穿楊）+ buff 的 range 词条。"""
+        return float(self.skills.passive_mods().get("range", 0)
+                     + self.buffs.mod_sum("range"))
+
     def crit_rate(self) -> float:
-        """暴击率（%）：被动技能 + buff 的 crit 词条之和。"""
-        return float(self.skills.passive_mods().get("crit", 0)
-                     + self.buffs.mod_sum("crit"))
+        """暴击率（%）：被动技能 + buff 的 crit 词条之和，封顶 100。"""
+        return min(100.0, float(self.skills.passive_mods().get("crit", 0)
+                                + self.buffs.mod_sum("crit")))
 
     def crit_mult(self) -> float:
-        """暴击伤害倍率：被动 crit_mult（如霸王箭 150→1.5），否则用默认。"""
-        pm = self.skills.passive_mods()
-        if pm.get("crit_mult"):
-            return pm["crit_mult"] / 100.0
-        return settings.CRIT_MULT
+        """暴击伤害倍率：被动/buff 取最强来源（如霸王箭 200→2.0），否则默认。"""
+        best = self.skills.passive_mods().get("crit_mult", 0)
+        best = max(best, self.buffs.mod_sum("crit_mult"))
+        return best / 100.0 if best else settings.CRIT_MULT
 
     def _pure_buff_seconds(self, skill_data: dict) -> float:
-        """技能若为纯 buff（非攻击）则返回其持续秒数，否则返回 0.0。
+        """技能若为纯 buff（非攻击）则返回其持续秒数，否则 0.0。
 
-        关键区分：原版多个弓系攻击技能（烈火箭/炸弹箭）的 level 表也带 time
-        （燃烧 DoT / 引信计时），若仅凭 time 判定会被误当 buff 吞掉、不触发攻击。
-        故再看 damage/mobCount/range/bulletCount 任一 > 0 即视为攻击技能。
+        判定统一走 skills.skill_buff_seconds（单一事实来源），再用于区分
+        「扣消耗上 buff」与「进入攻击流程」。
         """
         d = skill_data.get("def")
-        lv = int(skill_data.get("level", 0))
-        if d is None or lv <= 0:
+        if d is None:
             return 0.0
-        seconds = d.stat(lv, "time", 0)
-        if seconds <= 0:
-            return 0.0
-        if any(d.stat(lv, atk_key, 0) > 0
-               for atk_key in ("damage", "mobCount", "range", "bulletCount")):
-            return 0.0
-        return float(seconds)
+        return skills_mod.skill_buff_seconds(d, int(skill_data.get("level", 0)))
 
     def _apply_buff_skill(self, skill_data: dict) -> bool:
         """纯 buff 技能接线：命中判定则上 buff 返回 True，否则 False。
 
-        mods 从 level 表映射：attack→atk、dex→dex、criticalrate→crit、hp→hp。
+        mods 由 core.skill_effects 按 WZ 字段语义翻译（通用字段 + 逐技能覆盖），
+        平坦加值；未实装效果（如召唤/替身）会得到空 mods 但仍算施放成功。
         """
         seconds = self._pure_buff_seconds(skill_data)
         if seconds <= 0:
             return False
         d = skill_data["def"]
         lv = int(skill_data["level"])
-        mods = {key: d.stat(lv, src, 0)
-                for src, key in BUFF_MOD_MAP.items()}
-        mods = {k: v for k, v in mods.items() if v}
+        mods = skill_effects.buff_mods(
+            str(skill_data["id"]), lambda key: d.stat(lv, key, 0))
         self.buffs.apply(str(skill_data["id"]), d.name, seconds, mods)
         return True
 
@@ -258,28 +263,35 @@ class Player:
         return int(flat * self._buff_rate("pdd"))
 
     def magic_attack_value(self) -> int:
-        """魔法力（面板）：武器 MAD × (2×INT + LUK) / 100 × 魔法藥%。"""
-        return int(stats_mod.magic_attack(self.total_stats(),
-                                          self.inventory.stat_sum("incMAD"))
-                   * self._buff_rate("mad"))
+        """魔法力（面板）：(武器 MAD × (2×INT + LUK) / 100 + 被动/buff 魔攻) × 魔法藥%。"""
+        flat = stats_mod.magic_attack(self.total_stats(),
+                                      self.inventory.stat_sum("incMAD")) \
+            + self.skills.passive_mods().get("matk", 0) \
+            + self.buffs.mod_sum("matk")
+        return int(flat * self._buff_rate("mad"))
 
     def magic_defense_value(self) -> int:
-        """魔法防御：(装备 MDD 总和 + INT//10) × 護甲藥%。"""
-        return int(stats_mod.magic_defense(self.total_stats(),
-                                           self.inventory.stat_sum("incMDD"))
-                   * self._buff_rate("mdd"))
+        """魔法防御：(装备 MDD 总和 + INT//10 + 被动/buff 魔防) × 護甲藥%。"""
+        flat = stats_mod.magic_defense(self.total_stats(),
+                                       self.inventory.stat_sum("incMDD")) \
+            + self.skills.passive_mods().get("mdef", 0) \
+            + self.buffs.mod_sum("mdef")
+        return int(flat * self._buff_rate("mdd"))
 
     def accuracy_value(self) -> int:
-        """命中率：(基础 20 + DEX//2 + 装备 ACC + 被动/buff 加值) × 命藥%。"""
-        extra = self.skills.passive_mods().get("acc", 0)
+        """命中率：(基础 20 + DEX//2 + 装备 ACC + 被动/buff 平坦命中) × 命藥%。"""
+        extra = self.skills.passive_mods().get("acc", 0) \
+            + self.buffs.mod_sum("acc_flat")
         return int(stats_mod.accuracy(self.total_stats(),
                                       self.inventory.stat_sum("incACC"), extra)
                    * self._buff_rate("acc"))
 
     def evasion_value(self) -> int:
-        """回避率：(LUK//2 + 装备 EVA) × 回避藥%。"""
-        return int(stats_mod.evasion(self.total_stats(),
-                                     self.inventory.stat_sum("incEVA"))
+        """回避率：(LUK//2 + 装备 EVA + 被动/buff 平坦回避) × 回避藥%。"""
+        extra = self.skills.passive_mods().get("eva", 0) \
+            + self.buffs.mod_sum("eva_flat")
+        return int((stats_mod.evasion(self.total_stats(),
+                                      self.inventory.stat_sum("incEVA")) + extra)
                    * self._buff_rate("eva"))
 
     def attack_speed_value(self) -> int:
@@ -294,20 +306,28 @@ class Player:
         return settings.ATTACK_DELAY_REF_MS / delay
 
     def move_speed_display(self) -> int:
-        """移动速度（面板 %）：100 + 装备 incSpeed 加成折算。"""
-        return int(100 * (1.0 + self._equip_speed_bonus("incSpeed")))
+        """移动速度（面板 %）：100 + 装备/被动/buff 加成折算。"""
+        points = self.skills.passive_mods().get("speed", 0) \
+            + self.buffs.mod_sum("speed")
+        return int(100 * (1.0 + self._equip_speed_bonus("incSpeed")
+                          + points / 100.0))
 
     def jump_power_display(self) -> int:
-        """跳跃力（面板 %）：100 + 装备 incJump 加成折算。"""
-        return int(100 * (1.0 + self._equip_speed_bonus("incJump")))
+        """跳跃力（面板 %）：100 + 装备/被动/buff 加成折算。"""
+        points = self.skills.passive_mods().get("jump", 0) \
+            + self.buffs.mod_sum("jump")
+        return int(100 * (1.0 + self._equip_speed_bonus("incJump")
+                          + points / 100.0))
 
     # ── 四维属性 ───────────────────────────────────────────────────
     def total_stats(self) -> dict:
-        """四维合计 = 加点属性 + 装备词条 + 被动技能 + buff（str/dex/int/luk）。"""
+        """四维合计 = (加点 + 装备词条 + 被动 + buff 平坦) × (1 + stat_pct%)。"""
         inv = self.inventory
         passive = self.skills.passive_mods()
-        return {k: self.stats.get(k, 0) + inv.bonus(k)
-                + passive.get(k, 0) + self.buffs.mod_sum(k)
+        pct = 1.0 + (passive.get("stat_pct", 0)
+                     + self.buffs.mod_sum("stat_pct")) / 100.0
+        return {k: int((self.stats.get(k, 0) + inv.bonus(k)
+                        + passive.get(k, 0) + self.buffs.mod_sum(k)) * pct)
                 for k in stats_mod.STAT_KEYS}
 
     @property
@@ -340,21 +360,31 @@ class Player:
         return min(units / 1000.0, settings.EQUIP_SPEED_BONUS_CAP)
 
     def move_speed(self) -> float:
-        """地面水平速度：基础 × (1 + ΣincSpeed 加成 + 速度藥%)。"""
+        """地面水平速度：基础 × (1 + ΣincSpeed + (被动/速度藥)%)。"""
+        points = self.skills.passive_mods().get("speed", 0) \
+            + self.buffs.mod_sum("speed")
         return settings.MOVE_SPEED * (1.0 + self._equip_speed_bonus("incSpeed")
-                                      + self.buffs.mod_sum("speed") / 100.0)
+                                      + points / 100.0)
 
     def jump_velocity(self) -> float:
-        """起跳初速度（负值）：基础 × (1 + ΣincJump 加成 + 跳跃藥%)。"""
+        """起跳初速度（负值）：基础 × (1 + ΣincJump + (被动/跳跃藥)%)。"""
+        points = self.skills.passive_mods().get("jump", 0) \
+            + self.buffs.mod_sum("jump")
         return settings.JUMP_VELOCITY * (1.0 + self._equip_speed_bonus("incJump")
-                                         + self.buffs.mod_sum("jump") / 100.0)
+                                         + points / 100.0)
 
     def recalc_vitals(self) -> None:
-        """按 等级/职业/装备词条 重算 HP/MP 上限，并把当前值钳进上限。"""
+        """按 等级/职业/装备 + 被动/buff 平坦 hp/mp 词条 重算上限，并将当前值钳入。"""
         jobdef = JOBS.get(self.job) or JOBS[0]
         inv = self.inventory
-        self.max_hp = stats_mod.max_hp(self.level, jobdef.hp_gain, inv.bonus("hp"))
-        self.max_mp = stats_mod.max_mp(self.level, jobdef.mp_gain, inv.bonus("mp"))
+        passive = self.skills.passive_mods() if hasattr(self, "skills") else {}
+        buffs = getattr(self, "buffs", None)
+        hp_bonus = inv.bonus("hp") + passive.get("hp", 0) \
+            + (buffs.mod_sum("hp") if buffs is not None else 0)
+        mp_bonus = inv.bonus("mp") + passive.get("mp", 0) \
+            + (buffs.mod_sum("mp") if buffs is not None else 0)
+        self.max_hp = stats_mod.max_hp(self.level, jobdef.hp_gain, hp_bonus)
+        self.max_mp = stats_mod.max_mp(self.level, jobdef.mp_gain, mp_bonus)
         self.hp = min(self.hp, self.max_hp)
         self.mp = min(self.mp, self.max_mp)
 
@@ -858,10 +888,11 @@ class Player:
     def attack_rect(self) -> Optional[pygame.Rect]:
         if not self.attacking:
             return None
-        rng = settings.ATTACK_RANGE
+        bonus = self.attack_range_bonus()
+        rng = settings.ATTACK_RANGE + bonus
         if self.pending_skill is not None and self.pending_skill["range"] > 0:
-            # 技能范围以玩家为中心（如剑气纵横 range 130）
-            rng = float(self.pending_skill["range"])
+            # 技能范围以玩家为中心（如剑气纵横 range 130），再叠加被动射程
+            rng = float(self.pending_skill["range"]) + bonus
             left = self.x - rng / 2
         elif self.facing_right:
             left = self.x

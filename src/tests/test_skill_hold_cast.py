@@ -64,9 +64,11 @@ def game(monkeypatch, tmp_path):
     yield g
 
 
-def _make_def(sid: str, repeat: bool, mp_con: int = 9) -> SkillDef:
+def _make_def(sid: str, repeat: bool, mp_con: int = 9, **extra) -> SkillDef:
+    level = {"mpCon": mp_con, "damage": 51}
+    level.update(extra)
     return SkillDef(sid, "暴風神射" if repeat else "箭雨", "",
-                    [{"mpCon": mp_con, "damage": 51}], 1, repeat=repeat)
+                    [level], 1, repeat=repeat)
 
 
 def _arm_skill(game: Game, slot: int, key: int, sid: str,
@@ -148,7 +150,7 @@ def test_hold_repeat_skill_shows_channel_effect_tracking_player(game, monkeypatc
 
 
 def test_channel_effect_flips_with_player_facing(game, monkeypatch):
-    """通道技持续特效随人物朝向水平镜像，人物转身特效立即改朝。"""
+    """通道技持续特效随人物朝向水平镜像（素材朝左），人物转身特效立即改朝。"""
     held = HeldKeys()
     monkeypatch.setattr(pygame.key, "get_pressed", lambda: held)
     frame = (pygame.Surface((4, 4)), (2, 4), 100)
@@ -161,10 +163,28 @@ def test_channel_effect_flips_with_player_facing(game, monkeypatch):
     looping = [e for e in game.ctx.world.combat.effects
                if getattr(e, "loop", False)]
     game._update(0.05)
-    assert looping[0].flip is False
+    assert looping[0].flip is True
     game.ctx.world.player.facing_right = False
     game._update(0.05)
-    assert looping[0].flip is True
+    assert looping[0].flip is False
+
+
+def test_cast_effect_flips_with_player_facing(game, monkeypatch):
+    """一次性施法特效按人物朝向镜像：素材朝左，人物朝右时翻转。"""
+    frame = (pygame.Surface((4, 4)), (2, 4), 100)
+    monkeypatch.setattr(game.assets, "skill_effect_frames", lambda sid: [frame])
+    _arm_skill(game, 2, pygame.K_w, ONCE, repeat=False)
+    player = game.ctx.world.player
+    effects = game.ctx.world.combat.effects
+
+    player.facing_right = True
+    game._try_cast(2)
+    assert effects[-1].flip is True
+    player.attacking = False
+    player.attack_timer = 0.0
+    player.facing_right = False
+    game._try_cast(2)
+    assert effects[-1].flip is False
 
 
 def test_release_repeat_skill_ends_channel_effect(game, monkeypatch):
@@ -208,7 +228,16 @@ def test_repeat_skill_cast_writes_no_cooldown(game):
     assert game.ctx.world.player.attacking   # 已进入技能攻击
 
 
-def test_normal_skill_cast_still_gets_cooldown(game):
+def test_normal_skill_without_wz_cooltime_writes_no_cooldown(game):
+    """无 WZ cooltime 的普通技能不写冷却：节奏交给攻击动画/攻击槽门控。"""
     book = _arm_skill(game, 2, pygame.K_w, ONCE, repeat=False)
     game._try_cast(2)
-    assert book.cooldowns.get(ONCE, 0.0) > 0.0
+    assert ONCE not in book.cooldowns
+
+
+def test_normal_skill_with_wz_cooltime_writes_cooldown(game):
+    """带 WZ cooltime=10（秒）的技能：出手后写 10 秒冷却。"""
+    book = _arm_skill(game, 2, pygame.K_w, ONCE, repeat=False)
+    book.defs[ONCE] = _make_def(ONCE, False, cooltime=10)
+    game._try_cast(2)
+    assert book.cooldowns.get(ONCE) == 10.0

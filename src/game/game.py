@@ -531,7 +531,7 @@ class Game:
         eff = self.assets.skill_effect_frames(sid)
         if eff:
             self.ctx.world.combat.effects.append(Effect(
-                eff, player.x, player.y, flip=not player.facing_right))
+                eff, player.x, player.y, flip=player.facing_right))
 
     def _tick_skill_hold(self, dt: float) -> None:
         """通道技按住补放：绑键仍是 repeat 技能且物理按住时，按间隔调 _try_cast。
@@ -600,7 +600,7 @@ class Game:
             if tail:
                 effects.append(Effect(tail, player.x, player.y,
                                       use_origin=True,
-                                      flip=not player.facing_right))
+                                      flip=player.facing_right))
 
     def _tick_skill_buffer(self, dt: float) -> None:
         """输入缓冲计时：攻击槽一旦空闲立即补放，超窗作废。"""

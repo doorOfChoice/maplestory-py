@@ -233,3 +233,33 @@ def test_physical_mob_contact_not_magic():
     hit = _mob_hit({"hp": 50, "exp": 0, "weaponAttack": 10, "accuracy": 30})
     assert hit["magic"] is False
     assert 9 <= hit["amount"] <= 11
+
+
+# ── 近战命中特效朝向：素材朝左，按攻击者朝向镜像 ────────────────────
+def _skill_hit_assets() -> "_Assets":
+    class _HitAssets(_Assets):
+        def skill_hit_frames(self, sid):
+            return [(pygame.Surface((4, 4)), (2, 4), 100)]
+
+    return _HitAssets()
+
+
+def _melee_player(facing_right: bool) -> "_Player":
+    p = _Player()
+    p.pending_skill = {"id": "3111004", "damage": 1.0, "mob_count": 1}
+    p.facing_right = facing_right
+    return p
+
+
+def test_melee_hit_effect_flips_when_facing_right():
+    """面向右近战命中：命中特效镜像，冲击朝右。"""
+    c = Combat(_skill_hit_assets(), rng=random.Random(1))
+    c.player_attack(_melee_player(True), [_Mob()])
+    assert c.effects[-1].flip is True
+
+
+def test_melee_hit_effect_unflipped_when_facing_left():
+    """面向左近战命中：命中特效保持素材原样（朝左）。"""
+    c = Combat(_skill_hit_assets(), rng=random.Random(1))
+    c.player_attack(_melee_player(False), [_Mob()])
+    assert c.effects[-1].flip is False

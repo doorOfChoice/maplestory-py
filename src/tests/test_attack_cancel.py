@@ -153,7 +153,7 @@ def test_skill_cast_not_blocked_by_other_skill_cooldown(monkeypatch):
     book.levels["3001005"] = 1
     d = book.cast("3001004", 1)
     assert d is not None
-    book.start_cooldown("3001004")
+    book.start_cooldown("3001004", 1000)
     assert book.cast("3001004", 1) is None
     assert book.cast("3001005", 1) is not None
 
@@ -166,7 +166,7 @@ def test_cast_does_not_consume_cooldown():
     book.levels["3001004"] = 1
     assert book.cast("3001004", 10) is not None
     assert book.cast("3001004", 10) is not None
-    book.start_cooldown("3001004")
+    book.start_cooldown("3001004", 1000)
     assert book.cast("3001004", 10) is None
     book.tick(10.0)
     assert book.cast("3001004", 10) is not None

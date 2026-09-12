@@ -49,10 +49,12 @@ def test_bowman_second_third_job_trees_load():
         assert "3101005" in skill_ids_for_job(assets, 3100)
         assert "3111006" in skill_ids_for_job(assets, 3110)
         hunter = SkillBook(assets, 3100)
+        hunter.on_advance(JOBS[3000])       # 累积一转被动（霸王箭产 crit_mult）
         hunter.on_advance(JOBS[3100])
         assert hunter.levels["3100000"] == hunter.defs["3100000"].max_level
         hm = hunter.passive_mods()
         assert hm["acc"] > 0 and hm["crit_mult"] >= 200
+        assert hm["mastery"] > 0            # 精準之弓 mastery 生效
         bm = SkillBook(assets, 3110)
         bm.on_advance(JOBS[3110])
         assert bm.levels["3110001"] == bm.defs["3110001"].max_level
@@ -77,6 +79,32 @@ def test_buff_skill_level_has_time_field():
         d = load_skill_defs(assets, ["3001003"])["3001003"]
         assert d.stat(1, "time") == 70
         assert d.stat(1, "mpCon") == 8
+    finally:
+        assets.close()
+
+
+@needs_wz
+def test_real_buff_skills_map_to_player_mods():
+    """真实 buff：集中術 acc/eva→平坦命中回避、楓葉祝福 x→stat_pct、召唤不产玩家增益。"""
+    pygame.init()
+    pygame.display.set_mode((8, 8))
+    from game.render.assets import Assets
+    from game.core.skill_effects import buff_mods
+    from game.systems.skills import load_skill_defs
+    assets = Assets(settings.TRAINER_SPAWN_MAP)
+    try:
+        ids = ["3001003", "3121000", "3121006"]
+        defs = load_skill_defs(assets, ids)
+
+        def mods(sid):
+            d = defs[sid]
+            lv = d.max_level
+            return buff_mods(sid, lambda k, d=d, lv=lv: d.stat(lv, k, 0))
+
+        m = mods("3001003")
+        assert m["acc_flat"] > 0 and m["eva_flat"] > 0
+        assert mods("3121000") == {"stat_pct": 15}
+        assert mods("3121006") == {}          # 召唤：pad 不作用于玩家
     finally:
         assets.close()
 

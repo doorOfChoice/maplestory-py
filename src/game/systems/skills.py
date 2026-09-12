@@ -8,7 +8,9 @@
   满足、CharLevel 满足、未满级。SP 按职业组分池独立结算（一转/二转/三转各自结余）。
   转职时 on_advance 把该转附赠被动直接满级（被动跨转累加进 passive_mods）。
   快捷键永不自动分配：只有玩家把技能拖到键格上（assign_skill_to_key）才上键。
-  技能数据全部来自官方 Skill.wz，伤害倍率 = level.damage / 100。
+  技能数据全部来自官方 Skill.wz，伤害倍率 = level.damage / 100，
+  冷却取 level.cooltime（秒），多段技取 level.attackCount。
+  被动/buff 的 WZ 字段语义差异由 core.skill_effects 统一翻译（见该模块）。
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from game import settings
+from game.core import skill_effects
 from game.core.jobs import (job_chain, job_sp_group, resolve_skill_img,
                             skill_ids_for_chain, sp_group_of_skill)
 from game.core.keybindings import SKILL_SLOT_COUNT
@@ -72,6 +75,23 @@ class SkillDef:
             return int(val)
         except (TypeError, ValueError):
             return default
+
+
+def skill_buff_seconds(d: "SkillDef", level: int) -> float:
+    """技能若为纯 buff（非攻击）则返回其持续秒数，否则 0.0。
+
+    关键区分：多个攻击技能的 level 表也带 time（烈火箭/炸弹箭的燃烧 DoT/引信），
+    若仅凭 time 判定会被误当 buff 吞掉、不触发攻击。故再看
+    damage/mobCount/range/bulletCount/attackCount 任一 > 0 即视为攻击技能。
+    """
+    seconds = d.stat(level, "time", 0) if level > 0 else 0
+    if seconds <= 0:
+        return 0.0
+    if any(d.stat(level, key, 0) > 0
+           for key in ("damage", "mobCount", "range", "bulletCount",
+                       "attackCount")):
+        return 0.0
+    return float(seconds)
 
 
 def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
@@ -253,41 +273,24 @@ class SkillBook:
         return True
 
     def passive_mods(self) -> Dict[str, int]:
-        """已学被动技能的聚合属性修正（跨转累加）。
+        """已学被动技能的聚合属性修正（跨转累加、确定性）。
 
-        键：str/dex/int/luk/atk/def/crit/crit_mult/acc/range/hp/mp。
-        被动技能在转职 on_advance 时已满级（附赠），这里读取
-        Skill.wz level 表的真实字段映射：
-            prop   → crit（暴击率 %，如霸王箭 12→40）
-            damage → crit_mult（暴击伤害 %，如霸王箭 105→200）
-            x      → acc（命中，如精準強化 1→16）
-            range  → range（射程加成，如百步穿楊 15→120）
-        player.total_stats / attack_value / defense_value / crit_rate 会读取本表。
+        逐技能语义映射见 core/skill_effects（WZ 的 x/y/prop/damage 含义随技能而异）。
+        多数词条各来源求和；crit_mult（暴伤 %）取最强来源（避免多被动互相覆盖）。
+        player.total_stats / attack_value / defense_value / crit_rate 等读取本表。
         """
         mods: Dict[str, int] = {}
-        for pid in self._passive_ids:
+        for pid in sorted(self._passive_ids):
             d = self.defs.get(pid)
             lv = self.levels.get(pid, 0)
             if d is None or lv <= 0:
                 continue
-            lv_table = d.stat(lv, "prop", 0)
-            if lv_table:
-                mods["crit"] = mods.get("crit", 0) + lv_table
-            lv_dmg = d.stat(lv, "damage", 0)
-            if lv_dmg:
-                mods["crit_mult"] = lv_dmg
-            lv_x = d.stat(lv, "x", 0)
-            if lv_x:
-                mods["acc"] = mods.get("acc", 0) + lv_x
-            lv_r = d.stat(lv, "range", 0)
-            if lv_r:
-                mods["range"] = mods.get("range", 0) + lv_r
-            for stat_key, src in (("dex", "dex"), ("str", "str"),
-                                  ("hp", "hp"), ("mp", "mp"),
-                                  ("atk", "attack"), ("def", "pdd")):
-                val = d.stat(lv, src, 0)
-                if val:
-                    mods[stat_key] = mods.get(stat_key, 0) + val
+            stat = lambda key, d=d, lv=lv: d.stat(lv, key, 0)
+            for key, value in skill_effects.passive_mods(pid, stat).items():
+                if key == "crit_mult":
+                    mods[key] = max(mods.get(key, 0), value)
+                else:
+                    mods[key] = mods.get(key, 0) + value
         return mods
 
     def on_advance(self, jobdef) -> None:
@@ -332,7 +335,9 @@ class SkillBook:
             "range": d.stat(lv, "range", 0),          # 0 = 默认普攻范围
             "mob_count": d.stat(lv, "mobCount", 1),
             "bullet_count": max(1, d.stat(lv, "bulletCount", 1)),
-            "cooldown_ms": d.stat(lv, "cooldown", 0),  # WZ 官方冷却（毫秒）
+            "attack_count": max(1, d.stat(lv, "attackCount", 1)),
+            # WZ 官方冷却字段为 cooltime（秒）；换算成毫秒供 start_cooldown 统一处理
+            "cooldown_ms": d.stat(lv, "cooltime", 0) * 1000,
             "repeat": d.repeat,                  # 通道技：按住可连发
         }
         if skill_id == settings.SNAIL_THROW_SKILL_ID:
@@ -342,14 +347,18 @@ class SkillBook:
         return data
 
     def start_cooldown(self, skill_id: str, cooldown_ms: int = 0) -> None:
-        """确认出手后写入施放冷却：WZ 官方 cooldown（毫秒）优先，缺省回退配置。
+        """确认出手后写入施放冷却：WZ cooltime（毫秒）优先，缺省看 settings 覆盖表。
 
-        同时记录总时长，供 HUD 冷却遮罩算比例（cooldown_totals 不入档）。
+        WZ 无 cooltime 的技能（绝大多数攻击技）不写冷却——节奏由攻击动画与
+        攻击槽门控决定，而非人工兜底 CD。settings.SKILL_COOLDOWN 可对个别技能
+        额外指定冷却（秒）。同时记录总时长，供 HUD 冷却遮罩算比例。
         """
         if cooldown_ms and cooldown_ms > 0:
             seconds = max(1.0, cooldown_ms / 1000.0)
         else:
-            seconds = settings.SKILL_COOLDOWN.get(skill_id, 0.8)
+            seconds = settings.SKILL_COOLDOWN.get(skill_id, 0.0)
+            if seconds <= 0:
+                return
         self.cooldowns[skill_id] = seconds
         self.cooldown_totals[skill_id] = seconds
 

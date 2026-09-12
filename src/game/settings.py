@@ -170,8 +170,8 @@ DEFAULT_EQUIPS = [
 # ── 技能 ─────────────────────────────────────────────────────────────
 SP_PER_LEVEL = 3                 # 每级获得 SP
 SKILL_MP_REGEN = 1.2             # MP 自然回复 / 秒
-SKILL_COOLDOWN: dict = {}        # 施放冷却覆盖表（秒）；缺省回退 0.8
-SKILL_MAX_LEVEL = 20             # 技能最高等级（裁剪 WZ level 表）
+SKILL_COOLDOWN: dict = {}        # 额外冷却覆盖表（秒，技能 id→秒）；WZ cooltime 优先
+SKILL_MAX_LEVEL = 30             # 技能最高等级（裁剪 WZ level 表；四转技能上限 30）
 SKILL_KEYDOWN_INTERVAL = 0.15    # 按住通道技（如暴風神射）两次补放的最小间隔（秒）
 ATTACK_CANCEL_DELAY = 0.25       # 攻击起手后允许被下一击取消后摇的最短秒数
 SKILL_INPUT_BUFFER = 0.4         # 技能键在攻击锁定期内按下时的输入缓冲时长（秒）

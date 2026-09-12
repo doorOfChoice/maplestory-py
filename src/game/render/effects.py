@@ -23,7 +23,7 @@ class Effect:
         use_origin=True 时按帧 origin 对齐锚点（默认以贴图中心对齐）；
         follow 提供 x/y 属性时每帧跟随（如跟随玩家的持续特效）；
         flip=True 时水平镜像，face_follow=True 时随 follow 的朝向实时翻转
-        （特效素材朝右，玩家朝左时镜像）。
+        （特效素材朝左，与人物一致；玩家朝右时镜像）。
         """
         self.anim = Animation(frames, loop=loop)
         self.x = x
@@ -45,7 +45,7 @@ class Effect:
             self.x = self.follow.x
             self.y = self.follow.y
             if self.face_follow:
-                self.flip = not getattr(self.follow, "facing_right", True)
+                self.flip = getattr(self.follow, "facing_right", True)
 
     def _mirror(self, idx: int, img: pygame.Surface) -> pygame.Surface:
         cached = self._flip_cache.get(idx)

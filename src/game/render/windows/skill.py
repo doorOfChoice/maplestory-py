@@ -13,6 +13,7 @@ from typing import List, Optional, Tuple
 import pygame
 
 from game.core.jobs import job_chain, job_sp_group
+from game.systems.skills import skill_buff_seconds
 from game.render.windows.core import widgets
 from game.render.windows.core.services import WindowServices
 from game.render.windows.core.window import DragPickup, Window
@@ -70,6 +71,14 @@ class SkillWindow(Window):
         sids = book.skills_for_group(active) if groups else []
         return tabs, active, sids
 
+    def _info_text(self, d, lv: int) -> str:
+        """技能行第二行信息：buff 显示持续时间与消耗，攻击技显示伤害%与消耗。"""
+        mp = d.stat(lv, "mpCon", 0)
+        seconds = skill_buff_seconds(d, lv)
+        if seconds > 0:
+            return f"增益 {seconds:.0f}s  MP{mp}"
+        return f"{d.stat(lv, 'damage', 100)}%  MP{mp}"
+
     def _skill_tip(self, book, d, lv: int, mouse, row: pygame.Rect) -> None:
         """悬停技能行时把描述/伤害/快捷键放进深色 Tooltip，避免行内文字溢出。"""
         if not row.collidepoint(mouse):
@@ -78,7 +87,11 @@ class SkillWindow(Window):
         if d.desc:
             lines.append(d.desc)
         if lv > 0:
-            lines.append(f"伤害 {d.stat(lv, 'damage', 100)}% · 消耗 MP{d.stat(lv, 'mpCon', 0)}")
+            seconds = skill_buff_seconds(d, lv)
+            if seconds > 0:
+                lines.append(f"增益持续 {seconds:.0f}s · 消耗 MP{d.stat(lv, 'mpCon', 0)}")
+            else:
+                lines.append(f"伤害 {d.stat(lv, 'damage', 100)}% · 消耗 MP{d.stat(lv, 'mpCon', 0)}")
             key = self._hotkey_of(book, d.id)
             if key:
                 lines.append(f"快捷键 {key}")
@@ -154,9 +167,7 @@ class SkillWindow(Window):
             name_txt = widgets.ellipsize(f"{d.name} Lv{lv}/{d.max_level}", ft, name_w)
             surface.blit(ft.render(name_txt, True, color), (tx, ry + 5))
             if lv > 0:
-                dmg = d.stat(lv, "damage", 100)
-                mp = d.stat(lv, "mpCon", 0)
-                surface.blit(ft.render(f"{dmg}%  MP{mp}", True, (40, 90, 46)),
+                surface.blit(ft.render(self._info_text(d, lv), True, (40, 90, 46)),
                              (tx, ry + 20))
             else:
                 surface.blit(ft.render(f"Lv{d.char_level or 1} 可学习", True, color),
@@ -223,9 +234,7 @@ class SkillWindow(Window):
                                          row.right - (row.x + 52) - 6)
             surface.blit(f.render(name_txt, True, color), (row.x + 52, ry + 6))
             if lv > 0:
-                dmg = d.stat(lv, "damage", 100)
-                mp = d.stat(lv, "mpCon", 0)
-                info = fs.render(f"{dmg}% MP{mp}", True, (150, 210, 160))
+                info = fs.render(self._info_text(d, lv), True, (150, 210, 160))
                 surface.blit(info, (row.x + 52, ry + 28))
             else:
                 surface.blit(fs.render(f"Lv{d.char_level or 1} 可学习",

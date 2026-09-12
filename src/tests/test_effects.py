@@ -56,12 +56,12 @@ def test_effect_flip_mirrors_sprite():
 
 
 def test_effect_face_follow_tracks_facing():
-    """face_follow：跟随目标的朝向决定是否镜像，转身即翻转。"""
+    """face_follow：素材朝左（与人物一致），人物朝右时镜像，转身即翻转。"""
     target = SimpleNamespace(x=0.0, y=0.0, facing_right=False)
     effect = Effect([_two_pixel_frame()], 0, 0, follow=target,
                     face_follow=True)
     effect.update(0.016)
-    assert effect.flip is True
+    assert effect.flip is False
     target.facing_right = True
     effect.update(0.016)
-    assert effect.flip is False
+    assert effect.flip is True
