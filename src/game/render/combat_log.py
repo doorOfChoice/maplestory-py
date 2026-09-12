@@ -26,8 +26,8 @@ SHADOW_COLOR = (0, 0, 0)
 
 class CombatLogView:
     def __init__(self) -> None:
-        # 浮动明细压在地图上：13px + 黑体中粗字重，避免细笔画抗锯齿发糊
-        self.font = load_cjk_font(13, ("stheitimedium",))
+        # 浮动明细压在地图上：12px + 黑体中粗字重，避免细笔画抗锯齿发糊
+        self.font = load_cjk_font(12, ("stheitimedium",))
         self._icon_cache: dict = {}
 
     # ── 图标 ─────────────────────────────────────────────────────────

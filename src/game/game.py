@@ -892,8 +892,8 @@ class Game:
         alpha = max(0, min(255, int(255 * a)))
         cx = settings.VIEW_W // 2
         cy = settings.VIEW_H // 3
-        big = load_cjk_font(52)
-        small = load_cjk_font(26)
+        big = load_cjk_font(48)
+        small = load_cjk_font(24)
         title = render_text(big, name, (255, 246, 214))
         self._blit_faded(surface, title, (cx, cy), alpha)
         if street:

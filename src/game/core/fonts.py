@@ -6,6 +6,8 @@ pygame 的 `pygame.font.Font(None, size)` 只带 ASCII 字形，遇到 CJK 会�
 2. 按平台常见中文字体名匹配的系统字体；
 3. 全部落空时回退 Font(None)（保持可用，不抛异常）。
 
+捆绑字体最高优先（含像素字体，见 _is_pixel_font）：像素/位图字体经 _SharpFont
+包装后强制关抗锯齿，否则自由字体会在点阵边缘补灰色像素、失去原版锐利感。
 另提供 render_text：对反复出现的文本做 LRU 缓存（HUD/伤害数字每帧渲染，
 字体渲染很贵，缓存 Surface 可消除帧时间尖峰）。
 """
@@ -85,38 +87,64 @@ def find_bundled_font(font_dir: Optional[Path] = None,
     return files[0]
 
 
+# 像素/位图字体识别：命中这些词的文件名视为点阵字体，关抗锯齿渲染
+_PIXEL_FONT_HINTS = ("pixel", "bitmap", "dot", "8px", "10px", "12px", "16px")
+
+
+def _is_pixel_font(path: str) -> bool:
+    """文件名含 pixel / bitmap / 像素尺寸等词 → 视为点阵字体。"""
+    stem = Path(path).stem.lower()
+    return any(hint in stem for hint in _PIXEL_FONT_HINTS)
+
+
+class _SharpFont(pygame.font.Font):
+    """像素/位图字体包装：强制关抗锯齿，保持点阵边缘锐利。
+
+    pygame 的 render(antialias) 默认开抗锯齿，会在字形边缘补灰色像素，
+    点阵字体经此处理会发虚；这里忽略调用方传入的 antialias 一律按 False 渲染。
+    """
+
+    def render(self, text, antialias: bool = True,
+               color=(255, 255, 255), background=None) -> pygame.Surface:
+        return super().render(text, False, color, background)
+
+
+def _open_font(path: str, size: int) -> pygame.font.Font:
+    """按路径加载字体：点阵字体套 _SharpFont，否则用原生 Font。"""
+    cls = _SharpFont if _is_pixel_font(path) else pygame.font.Font
+    return cls(path, size)
+
+
 def _candidate_paths(size: int, prefer: Tuple[str, ...] = ()) -> list:
-    """按字号给出字体文件候选（依优先级）：显式指定 > 小字重字 > 标题宋体 > 系统字体。"""
+    """按字号给出字体文件候选（依优先级）：显式指定 > 捆绑字体 > 系统字体。
+
+    捆绑字体（现为像素字体）对任何字号都最高优先；多字重时小字号先挑重字重。
+    """
+    paths = [path for name in prefer if (path := pygame.font.match_font(name))]
     regular = find_bundled_font()
-    paths = []
-    paths += [path for name in prefer if (path := pygame.font.match_font(name))]
     if size < _TITLE_SERIF_MIN_SIZE:
         heavy = find_bundled_font(weights=_SMALL_UI_WEIGHTS)
         if heavy is not None:
             paths.append(str(heavy))
-    elif regular is not None:
+    if regular is not None:
         paths.append(str(regular))
     paths += [path for name in _FONT_CANDIDATES
               if (path := pygame.font.match_font(name))]
-    # 兜底：小字号即使无重字重/系统字体，也宁可回到捆绑 Regular 而非 Font(None)
-    if size < _TITLE_SERIF_MIN_SIZE and regular is not None:
-        paths.append(str(regular))
     return paths
 
 
 def load_cjk_font(size: int, prefer: Tuple[str, ...] = ()) -> pygame.font.Font:
     """返回一个可渲染中文的 pygame 字体：显式指定 > 捆绑字体 > 系统字体 > Font(None)。
 
-    小字号（< _TITLE_SERIF_MIN_SIZE）优先挑捆绑字体中的重字重（SemiBold /
-    Medium），避免宋体细笔画在 UI 尺寸下发虚；大字号标题保留 Regular 宋体。
-    prefer 传入字体名元组时最先尝试（如 ("stheitimedium",) 强制黑体粗字重）。
+    捆绑字体优先；像素字体（resources/fonts 下的点阵字）套 _SharpFont 强制关
+    抗锯齿。prefer 传入字体名元组时最先尝试（如 ("stheitimedium",) 强制黑体）。
     """
     hit = _FONT_CACHE.get((size, prefer))
     if hit is not None:
         return hit
     for path in _candidate_paths(size, prefer):
         try:
-            font = pygame.font.Font(path, size)
+            font = _open_font(path, size)
             _FONT_CACHE[(size, prefer)] = font
             return font
         except Exception:

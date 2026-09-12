@@ -125,7 +125,7 @@ class DamageNumber:
         sprites = assets.damage_digits(self.set_name) if assets else {}
         if not sprites:      # 素材缺失退回字体渲染
             if DamageNumber.FONT is None:
-                DamageNumber.FONT = pygame.font.Font(None, 20)
+                DamageNumber.FONT = pygame.font.Font(None, 24)
             color = {"violet": (170, 120, 255), "blue": (120, 180, 255)}.get(
                 self.kind, (255, 60, 60))
             text = render_text(DamageNumber.FONT, str(self.amount or "Miss"), color)

@@ -163,11 +163,11 @@ _tip_num_font: Optional[pygame.font.Font] = None
 
 
 def _tip_font_big() -> pygame.font.Font:
-    """大数字（攻击力）字号 20 的缓存字体。"""
+    """大数字（攻击力）字号 24 的缓存字体（12px 点阵字体的整数倍）。"""
     global _tip_num_font
     if _tip_num_font is None:
         from game.core.fonts import load_cjk_font
-        _tip_num_font = load_cjk_font(20)
+        _tip_num_font = load_cjk_font(24)
     return _tip_num_font
 
 

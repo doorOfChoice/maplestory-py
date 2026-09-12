@@ -4,7 +4,7 @@ BtDetail「詳細說明」详情弹窗。
 即时模式：加点热区（_ap_rects / _auto_rect / _detail_rect）在 draw() 中重建，
 manager 下一帧命中回放。像素数字走 widgets.PixelNumbers（StatusBar/number），
 素材缺失整体回退旧自绘面板（210×250，锚点同旧 panels._draw_stat_fallback）。
-「詳細說明」弹窗用官方 Stat/backgrnd2（184×203）烘焙的九行战斗数值标签，
+「詳細說明」弹窗用官方 Stat/backgrnd2（177×203）烘焙的九行战斗数值标签，
 九行全部读取 Player 面板 getter（魔法/命中/回避为折算公式，详见 stats.py）。
 坐标约定：事件 pos 为内部视口（VIEW）坐标。
 """
@@ -33,12 +33,12 @@ STAT_BT_X = 158                      # BtApUp x
 STAT_AUTO_POS = (96, 195)            # BtAuto（73×35）升级点数(63,206)右侧、垂直居中共对齐
 STAT_DETAIL_POS = (102, 313)         # BtDetail（63×19）右下、贴近窗口底
 
-# 「詳細說明」详情弹窗（官方 Stat/backgrnd2，184×203，九行标签 y 实测）
+# 「詳細說明」详情弹窗（官方 Stat/backgrnd2，177×203，九行标签 y 实测）
 STAT_DETAIL_BG = "Stat/backgrnd2"
-DETAIL_W, DETAIL_H = 184, 203
+DETAIL_W, DETAIL_H = 177, 203
 DETAIL_ROW_Y = {"atk": 15, "pdd": 33, "mad": 51, "mdd": 69,
                 "acc": 87, "eva": 105, "spd": 123, "move": 141, "jump": 160}
-DETAIL_VALUE_X = 176                 # 数值右缘（右对齐）
+DETAIL_VALUE_X = 168                 # 数值右缘（右对齐，留出底图右框 8px）
 DETAIL_BUFF_COLOR = (200, 20, 20)    # buff 加成后缀 (+N) 红色
 # 九行 → (自绘兜底中文标签, Player 面板 getter, 是否含 buff)
 DETAIL_ROWS: Tuple[Tuple[str, str, str, bool], ...] = (

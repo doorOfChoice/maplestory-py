@@ -29,6 +29,7 @@ class FakeUI:
         self.font_small = pygame.font.Font(None, 12)
         self.font_tiny = pygame.font.Font(None, 10)
         self.font_big = self.font
+        self.font_death = pygame.font.Font(None, 24)
 
     @staticmethod
     def _wrap(text: str, width: int, font) -> List[str]:

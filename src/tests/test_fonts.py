@@ -80,10 +80,21 @@ def test_bundled_font_is_loaded_from_resources_dir():
 
 
 def test_load_cjk_font_prefers_bundled_over_system():
-    """有捆绑字体时，load_cjk_font 渲染结果应与直接加载捆绑字体一致。"""
+    """有捆绑像素字体时，load_cjk_font 用它且强制关抗锯齿（与手动关 AA 一致）。"""
     path = find_bundled_font()
     if path is None:
         pytest.skip("未放置捆绑字体")
     a = load_cjk_font(24).render("中", True, (255, 255, 255))
-    b = pygame.font.Font(str(path), 24).render("中", True, (255, 255, 255))
+    b = pygame.font.Font(str(path), 24).render("中", False, (255, 255, 255))
     assert pygame.image.tostring(a, "RGBA") == pygame.image.tostring(b, "RGBA")
+
+
+def test_pixel_font_ignores_antialias_flag():
+    """像素字体渲染不受 antialias 参数影响：开/关都输出同一张锐利点阵字。"""
+    path = find_bundled_font()
+    if path is None or "pixel" not in path.stem.lower():
+        pytest.skip("未放置像素字体")
+    font = load_cjk_font(12)
+    aa_on = font.render("中", True, (255, 255, 255))
+    aa_off = font.render("中", False, (255, 255, 255))
+    assert pygame.image.tostring(aa_on, "RGBA") == pygame.image.tostring(aa_off, "RGBA")

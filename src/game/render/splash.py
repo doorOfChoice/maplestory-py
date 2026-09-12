@@ -50,8 +50,8 @@ class Splash:
         self._draw_spinner(surface, cx, cy - 70, spinner_r)
 
         # 标题 + 副标题
-        title_font = load_cjk_font(50)
-        sub_font = load_cjk_font(26)
+        title_font = load_cjk_font(48)
+        sub_font = load_cjk_font(24)
         title = title_font.render("MapleStory 113", True, _TITLE)
         sub = sub_font.render("弓箭手村东部小山", True, _SUBTITLE)
         surface.blit(title, title.get_rect(center=(cx, cy + 20)))
@@ -103,6 +103,6 @@ class Splash:
         pygame.draw.rect(surface, (70, 86, 116),
                          (left, top, bar_w, bar_h), width=1, border_radius=7)
         # 百分比
-        font = load_cjk_font(20)
+        font = load_cjk_font(24)
         pct = font.render(f"{int(progress * 100)}%", True, _SUBTITLE)
         surface.blit(pct, pct.get_rect(center=(cx, top + bar_h + 14)))

@@ -78,7 +78,8 @@ class UI:
     def __init__(self, assets):
         self.assets = assets
         self.font = _load_font(12)
-        self.font_big = _load_font(14)
+        self.font_big = _load_font(12)     # 对话框标题：与正文同字号，靠颜色区分
+        self.font_death = _load_font(24)   # 死亡画面大字：12px 点阵字体的整数倍
         self.font_small = _load_font(12)
         self.font_tiny = _load_font(12)
         self.dialog_lines: List[str] = []
@@ -609,10 +610,10 @@ class UI:
         y = (surface.get_height() - h) // 2 - 30
         self._dlg_frame(surface, x, y, DLG_W, content_h)
 
-        txt = self.font_big.render("你 已 死 亡", True, (185, 45, 45))
-        surface.blit(txt, (x + (374 - txt.get_width()) / 2, y + DLG_TOP_H + 14))
+        txt = self.font_death.render("你 已 死 亡", True, (185, 45, 45))
+        surface.blit(txt, (x + (374 - txt.get_width()) / 2, y + DLG_TOP_H + 10))
         sub = self.font.render("点击按钮或按 R 返回村口重生", True, DLG_TEXT_BASE)
-        surface.blit(sub, (x + (374 - sub.get_width()) / 2, y + DLG_TOP_H + 44))
+        surface.blit(sub, (x + (374 - sub.get_width()) / 2, y + DLG_TOP_H + 46))
         # 可点重生按钮（官方 BtOK 素材，缺失自绘）：死亡不再纯键盘
         btn = self._img("UIWindow.img", "UtilDlgEx/BtOK/normal/0")
         bw, bh = (btn.get_width(), btn.get_height()) if btn else (120, 26)
