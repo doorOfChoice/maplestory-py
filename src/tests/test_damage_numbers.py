@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pygame
+import numpy as np
 
 from game.systems.combat import Combat, DamageNumber
 
@@ -58,6 +59,20 @@ def test_fully_faded_at_end_of_life():
     n.update(1.0)
     assert n.alpha == 0.0
     assert n.rise == 30.0
+
+
+def test_fade_scales_per_pixel_alpha_not_surface_alpha():
+    """淡出必须逐像素缩放 alpha：字形 alpha 按比例衰减、透明处保持透明。
+
+    回归防线：改用 Surface.set_alpha 会绕过逐像素 alpha（真实驱动下把数字外围
+    的透明背景糊成实色黑条），此时字形像素 alpha 不会随 fade 改变。
+    """
+    surf = pygame.Surface((4, 4), pygame.SRCALPHA)
+    surf.fill((255, 0, 0, 255))          # 整块不透明，便于检查 alpha 缩放
+    faded = DamageNumber._faded(surf, 0.5)
+    alpha = np.asarray(pygame.surfarray.array_alpha(faded))
+    assert alpha.min() == 127 and alpha.max() == 127
+    assert np.asarray(pygame.surfarray.array_alpha(surf)).min() == 255  # 不污染原图
 
 
 class _Mob:

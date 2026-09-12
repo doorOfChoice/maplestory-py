@@ -144,10 +144,23 @@ class DamageNumber:
         fade = self.alpha < 1.0
         for surf, origin in pieces:
             if fade:
-                surf = surf.copy()
-                surf.set_alpha(int(255 * self.alpha))
+                surf = self._faded(surf, self.alpha)
             surface.blit(surf, (px - origin[0], int(sy) - origin[1]))
             px += surf.get_width()
+
+    @staticmethod
+    def _faded(surf: pygame.Surface, fade: float) -> pygame.Surface:
+        """逐像素乘 alpha 淡出，返回副本（不改动缓存表面）。
+
+        不能用 Surface.set_alpha(int)：对 SRCALPHA 表面其行为未定义，真实显示
+        驱动下会用统一 alpha 覆盖逐像素 alpha，使数字外围本应透明的背景整块变
+        实色（黑条）。这里用 BLEND_RGBA_MULT 只缩放 alpha 通道。
+        """
+        faded = surf.copy()
+        mod = pygame.Surface(faded.get_size(), pygame.SRCALPHA)
+        mod.fill((255, 255, 255, max(0, min(255, int(255 * fade)))))
+        faded.blit(mod, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        return faded
 
 
 class DropItem:
