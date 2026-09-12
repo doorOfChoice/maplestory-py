@@ -55,6 +55,7 @@ class CombatTarget(Protocol):
     cy: float
     sprite_h: float
     pd: int
+    mdd: int
     eva: int
     level: int
     dead: bool
@@ -263,7 +264,7 @@ class Arrow:
                  atk_lo: Optional[int] = None, atk_hi: Optional[int] = None,
                  mult: float = 1.0, crit_rate: float = 0.0,
                  crit_mult: float = settings.CRIT_MULT, player_level: int = 0,
-                 attack_count: int = 1):
+                 attack_count: int = 1, magic: bool = False):
         self.x = x
         self.y = y
         self.vx = vx
@@ -283,6 +284,7 @@ class Arrow:
         self.crit_mult = crit_mult
         self.player_level = player_level
         self.attack_count = max(1, attack_count)
+        self.magic = magic                # 魔法攻击改用怪 mdd 而非 pd 减伤
         self.age = 0.0
         self.hit_ids: set = set()
         self.dead = False
@@ -296,8 +298,9 @@ class Arrow:
         """本次命中伤害；有攻击参数走统一公式，否则用固定 dmg/crit。"""
         if self.atk_lo is None:
             return self.dmg, self.crit
+        mob_pd = mob.mdd if self.magic else mob.pd
         return stats_mod.roll_damage(
-            self.atk_lo, self.atk_hi, self.mult, mob.pd,
+            self.atk_lo, self.atk_hi, self.mult, mob_pd,
             self.player_level, mob.level, rng,
             self.crit_rate, self.crit_mult)
 
@@ -407,6 +410,26 @@ class Combat:
                 best, best_d = y, d
         return best
 
+    def _drop_ground(self, x: float, ref_y: float) -> Optional[float]:
+        """掉落物落点：优先取 ref_y 附近的支撑面，否则取下方最近的平台。
+
+        怪悬在空中（飞行怪）或骑在断口时，``_surface_y`` 的近邻搜索会落空；
+        旧逻辑此时回退到生成点高度，掉落物便悬在半空。这里补一条「向下找
+        最近的 foothold」，让它真正落到下方平台。
+        """
+        surface = self._surface_y(x, ref_y)
+        if surface is not None:
+            return surface
+        best: Optional[float] = None
+        for f in self.assets.footholds:
+            x1, x2 = f["x1"], f["x2"]
+            if x1 == x2 or not (min(x1, x2) - 1.0 <= x <= max(x1, x2) + 1.0):
+                continue
+            y = f["y1"] + (f["y2"] - f["y1"]) * (x - x1) / (x2 - x1)
+            if y >= ref_y - 2.0 and (best is None or y < best):
+                best = y
+        return best
+
     def player_attack(self, player: Combatant,
                       monsters: List[CombatTarget]) -> None:
         """玩家攻击：命中框与怪物碰撞盒相交则造成伤害 + 官方命中特效。
@@ -435,6 +458,7 @@ class Combat:
             attack_count = max(1, int(skill.get("attack_count", 1)))
         else:
             mult = 1.0
+        magic = bool(skill.get("magic")) if skill else False
         atk_lo, atk_hi = player.attack_range()
         player_level = player.level
         crit_rate = player.crit_rate()
@@ -453,8 +477,9 @@ class Combat:
                     flip=getattr(player, "facing_right", True)))
             self.preferred_mob = mob
             for _ in range(attack_count):
+                mob_pd = mob.mdd if magic else mob.pd
                 dmg, crit = stats_mod.roll_damage(
-                    atk_lo, atk_hi, mult, mob.pd,
+                    atk_lo, atk_hi, mult, mob_pd,
                     player_level, mob.level, random,
                     crit_rate, crit_mult)
                 self.numbers.append(DamageNumber(
@@ -526,12 +551,14 @@ class Combat:
         if skill_data is None:
             mult, attack_count = 1.0, 1
             n, mob_count = 1, 1
+            magic = False
             frames = self.assets.normal_arrow_frames() if self.assets else []
             hit_frames: List = []
         else:
             sid = skill_data["id"]
             mult = skill_data["damage"]
             attack_count = max(1, int(skill_data.get("attack_count", 1)))
+            magic = bool(skill_data.get("magic"))
             n = max(1, int(skill_data.get("bullet_count", 1)))
             mob_count = max(1, skill_data["mob_count"])
             frames = self.assets.skill_ball_frames(sid) if self.assets else []
@@ -559,7 +586,8 @@ class Combat:
                 dmg=atk_hi, mob_count=mob_count, life=life,
                 atk_lo=atk_lo, atk_hi=atk_hi, mult=mult,
                 crit_rate=crit_rate, crit_mult=crit_mult,
-                player_level=player_level, attack_count=attack_count))
+                player_level=player_level, attack_count=attack_count,
+                magic=magic))
 
     def update_arrows(self, dt: float, monsters, player=None) -> None:
         for a in self.arrows:
@@ -577,7 +605,7 @@ class Combat:
             player.quests.on_kill(int(mob.mob_id))
         except Exception:
             pass
-        ground = self._surface_y(mob.x, mob.cy)
+        ground = self._drop_ground(mob.x, mob.cy)
         if self.drop_table is not None and self.drop_table.has_mob(str(mob.mob_id)):
             self._spawn_official_drops(mob, ground, self._active_quest_ids(player))
             return
@@ -725,7 +753,7 @@ class Combat:
         带拾取锁避免瞬间捡回；拾取需按 Z 手动触发。
         """
         feet = player.y + settings.FEET_OFFSET
-        ground = self._surface_y(player.x, feet)
+        ground = self._drop_ground(player.x, feet)
         d = DropItem(player.x, player.y,
                      item={"id": item.id, "name": item.name, "count": item.count,
                            "info": dict(item.info), "extra": dict(item.extra),

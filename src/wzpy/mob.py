@@ -10,6 +10,9 @@ The v83 client keeps these pieces in separate archives:
 
 ``MobRenderer`` joins those sources without claiming drop rates, which are
 server-side data and are not present in the v83 WZ files.
+
+``describe()`` 的 ``stats`` 除战斗数值外，还包含击退抗性（``info/pushed``）
+与飞行速度（``info/flySpeed``，有符号偏移，同 ``speed`` 风格），供物理与移动逻辑使用。
 """
 
 from __future__ import annotations
@@ -79,6 +82,7 @@ class MobRenderer:
     _ACTION_PRIORITY = (
         "stand", "move", "fly", "jump", "attack", "skill", "hit", "die",
     )
+    # (WZ 源字段名, describe() 输出的 stats 键名)
     _STAT_FIELDS = (
         ("level", "level"),
         ("maxHP", "hp"),
@@ -91,6 +95,9 @@ class MobRenderer:
         ("acc", "accuracy"),
         ("eva", "evasion"),
         ("speed", "speed"),
+        ("mpRecovery", "mpRecovery"),
+        ("pushed", "pushed"),
+        ("flySpeed", "flySpeed"),
     )
 
     def __init__(

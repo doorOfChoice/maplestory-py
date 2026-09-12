@@ -270,3 +270,205 @@ def test_death_sound_not_played_without_audio():
                                      "rx0": 0, "rx1": 450}, 0, ph)
     mob.take_hit(999, from_x=210)
     mob.update(0.05, player_x=100000, player_y=0, mobs=[])  # 无 audio
+
+
+# ── WZ info 行为字段：bodyAttack / firstAttack / pushed / maxMP / fs ──
+
+def _stats_assets(**stats):
+    """构造把指定 stats 注入 mob_info 的资产桩。"""
+
+    class _Assets(FakeAssets):
+        def mob_info(self, mob_id):
+            info = FakeAssets.mob_info(self, mob_id)
+            info["stats"].update(stats)
+            return info
+
+    return _Assets()
+
+
+def test_body_attack_zero_emits_no_contact_damage():
+    """bodyAttack=0 的怪物贴身也不产生接触伤害事件。"""
+    ph = make(CHAIN)
+    mob = Monster(_stats_assets(bodyAttack=0),
+                  {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                   "rx0": 0, "rx1": 450}, 0, ph)
+    mobs = []
+    for _ in range(20):
+        mob.update(0.05, player_x=210, player_y=0, mobs=mobs)
+    assert mobs == []
+
+
+def test_body_attack_defaults_to_true_and_emits_contact():
+    """缺 bodyAttack 字段时按原版默认=1：贴身产生接触伤害。"""
+    ph = make(CHAIN)
+    mob = Monster(FakeAssets(), {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                                 "rx0": 0, "rx1": 450}, 0, ph)
+    mobs = []
+    for _ in range(20):
+        mob.update(0.05, player_x=210, player_y=0, mobs=mobs)
+    assert mobs and mobs[0]["type"] == "contact"
+
+
+def test_first_attack_mob_chases_unprovoked():
+    """firstAttack=1 的怪主动先制：玩家进入仇恨范围即追击，无需挨打。"""
+    ph = make(CHAIN)
+    mob = Monster(_stats_assets(firstAttack=1),
+                  {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                   "rx0": 0, "rx1": 450}, 0, ph)
+    for _ in range(60):
+        mob.update(0.05, player_x=300, player_y=0, mobs=[])
+    assert mob.state in ("chase", "attack")
+    assert mob.x > 240                       # 主动朝玩家推进
+
+
+def test_first_attack_mob_ignores_out_of_range_player():
+    """先制怪在玩家超出仇恨范围时仍不追击。"""
+    ph = make(CHAIN)
+    mob = Monster(_stats_assets(firstAttack=1),
+                  {"id": "0100101", "x": 10, "y": 0, "cy": 0,
+                   "rx0": 0, "rx1": 450}, 0, ph)
+    for _ in range(60):
+        mob.update(0.05, player_x=100000, player_y=0, mobs=[])
+    assert mob.state != "chase"
+
+
+def test_pushed_zero_mob_is_not_knocked_back():
+    """pushed=0（不可推移）的怪受击不位移。"""
+    ph = make(CHAIN)
+    mob = Monster(_stats_assets(pushed=0),
+                  {"id": "0100101", "x": 200, "y": 0, "cy": 0,
+                   "rx0": 0, "rx1": 450}, 0, ph)
+    mob.take_hit(5, from_x=300)
+    assert mob.x == pytest.approx(200.0)
+
+
+def test_high_pushed_mob_resists_knockback():
+    """pushed 越大击退越短：50000 的怪位移远小于普通怪。"""
+    ph = make(CHAIN)
+    tough = Monster(_stats_assets(pushed=50000),
+                    {"id": "0100101", "x": 200, "y": 0, "cy": 0,
+                     "rx0": 0, "rx1": 450}, 0, ph)
+    normal = Monster(FakeAssets(),
+                     {"id": "0100101", "x": 200, "y": 0, "cy": 0,
+                      "rx0": 0, "rx1": 450}, 0, ph)
+    tough.take_hit(5, from_x=300)
+    normal.take_hit(5, from_x=300)
+    assert (200 - tough.x) < (200 - normal.x)
+    assert (200 - tough.x) < 1.0
+
+
+def test_boss_is_never_knocked_back():
+    """boss 站桩：受击也不被推开。"""
+
+    class BossAssets(FakeAssets):
+        def mob_info(self, mob_id):
+            info = FakeAssets.mob_info(self, mob_id)
+            info["stats"]["boss"] = True
+            info["stats"]["pushed"] = 1
+            return info
+
+    ph = make(CHAIN)
+    mob = Monster(BossAssets(), {"id": "0100101", "x": 200, "y": 0, "cy": 0,
+                                 "rx0": 0, "rx1": 450}, 0, ph)
+    mob.take_hit(5, from_x=300)
+    assert mob.x == pytest.approx(200.0)
+
+
+def test_status_attack_consumes_mp():
+    """异常技能按 mpCon 耗蓝；蓝不足时该技能不再随接触释放。"""
+    ph = make(CHAIN)
+    mob = Monster(_stats_assets(mp=10),
+                  {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                   "rx0": 0, "rx1": 450}, 0, ph)
+    mob.status_attacks = [{"kind": "poison", "prob": 100, "duration": 5,
+                           "potency": 1, "mp_cost": 3}]
+    mob.mp = 10
+    mobs = []
+    mob.update(0.05, player_x=210, player_y=0, mobs=mobs)
+    assert mobs and mobs[0]["status_attacks"]
+    assert mob.mp == pytest.approx(7.0)
+    mob.attack_cooldown = 0.0
+    mob.mp = 0
+    mobs2 = []
+    mob.update(0.05, player_x=mob.x, player_y=0, mobs=mobs2)
+    assert mobs2 and mobs2[0]["status_attacks"] == []
+
+
+def test_mob_mp_regenerates_over_time():
+    """怪物按 mpRecovery 随时间回蓝，且不超过 maxMP。"""
+    ph = make(CHAIN)
+    mob = Monster(_stats_assets(mp=100, mpRecovery=10),
+                  {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                   "rx0": 0, "rx1": 450}, 0, ph)
+    mob.mp = 0
+    mob.update(1.0, player_x=100000, player_y=0, mobs=[])
+    assert mob.mp == pytest.approx(10.0)
+    for _ in range(20):
+        mob.update(1.0, player_x=100000, player_y=0, mobs=[])
+    assert mob.mp == pytest.approx(100.0)
+
+
+def test_flying_mob_speed_follows_wz_fly_speed():
+    """仅有 fly 动作的怪，移速取 WZ flySpeed（有符号偏移，同 speed 套路）。"""
+
+    class FlyAssets(FakeAssets):
+        def mob_info(self, mob_id):
+            info = FakeAssets.mob_info(self, mob_id)
+            info["stats"]["flySpeed"] = 100
+            return info
+
+        def mob_frames(self, mob_id, action, flip=False):
+            return [(self._surf, 100)] if action == "fly" else []
+
+    ph = make(CHAIN)
+    mob = Monster(FlyAssets(), {"id": "0100101", "x": 210, "y": 0, "cy": 0,
+                                "rx0": 0, "rx1": 450}, 0, ph)
+    assert mob.act_walk == "fly" and mob.flying
+    expected = settings.MOB_SPEED_BASE + 100 * settings.MOB_SPEED_FACTOR
+    assert mob.move_speed == pytest.approx(expected)
+
+
+def test_flying_mob_blocked_by_wall():
+    """飞行怪撞到竖直墙应被挡下折返，而不是穿墙飞过去。"""
+
+    class FlyAssets(FakeAssets):
+        def mob_frames(self, mob_id, action, flip=False):
+            return [(self._surf, 100)] if action == "fly" else []
+
+    segs = [fh(1, 0, 0, 0, 400, 0),          # 地面
+            fh(2, 0, 150, 0, 150, 400)]      # 竖直墙（贯穿怪所在高度）
+    ph = make(segs)
+    mob = Monster(FlyAssets(), {"id": "0100101", "x": 100, "y": 200, "cy": 200,
+                                "rx0": 100, "rx1": 400}, 0, ph)
+    hi = mob.x
+    for _ in range(300):
+        mob.update(0.05, player_x=100000, player_y=0, mobs=[])
+        hi = max(hi, mob.x)
+    limit = 150 - settings.PLAYER_BODY_HALF_W
+    assert hi <= limit + 1.0
+
+
+def test_flying_mob_flies_sine_wave_along_sloped_ground():
+    """飞行怪不吸附脚下地形：贴着斜坡飞时高度绕出生高度做大幅度正弦斜飞。"""
+
+    class FlyAssets(FakeAssets):
+        def mob_frames(self, mob_id, action, flip=False):
+            return [(self._surf, 100)] if action == "fly" else []
+
+    slope = [fh(1, 0, 0, 0, 200, 100, next=2),
+             fh(2, 0, 200, 100, 400, 200, prev=1)]
+    ph = make(slope)
+    # 出生点落在斜坡上（x=100 处坡面 y=50），若不悬停会被地形带到 y=150+；
+    # 端点固定为 400，保证 wandered 方向确定（否则随机折返会让断言不稳定）
+    mob = Monster(FlyAssets(), {"id": "0100101", "x": 100, "y": 50, "cy": 50,
+                                "rx0": 400, "rx1": 400}, 0, ph)
+    assert mob.flying and mob.fh is not None
+    hi = mob.x
+    lo_cy, hi_cy = mob.cy, mob.cy
+    for _ in range(200):
+        mob.update(0.05, player_x=100000, player_y=0, mobs=[])
+        hi = max(hi, mob.x)
+        lo_cy, hi_cy = min(lo_cy, mob.cy), max(hi_cy, mob.cy)
+        assert abs(mob.cy - 50) <= settings.MOB_FLY_WAVE_AMPLITUDE + 0.5
+    assert hi > 350                          # 在空中确实飞过一段距离
+    assert hi_cy - lo_cy > settings.MOB_FLY_WAVE_AMPLITUDE   # 有明显上下起伏

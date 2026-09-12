@@ -7,6 +7,7 @@ boss 守位站桩。移动速度取自 WZ stats.speed。
 
 from __future__ import annotations
 
+import math
 import random
 from typing import List, Optional, Tuple
 
@@ -59,6 +60,7 @@ class Monster:
             self.mob_time = -1
         self.x = float(data["x"])
         self.cy = float(data.get("cy") or data["y"])   # 地面接触 y
+        self._base_cy = self.cy                         # 飞行怪悬停基准高度
         self.rx0 = float(data["rx0"]) if data.get("rx0") is not None else float(data["x"])
         self.rx1 = float(data["rx1"]) if data.get("rx1") is not None else float(data["x"])
         self.flip = bool(data.get("flip"))
@@ -87,8 +89,18 @@ class Monster:
         raw = settings.MOB_SPEED_BASE + self.speed * settings.MOB_SPEED_FACTOR
         self.move_speed = min(max(raw, settings.MOB_SPEED_MIN),
                               settings.MOB_SPEED_MAX)
+        self._raw_move_speed = raw
         self.boss = bool(stats.get("boss"))
         self.drops = info.get("drops") or []
+        # WZ info 行为字段
+        self.body_attack = bool(stats.get("bodyAttack", 1))
+        self.first_attack = bool(stats.get("firstAttack"))
+        self.pushed = float(stats.get("pushed", 1.0) or 0.0)
+        # maxMP 供异常技能耗蓝；mpRecovery 为每秒回蓝量
+        self.max_mp = int(stats.get("mp") or 0)
+        self.mp = self.max_mp
+        self.mp_recovery = float(stats.get("mpRecovery") or 0)
+        self.fly_speed = float(stats.get("flySpeed") or 0)
 
         # 接触攻击附带的异常（毒/晕/减速）：skill 节点 + MobSkill.img 强度
         self.status_attacks: List[dict] = self._load_status_attacks()
@@ -120,10 +132,19 @@ class Monster:
         self.act_walk = self._first_action(("move", "fly", "stand"))
         self.act_idle = "stand" if self._has("stand") else self.act_walk
         self._load_action(self.act_walk)
+        # 飞行怪（只有 fly 动作）：保持出生高度在空中移动，不吸附 foothold；
+        # 移速取 WZ flySpeed（有符号偏移，同 speed 风格）。
+        self.flying = self.act_walk == "fly"
+        self._fly_travel = 0.0           # 飞行航迹累计水平位移（正弦相位）
+        if self.flying:
+            fly = settings.MOB_SPEED_BASE + self.fly_speed * settings.MOB_SPEED_FACTOR
+            self._raw_move_speed = fly
+            self.move_speed = min(max(fly, settings.MOB_SPEED_MIN),
+                                  settings.MOB_SPEED_MAX)
 
         # 巡逻/追击边界：钳到出生段可步行平台两端，并按贴图半宽内缩
         # （身体边缘贴平台边折返，不半身悬出边缝；边缝处没有贴图可遮）
-        if self.fh is not None:
+        if self.fh is not None and not self.flying:
             roam_min, roam_max = self._reachable_bounds(self.fh)
             inset = self._drawn_half_width()
             self.rx0 = max(self.rx0, roam_min + inset)
@@ -180,7 +201,9 @@ class Monster:
             if self.state_timer > 0:
                 # 受击小击退（钳在巡逻平台内）：朝远离攻击者的方向退
                 away = -1 if self.x < from_x else 1
-                self.x = min(max(self.x + away * 10.0, self.rx0), self.rx1)
+                dist = self._knockback_distance()
+                self._advance_x(self.x + away * dist)
+                self.x = min(max(self.x, self.rx0), self.rx1)
                 self._resnap_ground()
         if self.hp <= 0:
             self.die()
@@ -195,6 +218,13 @@ class Monster:
         self.remove_after = 0.5
         action = "die1" if self._has("die1") else ("die" if self._has("die") else "hit1")
         self._load_action(action)
+
+    def _knockback_distance(self) -> float:
+        """受击退距离：boss 与 pushed<=0 的怪不退，其余按 pushed 抗性反比缩放。"""
+        if self.boss or self.pushed <= 0:
+            return 0.0
+        return settings.MOB_KNOCKBACK_BASE / (
+            1.0 + self.pushed / settings.MOB_PUSHED_RESIST)
 
     # ── 每帧更新 ───────────────────────────────────────────────────
     def update(self, dt: float, player_x: float, player_y: float,
@@ -217,6 +247,10 @@ class Monster:
         if self.attack_cooldown > 0:
             self.attack_cooldown -= dt
 
+        # 回蓝（异常技能按 mpCon 耗蓝）
+        if self.max_mp > 0 and self.mp < self.max_mp and self.mp_recovery > 0:
+            self.mp = min(self.max_mp, self.mp + self.mp_recovery * dt)
+
         dx = player_x - self.x
         dist = abs(dx)
         # 垂直距离：玩家脚底 vs 怪物地面 y（不同层平台不参与仇恨/接触伤害）
@@ -238,16 +272,17 @@ class Monster:
                     and dy <= settings.MOB_AGGRO_Y_RANGE)
         if self.aggro and not in_range:
             self.aggro = False
-        chasing = self.aggro and in_range and not self.boss
+        # firstAttack=1 的怪主动先制：进入范围即追，无需挨打
+        chasing = (self.aggro or self.first_attack) and in_range and not self.boss
 
         if chasing and dist > settings.MOB_ATTACK_RANGE:
             self.state = "chase"
             step = self.move_speed * dt
             if dx > 0:
-                self.x = min(self.x + step, player_x - 1)
+                self._advance_x(min(self.x + step, player_x - 1))
                 self.dir = 1
             else:
-                self.x = max(self.x - step, player_x + 1)
+                self._advance_x(max(self.x - step, player_x + 1))
                 self.dir = -1
             # 不追出自己的巡逻平台（否则会悬空在平台外）
             self.x = min(max(self.x, self.rx0), self.rx1)
@@ -266,8 +301,10 @@ class Monster:
 
         self.anim.advance(dt)
 
-        # 接触伤害（近身且冷却完毕；出生保护期内不攻击；不同层不攻击）
-        if ((not no_aggro) and dist <= settings.MOB_ATTACK_RANGE
+        # 接触伤害（近身且冷却完毕；出生保护期内不攻击；不同层不攻击；
+        # bodyAttack=0 的怪只挡路不造成伤害）
+        if (self.body_attack and (not no_aggro)
+                and dist <= settings.MOB_ATTACK_RANGE
                 and dy <= settings.MOB_CONTACT_Y_RANGE
                 and self.attack_cooldown <= 0):
             if audio:
@@ -281,7 +318,7 @@ class Monster:
                 "magic": magic,
                 "x": self.x, "y": self.cy - 30,
                 "id": self.mob_id,
-                "status_attacks": self.status_attacks,
+                "status_attacks": self._cast_status_attacks(),
             })
             self.attack_cooldown = 0.8
 
@@ -290,11 +327,13 @@ class Monster:
         if self._wander_walking:
             if self.wander_target > self.x:
                 self.dir = 1
-                self.x = min(self.x + self.move_speed * dt, self.wander_target)
+                blocked = self._advance_x(
+                    min(self.x + self.move_speed * dt, self.wander_target))
             else:
                 self.dir = -1
-                self.x = max(self.x - self.move_speed * dt, self.wander_target)
-            if abs(self.x - self.wander_target) < 0.5:
+                blocked = self._advance_x(
+                    max(self.x - self.move_speed * dt, self.wander_target))
+            if blocked or abs(self.x - self.wander_target) < 0.5:
                 self._wander_walking = False
                 self._wander_timer = random.uniform(*settings.MOB_WANDER_PAUSE)
             self._load_action(self.act_walk)
@@ -307,6 +346,26 @@ class Monster:
             self._load_action(self.act_idle)
         self._step_move()
 
+    def _advance_x(self, new_x: float) -> bool:
+        """水平移动到 new_x；飞行怪按当前高度被竖直墙与地图边界阻挡。
+
+        飞行怪的航迹是绕出生高度的大幅度正弦波：竖直偏移按累计水平位移
+        取相位（原版斜飞感），波长/振幅见 settings。返回是否被挡下（巡逻
+        据此折返）。地面怪不受竖直墙影响：其巡逻范围已由 foothold 平台
+        钳制，故沿用旧的直接赋值。
+        """
+        if not self.flying or self.physics is None:
+            self.x = new_x
+            return False
+        old_x = self.x
+        clamped = self.physics.wall_block(old_x, new_x, self.cy, self.cy)
+        self.x = clamped
+        self._fly_travel += abs(clamped - old_x)
+        self.cy = self._base_cy + math.sin(
+            self._fly_travel / settings.MOB_FLY_WAVE_LENGTH * math.tau) \
+            * settings.MOB_FLY_WAVE_AMPLITUDE
+        return abs(clamped - new_x) > 1e-6
+
     def _step_move(self) -> None:
         """沿脚下相连平台走：越过当前段端点时续接下一段，并跟随坡面高度。
 
@@ -314,7 +373,7 @@ class Monster:
         续段（自动走上走下）；若仍走到断口，则保持当前段高度，交由巡逻
         边界折返，绝不悬空或坠落。
         """
-        if self.fh is None:
+        if self.fh is None or self.flying:
             return
         if not self.fh.covers(self.x):
             nxt = self.physics.walk_surface(self.fh, self.x, 0)
@@ -326,7 +385,7 @@ class Monster:
 
     def _resnap_ground(self) -> None:
         """受击击退后快速回到脚下段地面；只有确有支撑时才吸附，避免悬空。"""
-        if self.fh is None:
+        if self.fh is None or self.flying:
             return
         if not self.fh.covers(self.x):
             nxt = self.physics.walk_surface(self.fh, self.x, 0)
@@ -412,10 +471,28 @@ class Monster:
                 potency = float(int(lv.get("x") or 0))
             except (TypeError, ValueError):
                 potency = 0.0
+            try:
+                mp_cost = int(lv.get("mpCon") or 0)
+            except (TypeError, ValueError):
+                mp_cost = 0
             attacks.append({"kind": settings.MOB_STATUS_SKILLS[sid],
                             "prob": prob, "duration": duration,
-                            "potency": potency})
+                            "potency": potency, "mp_cost": mp_cost})
         return attacks
+
+    def _cast_status_attacks(self) -> List[dict]:
+        """按当前 MP 过滤可释放的异常技能并扣蓝；无蓝条怪不受限。"""
+        if not self.status_attacks:
+            return []
+        if self.max_mp <= 0:
+            return list(self.status_attacks)
+        casts: List[dict] = []
+        for atk in self.status_attacks:
+            cost = int(atk.get("mp_cost") or 0)
+            if cost <= self.mp:
+                self.mp -= cost
+                casts.append(atk)
+        return casts
 
     def _mob_skill_node(self):
         """当前怪 img 的 skill 引用节点；缺素材/结构异常返回 None。"""

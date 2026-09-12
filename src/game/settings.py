@@ -120,7 +120,11 @@ MOB_SPEED_MAX = 100.0            # 追击/漫游速度上限
 MOB_WANDER_PAUSE = (1.0, 4.0)    # 漫游两段行走之间随机站桩时长（秒）
 MOB_ATTACK_RANGE = 40.0          # 接触伤害距离（水平）
 MOB_CONTACT_Y_RANGE = 40.0       # 接触伤害距离（垂直，脚底 y 差）
-MOB_KNOCKBACK = 60.0             # 受击击退
+MOB_KNOCKBACK = 60.0             # 受击击退（预留）
+MOB_KNOCKBACK_BASE = 10.0        # pushed=1 时的受击击退距离 px（原硬编码值）
+MOB_PUSHED_RESIST = 1000.0       # pushed 抗性尺度：数值越大退得越短；pushed<=0 不退
+MOB_FLY_WAVE_LENGTH = 150.0      # 飞行怪正弦航迹的水平波长 px（越小越陡）
+MOB_FLY_WAVE_AMPLITUDE = 70.0    # 飞行怪正弦航迹的上下振幅 px（斜飞幅度）
 MOB_HP_BAR_TTL = 8.0             # 受击后脚下血条的显示时长（秒，再受击刷新）
 SPAWN_GRACE = 3.0                # 出生/重生后怪物不追击不攻击的秒数
 MOB_RESPAWN_DELAY = 5.0          # 怪物死亡后原地重生延迟秒数
