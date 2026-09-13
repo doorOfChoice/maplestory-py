@@ -74,12 +74,57 @@ def test_magician_second_jobs_are_sp_learned_not_auto_passive():
     assert JOBS[2100].advance_sp == 4
 
 
+def test_magician_third_jobs_are_linear_from_second():
+    """法师三转三系：前置对应二转分支、需 Lv70、树 211/221/231.img、共用汉斯、不补发武器。"""
+    for code, tree, pre in ((2110, "211.img", 2100), (2210, "221.img", 2200),
+                            (2310, "231.img", 2300)):
+        jd = JOBS[code]
+        assert jd.prejob == pre
+        assert jd.advance_lv == 70
+        assert jd.tree_imgs == [tree]
+        assert jd.trainer_npc == 1032001
+        assert jd.starter_weapon is None
+        assert can_advance(SimpleNamespace(job=pre, level=69), jd) is False
+        assert can_advance(SimpleNamespace(job=pre, level=70), jd) is True
+
+
+def test_magician_fourth_jobs_are_linear_from_third():
+    """法师四转三系：前置对应三转分支、需 Lv120、树 212/222/232.img、共用汉斯。"""
+    for code, tree, pre in ((2120, "212.img", 2110), (2220, "222.img", 2210),
+                            (2320, "232.img", 2310)):
+        jd = JOBS[code]
+        assert jd.prejob == pre
+        assert jd.advance_lv == 120
+        assert jd.tree_imgs == [tree]
+        assert jd.trainer_npc == 1032001
+        assert jd.starter_weapon is None
+        assert can_advance(SimpleNamespace(job=pre, level=119), jd) is False
+        assert can_advance(SimpleNamespace(job=pre, level=120), jd) is True
+
+
+def test_jobs_for_trainer_branches_three_and_four():
+    """汉斯按各系当前职业给出唯一下一步：二转→对应三转，三转→对应四转。"""
+    assert [j.code for j in jobs_for_trainer(1032001, player_job=2100)] == [2110]
+    assert [j.code for j in jobs_for_trainer(1032001, player_job=2200)] == [2210]
+    assert [j.code for j in jobs_for_trainer(1032001, player_job=2300)] == [2310]
+    assert [j.code for j in jobs_for_trainer(1032001, player_job=2110)] == [2120]
+    assert [j.code for j in jobs_for_trainer(1032001, player_job=2210)] == [2220]
+    assert [j.code for j in jobs_for_trainer(1032001, player_job=2310)] == [2320]
+
+
+def test_job_chain_magician_reaches_fourth():
+    """法师链到四转：主教 → 新手/法师/牧师/祭司/主教，五阶齐全。"""
+    assert [j.code for j in job_chain(2320)] == [0, 2000, 2300, 2310, 2320]
+    assert [j.code for j in job_chain(2120)] == [0, 2000, 2100, 2110, 2120]
+    assert [j.code for j in job_chain(2210)] == [0, 2000, 2200, 2210]
+
+
 def test_jobs_for_trainer_lists_all_shared_branches():
     """汉斯同时承担法师 1/2 转：按当前职业列全三系分支（火毒/冰雷/牧师）。"""
     assert [j.code for j in jobs_for_trainer(1032001, player_job=2000)] \
         == [2100, 2200, 2300]
     assert [j.code for j in jobs_for_trainer(1032001, player_job=0)] == [2000]
-    assert jobs_for_trainer(1032001, player_job=2100) == []
+    assert jobs_for_trainer(1032001, player_job=2320) == []      # 已达最高阶
 
 
 def test_jobdef_for_advance_quest_resolves_branch():

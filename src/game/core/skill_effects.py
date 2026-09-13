@@ -47,6 +47,20 @@ _BUFF_OVERRIDES: Dict[str, Dict[str, str]] = {
     "2001002": {"magic_guard": "x"},   # 魔法盾：x=伤害转 MP 比例
     "2301003": {"dmg_reduce": "x"},    # 神之保护：x=物理伤害减免 %（仅物理）
     # 魔法铠甲(2001003) 走通用字段 pdd→def，无需覆盖
+    # ── 法师三转/四转 ────────────────────────────────────────────
+    "2111005": {"attack_speed": "x"},  # 魔法狂暴：x 为攻速等级（负=更快，-1/-2）
+    "2211005": {"attack_speed": "x"},
+    "2121000": {"stat_pct": "x"},      # 冒险岛勇士：全属性 +x%
+    "2221000": {"stat_pct": "x"},
+    "2321000": {"stat_pct": "x"},
+    "2311003": {"exp_bonus": "x"},     # 神圣祈祷：经验 +x%（单机近似自身加成）
+    "2121002": {"magic_reflect": "x", "magic_reflect_chance": "prop"},  # 魔法反击
+    "2221002": {"magic_reflect": "x", "magic_reflect_chance": "prop"},
+    "2321002": {"magic_reflect": "x", "magic_reflect_chance": "prop"},
+    "2121004": {"no_mp_cost": "x"},    # 终极无限：持续内施法不消耗 MP
+    "2221004": {"no_mp_cost": "x"},
+    "2321004": {"no_mp_cost": "x"},
+    "2321005": {"status_immune": "x"},  # 圣灵之盾：持续内免疫异常状态
 }
 
 # ── 攻击附带的怪物状态 ───────────────────────────────────────────────
@@ -54,6 +68,13 @@ _BUFF_OVERRIDES: Dict[str, Dict[str, str]] = {
 ATTACK_STATUS: Dict[str, str] = {
     "2201004": "freeze",   # 冰冻术：命中冻结 time 秒
     "2101005": "poison",   # 毒雾术：prop% 概率中毒 time 秒
+    # 法师三转/四转命中附带状态
+    "2111003": "poison",   # 致命毒雾
+    "2111006": "poison",   # 火毒合击
+    "2211002": "freeze",   # 冰咆哮
+    "2211006": "freeze",   # 冰雷合击
+    "2221003": "freeze",   # 冰凤球
+    "2221007": "freeze",   # 落霜冰破
 }
 
 # 怪物 debuff 技：技能 id → 状态键。施放形态由 WZ 的 mob 节点推导（见 skills.cast_form），
@@ -87,6 +108,12 @@ _PASSIVE_FIELDS: Dict[str, Dict[str, str]] = {
     "2100000": {},                                # 魔力吸收（火毒）：命中吸怪 MP，combat._absorb_mp
     "2200000": {},                                # 魔力吸收（冰雷）：同上
     "2300000": {},                                # 魔力吸收（牧师）：同上
+    # 法师三转抗性/激化（被动）；元素抗性单机无逐元素来伤，统一近似为魔伤减免
+    "2110000": {"mdmg_reduce": "x"},              # 火毒抗性：x=抗性 %
+    "2210000": {"mdmg_reduce": "x"},              # 冰雷抗性
+    "2310000": {"mdmg_reduce": "x"},              # 魔法抗性（全属性）
+    "2110001": {"matk_pct": "y", "mp_cost_pct": "x"},  # 魔力激化：y=伤害%、x=MP 消耗%
+    "2210001": {"matk_pct": "y", "mp_cost_pct": "x"},
 }
 
 # 未登记被动的通用回退字段（平坦键，不使用 x/y/prop/damage 等歧义字段）

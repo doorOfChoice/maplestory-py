@@ -482,6 +482,46 @@ def test_channel_skill_exposes_prepare_keydown_end_frames():
 
 
 @needs_wz
+def test_magician_third_fourth_job_trees_load():
+    """法师三/四转六棵树自 WZ 加载、逐转 SP 分池；召唤/状态/buff 语义正确。"""
+    pygame.init()
+    pygame.display.set_mode((8, 8))
+    from game.render.assets import Assets
+    from game.core import skill_effects, skill_spec
+    from game.core.jobs import JOBS, skill_ids_for_job
+    from game.systems.skills import SkillBook, load_skill_defs
+    assets = Assets(settings.TRAINER_SPAWN_MAP)
+    try:
+        for code, group, sid in ((2110, 211, "2111006"), (2210, 221, "2211006"),
+                                 (2310, 231, "2311006"), (2120, 212, "2121006"),
+                                 (2220, 222, "2221006"), (2320, 232, "2321007")):
+            assert sid in skill_ids_for_job(assets, code)
+            book = SkillBook(assets, code)
+            book.on_advance(JOBS[code])
+            assert book.sp_for_group(group) == 4
+            assert book.levels == {}          # 法师各转均无附赠被动
+
+        # 魔法召唤物（冰破魔兽）攻击力取 level.mad 且按魔防结算
+        summon = next(e for e in
+                      load_skill_defs(assets, ["2121005"])["2121005"]
+                      .spec.effects_at(1)
+                      if isinstance(e, skill_spec.Summon))
+        assert summon.attack > 0 and summon.magic is True
+
+        # 火毒合击命中附带中毒；冒险岛勇士 stat_pct；神圣祈祷 exp_bonus
+        defs = load_skill_defs(assets, ["2111006", "2121000", "2311003"])
+        assert defs["2111006"].spec.damage_at(1).status.status == "poison"
+        assert skill_effects.buff_mods(
+            "2121000",
+            lambda k: defs["2121000"].stat(30, k, 0)) == {"stat_pct": 15}
+        assert skill_effects.buff_mods(
+            "2311003",
+            lambda k: defs["2311003"].stat(30, k, 0)) == {"exp_bonus": 50}
+    finally:
+        assets.close()
+
+
+@needs_wz
 def test_tile_skill_layers_resolved():
     """地面技多层贴图：烈火箭 tile 分层解析（含多层动画）。"""
     pygame.init()

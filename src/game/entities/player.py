@@ -292,6 +292,10 @@ class Player:
             stats, self.inventory.stat_sum("incMAD")) \
             + self.skills.passive_mods().get("matk", 0) \
             + self._buff_mod("matk", with_buffs)
+        # 魔力激化：matk_pct 为「伤害百分比」（100=原样，140=×1.4）
+        pct = self.skills.passive_mods().get("matk_pct", 0)
+        if pct > 0:
+            magic = magic * pct / 100.0
         return int(magic * self._buff_rate("mad", with_buffs))
 
     def magic_attack_range(self, skill_mad: int = 0, skill_mastery: int = 0,
@@ -322,6 +326,37 @@ class Player:
         """物理伤害减免 %（神之保护 buff）；仅对怪物接触/物理攻击生效。"""
         return max(0, self.buffs.mod_sum("dmg_reduce"))
 
+    def magic_damage_reduce(self) -> int:
+        """魔法伤害减免 %（法师元素/魔法抗性被动 + 同类 buff）；仅对魔法攻击生效。"""
+        return max(0, self.skills.passive_mods().get("mdmg_reduce", 0)
+                   + self.buffs.mod_sum("mdmg_reduce"))
+
+    def magic_reflect(self) -> Tuple[int, int]:
+        """魔法反击 (返还比例 %, 触发概率 %)；无 buff 返回 (0, 0)。"""
+        pct = self.buffs.mod_sum("magic_reflect")
+        if pct <= 0:
+            return (0, 0)
+        return (pct, self.buffs.mod_sum("magic_reflect_chance"))
+
+    def status_immune(self) -> bool:
+        """异常状态免疫（圣灵之盾）；持续内不再被施加减速/眩晕/中毒。"""
+        return self.buffs.mod_sum("status_immune") > 0
+
+    def no_mp_cost(self) -> bool:
+        """施法不消耗 MP（终极无限）；持续内所有技能 MP 代价归零。"""
+        return self.buffs.mod_sum("no_mp_cost") > 0
+
+    def mp_cost_rate(self) -> float:
+        """MP 消耗倍率（魔力激化被动）：mp_cost_pct 为百分比（100/140 → ×1.0/×1.4）。"""
+        pct = self.skills.passive_mods().get("mp_cost_pct", 0)
+        return pct / 100.0 if pct > 0 else 1.0
+
+    def skill_mp_cost(self, mp_con: int) -> int:
+        """技能 MP 实付：终极无限期间 0，否则按魔力激化倍率放大（向上取整）。"""
+        if self.no_mp_cost():
+            return 0
+        return int(mp_con * self.mp_cost_rate() + 0.999999)
+
     def accuracy_value(self, with_buffs: bool = True) -> int:
         """命中率：(基础 20 + DEX//2 + 装备 ACC + 被动/buff 平坦命中) × 命藥%。"""
         extra = self.skills.passive_mods().get("acc", 0) \
@@ -339,9 +374,13 @@ class Player:
                    * self._buff_rate("eva", with_buffs))
 
     def attack_speed_value(self) -> int:
-        """攻击速度：武器 WZ speed 值（0 最快、越大越慢）；空手为 0。"""
+        """攻击速度：武器 WZ speed 值（0 最快、越大越慢）；空手为 0。
+
+        魔法狂暴 buff 的 attack_speed 为速度等级偏移（负值 = 更快）。
+        """
         weapon = self.inventory.equipped.get("weapon")
-        return weapon.stat("speed") if weapon is not None else 0
+        base = weapon.stat("speed") if weapon is not None else 0
+        return base + self.buffs.mod_sum("attack_speed")
 
     def attack_anim_rate(self) -> float:
         """攻速 → 攻击动画推进倍率：delay=300+60×speed，基准 speed4 为 1.0。"""
@@ -700,7 +739,10 @@ class Player:
         return True
 
     def gain_exp(self, amount: int) -> bool:
-        """增加经验，返回是否升级。"""
+        """增加经验，返回是否升级。神圣祈祷 exp_bonus% 在此乘算（单机近似）。"""
+        bonus = self.buffs.mod_sum("exp_bonus")
+        if bonus > 0:
+            amount = int(amount * (100 + bonus) / 100.0)
         self.exp += amount
         leveled = False
         while self.exp >= self.exp_to_next():

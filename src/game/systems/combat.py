@@ -25,7 +25,7 @@ from game.render.assets import Assets
 from game.render.effects import Effect
 from game.systems.drops import OfficialDropTable, load_official_table
 from game.systems.inventory import make_item
-from game.systems.scrolls import is_scroll_id
+from game.systems.scrolls import is_scroll_id, scroll_name
 from game.core.fonts import render_text
 
 
@@ -247,12 +247,12 @@ class DropItem:
             return None
         if self.item is not None and self.assets is not None:
             iid = self.item.get("id")
-            if is_scroll_id(iid):
-                from game.render.windows.core.widgets import scroll_icon
-                return scroll_icon()    # 234 段自制卷轴：统一自绘图标
             s = self.assets.item_icon(iid)
             if s is None:
                 s = self.assets.equip_icon(iid)
+            if s is None and is_scroll_id(iid):    # WZ 无图兜底：自绘卷轴
+                from game.render.windows.core.widgets import scroll_icon
+                return scroll_icon()
             return s
         return None
 
@@ -449,17 +449,19 @@ class Summon:
     """召唤物（银鹰/凤凰/替身术…）：跟随玩家，按间隔用自身攻击力打最近目标。
 
     交付方式由 WZ summon 节点推导（skill_semantics.delivery=summon），
-    攻击力取 level.pad；出场/移动/攻击贴图取 Skill.wz summon/<action>。
+    攻击力取 level.pad（物理）或 mad（魔法）；出场/移动/攻击贴图取
+    Skill.wz summon/<action>。
     """
 
     def __init__(self, skill_id: str, x: float, y: float, attack: int,
                  duration: float, interval: float, frames, facing_right: bool,
-                 name: str = ""):
+                 name: str = "", magic: bool = False):
         self.skill_id = skill_id
         self.name = name
         self.x = x
         self.y = y
         self.attack = max(1, int(attack))
+        self.magic = magic
         self.total = duration
         self.remaining = duration
         self.interval = max(0.2, interval)
@@ -500,9 +502,10 @@ class Summon:
             return
         self.facing_right = mob.x >= self.x
         self._attacking = self._attack_seconds()
-        # 原版召唤物伤害：以自身 pad 为攻击区间、走统一伤害公式（含等级差/怪防）
+        # 原版召唤物伤害：以自身 pad/mad 为攻击区间、走统一伤害公式（含等级差/怪防）
+        mob_pd = mob.mdd if self.magic else mob.pd
         dmg, crit = stats_mod.roll_damage(
-            self.attack, self.attack, 1.0, mob.pd, player.level, mob.level,
+            self.attack, self.attack, 1.0, mob_pd, player.level, mob.level,
             combat.rng, 0.0, settings.CRIT_MULT)
         combat.numbers.append(DamageNumber(
             mob.x, mob.cy - mob.sprite_h, dmg,
@@ -1066,7 +1069,8 @@ class Combat:
             duration=info.get("duration", 0.0) or settings.SUMMON_ATTACK_INTERVAL,
             interval=interval,
             frames=frames, facing_right=facing,
-            name=getattr(d, "name", None) or sid))
+            name=getattr(d, "name", None) or sid,
+            magic=bool(info.get("magic", False))))
 
     def cast_field(self, player, skill_data: dict) -> None:
         """地面交付：在施放点生成持续区域，按间隔结算区域内目标。"""
@@ -1243,7 +1247,10 @@ class Combat:
         for it in res.items:
             if not self._has_item_icon(it["id"]):
                 continue
-            name = self.assets.item_name(it["id"]) if self.assets else None
+            if is_scroll_id(it["id"]):
+                name = scroll_name(it["id"])     # 234 段自制卷轴：名字取配置
+            else:
+                name = self.assets.item_name(it["id"]) if self.assets else None
             self.drops.append(DropItem(
                 mob.x + random.uniform(-18, 18), mob.cy - 20,
                 item={"id": it["id"], "count": it["count"], "name": name},
@@ -1251,6 +1258,8 @@ class Combat:
 
     def _has_item_icon(self, item_id: str) -> bool:
         """物品图标可解析才生成掉落：解析不出（如 8 位商城道具）宁可不出。"""
+        if is_scroll_id(item_id):        # 234 段自制卷轴：无 WZ 素材但可自绘
+            return True
         if self.assets is None:
             return True
         found_api = False
@@ -1296,13 +1305,45 @@ class Combat:
                     if hasattr(player, "physical_damage_reduce") else 0
                 if reduce > 0:
                     amount = max(1, int(amount * (100 - min(100, reduce)) / 100))
+            else:
+                # 法师元素/魔法抗性：魔法伤害按 mdmg_reduce% 减免
+                reduce = player.magic_damage_reduce() \
+                    if hasattr(player, "magic_damage_reduce") else 0
+                if reduce > 0:
+                    amount = max(1, int(amount * (100 - min(100, reduce)) / 100))
             player.take_attack_damage(amount)
             self.numbers.append(DamageNumber(
                 player.x, player.y - 40, amount, "red"))
-            for atk in hit.get("status_attacks", ()):
-                if random.random() * 100.0 < atk.get("prob", 0):
-                    player.statuses.apply(atk["kind"], atk["duration"],
-                                          atk["potency"])
+            if hit.get("magic"):
+                self._reflect_magic(player, hit, amount)
+            if not (hasattr(player, "status_immune") and player.status_immune()):
+                for atk in hit.get("status_attacks", ()):
+                    if random.random() * 100.0 < atk.get("prob", 0):
+                        player.statuses.apply(atk["kind"], atk["duration"],
+                                              atk["potency"])
+
+    def _reflect_magic(self, player, hit: dict, amount: int) -> None:
+        """魔法反击：受魔法伤害时按 (比例%, 概率%) 返还给攻击来源，单次封顶其 20% 体力。"""
+        source = hit.get("source")
+        if source is None or not hasattr(player, "magic_reflect"):
+            return
+        pct, chance = player.magic_reflect()
+        if pct <= 0:
+            return
+        if chance < 100 and self.rng.random() * 100 >= chance:
+            return
+        reflect = int(amount * pct / 100.0)
+        max_hp = getattr(source, "max_hp", 0) or 0
+        if max_hp > 0:
+            reflect = min(reflect, int(max_hp * 0.2))
+        if reflect <= 0:
+            return
+        self.numbers.append(DamageNumber(
+            getattr(source, "x", player.x),
+            getattr(source, "cy", player.y) - getattr(source, "sprite_h", 30),
+            reflect, "violet"))
+        if source.take_hit(reflect, from_x=player.x):
+            self._on_kill(player, source)
 
     def _take(self, drop: "DropItem", player) -> bool:
         """把一件掉落物收进角色：金币入 Combat，物品入背包；放不下则失败。"""

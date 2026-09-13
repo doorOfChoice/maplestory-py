@@ -123,9 +123,10 @@ class Summon:
     """召唤物。"""
     template: str = ""         # 召唤物 id（skill.summon 或 fallback 技能 id）
     duration: float = 0.0      # time
-    attack: int = 0            # pad（召唤物攻击力）
+    attack: int = 0            # pad（物理召唤物）/ mad（魔法召唤物）
     interval: float = 0.0      # 出手间隔（素材缺省时按 settings）
     count: int = 1
+    magic: bool = False        # 魔法召唤物：按怪物魔防（mdd）结算
 
 
 @dataclass(frozen=True)

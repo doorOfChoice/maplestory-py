@@ -91,6 +91,40 @@ JOBS: Dict[int, JobDef] = {
         advance_lv=30, advance_sp=4, prejob=2000, trainer_npc=1032001,
         hp_gain=12, mp_gain=20, auto_ap={"int": 4, "luk": 1},
     ),
+    # 法师 3 转三系：火毒巫师/冰雷巫师/祭司。Skill.wz/211/221/231.img；沿用同一
+    # 导师汉斯 1032001，前置为对应 2 转分支（各自线性）；已有短杖故不补发。
+    2110: JobDef(
+        code=2110, name="火毒巫师", tree_imgs=["211.img"],
+        advance_lv=70, advance_sp=4, prejob=2100, trainer_npc=1032001,
+        hp_gain=12, mp_gain=20, auto_ap={"int": 4, "luk": 1},
+    ),
+    2210: JobDef(
+        code=2210, name="冰雷巫师", tree_imgs=["221.img"],
+        advance_lv=70, advance_sp=4, prejob=2200, trainer_npc=1032001,
+        hp_gain=12, mp_gain=20, auto_ap={"int": 4, "luk": 1},
+    ),
+    2310: JobDef(
+        code=2310, name="祭司", tree_imgs=["231.img"],
+        advance_lv=70, advance_sp=4, prejob=2300, trainer_npc=1032001,
+        hp_gain=12, mp_gain=20, auto_ap={"int": 4, "luk": 1},
+    ),
+    # 法师 4 转三系：火毒魔导师/冰雷魔导师/主教。Skill.wz/212/222/232.img；前置对应
+    # 3 转分支，门槛 Lv120，沿用汉斯，不补发武器（原版满级技多为主动 buff/召唤）。
+    2120: JobDef(
+        code=2120, name="火毒魔导师", tree_imgs=["212.img"],
+        advance_lv=120, advance_sp=4, prejob=2110, trainer_npc=1032001,
+        hp_gain=12, mp_gain=20, auto_ap={"int": 4, "luk": 1},
+    ),
+    2220: JobDef(
+        code=2220, name="冰雷魔导师", tree_imgs=["222.img"],
+        advance_lv=120, advance_sp=4, prejob=2210, trainer_npc=1032001,
+        hp_gain=12, mp_gain=20, auto_ap={"int": 4, "luk": 1},
+    ),
+    2320: JobDef(
+        code=2320, name="主教", tree_imgs=["232.img"],
+        advance_lv=120, advance_sp=4, prejob=2310, trainer_npc=1032001,
+        hp_gain=12, mp_gain=20, auto_ap={"int": 4, "luk": 1},
+    ),
     # 弓箭手 1 转：Skill.wz/300.img；被动 精準強化/霸王箭/百步穿楊；
     # 导师赫丽娜(1012100)；转职附赠木弓(1452002，需求 Lv10 无属性要求，
     # 短弓 1452000 需求 Lv25/DEX80 转职时穿不上)

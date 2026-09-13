@@ -261,10 +261,11 @@ _DEBUFF_EXTRA = {
     "1111007": "def_down",      # 防御崩坏
 }
 
-# 解异常：勇士的意志系列（解除诱惑）。
+# 解异常：勇士的意志系列（解除诱惑）+ 祭司净化。
 _CLEANSE_SKILLS = {
-    "1121010", "2121008", "2221008", "2321002", "3121009",
+    "1121010", "2121008", "2221008", "2321009", "3121009",
     "3221008", "4121010", "4221008", "5121010", "5221010",
+    "2311001",   # 净化（祭司三转）
 }
 # 吸血：造成伤害的 x% 回血（WZ 无统一结构标记）。
 _DRAIN_SKILLS = {"4101005": "x", "4211004": "x", "4111005": "x"}
@@ -277,6 +278,7 @@ _ATTACK_CONTROL = {
     "4211002": "stun", "5201004": "stun", "4121008": "stun",   # 落叶斩/迷惑射击/忍者冲击
     "1111008": "stun",                           # 虎咆哮
     "1211002": "stun",                           # 属性攻击
+    "2121006": "stun",                           # 连环爆破（火毒四转）
 }
 
 
@@ -334,13 +336,16 @@ def effects(d, level: int) -> Tuple[Effect, ...]:
     if kind == "passive":
         return _proc_effects(d, level, getattr(d, "skill_type", None))
 
-    # 召唤
+    # 召唤：物理召唤物攻击力取 pad（银鹰/凤凰），魔法召唤物取 mad（魔兽/圣龙）
     if _has(d, "has_summon"):
+        pad = _stat(d, level, "pad", 0)
+        mad = _stat(d, level, "mad", 0)
         out.append(Summon(
             template=sid,
             duration=float(_stat(d, level, "time", 0)),
-            attack=_stat(d, level, "pad", 0),
+            attack=max(pad, mad),
             interval=settings.SUMMON_ATTACK_INTERVAL,
+            magic=mad > 0 and pad <= 0,
         ))
 
     # 地面/持续区域（与攻击共存：如火牢、毒雾；区域本身按间隔结算）

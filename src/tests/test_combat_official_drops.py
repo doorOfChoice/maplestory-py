@@ -168,3 +168,23 @@ def test_item_row_without_icon_is_not_spawned():
     _kill(c, _Mob())
     assert [d for d in c.drops if d.is_meso] and \
         not [d for d in c.drops if not d.is_meso]
+
+
+def test_scroll_row_spawns_with_drawn_icon_and_config_name():
+    """官方卷轴（204 段）无 WZ 图标时可自绘、名字取 WZ/配置而非「物品 id」。"""
+    class _NoIconAssets(_Assets):
+        def item_icon(self, item_id):
+            return None
+
+        def equip_icon(self, item_id):
+            return None
+
+    table = OfficialDropTable.from_dict({
+        "210100": [{"item": "2043001", "min": 1, "max": 1, "chance": 1_000_000}],
+    })
+    c = Combat(_NoIconAssets(), rng=random.Random(1), drop_table=table)
+    _kill(c, _Mob())
+    drops = [d for d in c.drops if not d.is_meso]
+    assert len(drops) == 1
+    assert drops[0].item["id"] == "2043001"
+    assert drops[0].item["name"] == "单手剑攻击卷轴 60%"

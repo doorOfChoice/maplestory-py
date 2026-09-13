@@ -78,11 +78,13 @@ class StorageWindow(Window):
         return max(1, (PANEL_FB_H - TITLE_H - 20 - 56) // ROW_H)
 
     def _icon(self, item_id: str) -> Optional[pygame.Surface]:
-        if is_scroll_id(item_id):    # 234 段自制卷轴：统一用自绘图标
-            return scroll_icon()
         if item_kind(item_id) == "equip":
-            return self.svc.assets.equip_icon(item_id)
-        return self.svc.assets.item_icon(item_id)
+            icon = self.svc.assets.equip_icon(item_id)
+        else:
+            icon = self.svc.assets.item_icon(item_id)
+        if icon is None and is_scroll_id(item_id):    # WZ 无图兜底：自绘卷轴
+            icon = scroll_icon()
+        return icon
 
     def _tip_payload(self, item: Item):
         """仓库 / 背包行悬停内容：装备结构化、其余纯文本（盲认图标有据可依）。"""

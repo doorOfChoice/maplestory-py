@@ -133,6 +133,10 @@ class Window:
         """无全局拖拽/拾取时，manager 把命中本窗口的松开事件转给子类。"""
         return False
 
+    def handle_drag_motion(self, pk: DragPickup, pos: Tuple[int, int]) -> bool:
+        """拖拽进行中光标经过本窗口时调用（悬停切页签等）；返回 True = 已消费。"""
+        return False
+
     def handle_wheel(self, pos: Tuple[int, int], amount: int) -> bool:
         return False
 

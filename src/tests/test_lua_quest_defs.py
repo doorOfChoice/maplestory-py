@@ -295,7 +295,7 @@ def test_build_advance_quest_defs_includes_magician_second_branches():
 
 
 def test_magician_trainer_offers_all_three_branches_at_once():
-    """导师汉斯 1032001：玩家为法师时三条二转分支同时可接，转职后一并消失。"""
+    """导师汉斯 1032001：玩家为法师时三条二转分支同时可接；转职后按链给下一阶。"""
     defs = build_advance_quest_defs()
     log = QuestLog(defs)
     player = SimpleNamespace(level=30, job=2000, x=0.0, y=0.0,
@@ -303,6 +303,9 @@ def test_magician_trainer_offers_all_three_branches_at_once():
     qids = [it.qid for it in collect_npc_quests(defs, log, "1032001", player)]
     assert qids == ["adv_2100", "adv_2200", "adv_2300"]
     player.job = 2100
+    assert [it.qid for it in collect_npc_quests(defs, log, "1032001", player)] \
+        == ["adv_2110"]
+    player.job = 2120                        # 四转已是链尾
     assert collect_npc_quests(defs, log, "1032001", player) == []
 
 

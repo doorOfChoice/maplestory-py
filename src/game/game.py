@@ -544,8 +544,10 @@ class Game:
         data = player.skills.cast(sid, player.level)
         if data is None:
             return
-        if player.mp < data["mp_con"]:
-            self.ctx.windows.flash(f"{name}：MP 不足（需 {data['mp_con']}）")
+        mp_con = player.skill_mp_cost(data["mp_con"])
+        data["mp_con"] = mp_con          # 统一改写实付：start_attack 与下方分支都读它
+        if player.mp < mp_con:
+            self.ctx.windows.flash(f"{name}：MP 不足（需 {mp_con}）")
             return
         if data.get("form") in ("teleport", "move"):
             mode = data.get("move_mode")
@@ -600,9 +602,8 @@ class Game:
             return
         if not player.start_attack(data):
             return
-        for kind in data.get("cleanse", ()):     # 勇士的意志：解除异常
-            if kind in ("seduce", "stun"):
-                player.statuses.clear()
+        if data.get("cleanse"):                  # 勇士的意志 / 净化：解除自身异常
+            player.statuses.clear()
         if not data.get("repeat"):
             player.skills.start_cooldown(sid, data.get("cooldown_ms", 0))
         self.ctx.audio.play_skill_cast(sid, player.equips)

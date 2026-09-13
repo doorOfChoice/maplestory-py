@@ -275,6 +275,10 @@ class WindowManager:
                 dy = pos[1] - d.start[1]
                 if dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD:
                     d.active = True
+            if d.active:                      # 拖拽中悬停通知（卷轴切页签等）
+                hit = self._topmost_at(pos, interactive_only=True)
+                if hit is not None:
+                    hit.handle_drag_motion(d.pk, pos)
             return True
         hit = self._topmost_at(pos, interactive_only=True)
         return hit.handle_mouse_motion(pos) if hit is not None else False
@@ -394,11 +398,10 @@ class WindowManager:
             self._draw_drag_label(surface, d)
             return
         item = d.pk.item
-        if is_scroll_id(item.id):
-            icon = widgets.scroll_icon()        # 234 段自制卷轴：统一自绘图标
-        else:
-            icon = (self.svc.assets.equip_icon(item.id) if item.kind == "equip"
-                    else self.svc.assets.item_icon(item.id))
+        icon = (self.svc.assets.equip_icon(item.id) if item.kind == "equip"
+                else self.svc.assets.item_icon(item.id))
+        if icon is None and is_scroll_id(item.id):    # WZ 无图兜底：自绘卷轴
+            icon = widgets.scroll_icon()
         if icon is None:
             return
         icon = widgets.fit_icon(icon, 32)

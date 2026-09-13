@@ -571,7 +571,8 @@ class SkillBook:
             data["summon"] = {"template": summon.template,
                               "duration": summon.duration,
                               "attack": summon.attack,
-                              "interval": summon.interval}
+                              "interval": summon.interval,
+                              "magic": summon.magic}
             data["duration"] = summon.duration
         if field is not None:
             data["field"] = {"area": data["area"], "duration": field.duration,

@@ -87,7 +87,23 @@ def make_item(item_id: str, assets, count: int = 1,
     id 统一补零到 8 位：怪物掉落表的 id 是 7 位（如 "1040013"），
     而 Character.wz 的部件图名是 8 位（"01040013.img"）——不补零的
     id 会让角色合成器找不到部件，穿上去等于没穿。
+
+    234 段旧自制卷轴在读取时迁移到官方 204 段；官方卷轴名称取 String.wz。
     """
+    from game.systems.scrolls import is_scroll_id, migrate_scroll_id, scroll_name
+    if is_scroll_id(migrate_scroll_id(item_id)):
+        real_id = migrate_scroll_id(item_id)
+        nm = name
+        if not nm and assets is not None:
+            getter = getattr(assets, "item_name", None)
+            if getter is not None:
+                try:
+                    nm = getter(real_id)
+                except Exception:
+                    nm = None
+        return Item(id=real_id,
+                    name=nm or scroll_name(real_id) or f"物品 {real_id}",
+                    count=count, kind="consume", info={"spec": {}})
     kind = item_kind(item_id)
     if kind == "equip":
         info = dict(assets.equip_info(item_id) or {})
@@ -113,6 +129,12 @@ def _tuc_of(info: Dict[str, Any]) -> int:
         return max(0, int(info.get("tuc") or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _migrate_scroll(item_id: str) -> str:
+    """旧存档卷轴 id 迁移到官方 id（非卷轴原样归一）。"""
+    from game.systems.scrolls import migrate_scroll_id
+    return migrate_scroll_id(item_id)
 
 
 @dataclass
@@ -394,9 +416,14 @@ class Inventory:
     def from_dict(cls, data: dict, assets=None) -> Inventory:
         inv = cls()
         for id_, count in data.get("consumes", {}).items():
-            item = (make_item(id_, assets, count) if assets
-                    else Item(id=id_, count=count, kind="consume"))
-            inv.consumes[id_] = item
+            real_id = _migrate_scroll(id_)
+            item = (make_item(real_id, assets, count) if assets
+                    else Item(id=real_id, count=count, kind="consume"))
+            cur = inv.consumes.get(real_id)
+            if cur is not None:                  # 旧/新 id 并存 → 累加数量
+                cur.count += item.count
+            else:
+                inv.consumes[real_id] = item
         for id_, count in data.get("etcs", {}).items():
             item = (make_item(id_, assets, count) if assets
                     else Item(id=id_, count=count, kind="etc"))
@@ -410,7 +437,8 @@ class Inventory:
             elif not assets:
                 inv.equipped[slot] = item
         for entry in data.get("storage", []):
-            id_, count = str(entry["id"]), int(entry.get("count") or 1)
+            id_ = _migrate_scroll(str(entry["id"]))
+            count = int(entry.get("count") or 1)
             if entry.get("kind") == "equip":
                 item = cls._build_equip(entry, assets)
                 item.count = 1

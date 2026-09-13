@@ -18,7 +18,7 @@ def _setup_merchant():
     register_shop_profile("weapons", "武器", [
         ("01452000", 10000), ("01452002", 8000)])
     register_shop_profile("scrolls", "卷轴", [
-        ("02340000", 150), ("02340002", 200), ("02340001", 100)])
+        ("02043001", 50000), ("02043003", 200000), ("02043005", 150000)])
 
 
 _setup_merchant()
@@ -96,15 +96,15 @@ def test_buy_price_script_overrides_fallback():
 
 def test_buy_price_falls_back_to_wz_when_no_script_price():
     """未定脚本价 → 回退 WZ/兜底；两处都有缺省则回 None。"""
-    register_shop_profile("scrolls", "卷轴", [("02340000", 150)])
-    assert buy_price("scrolls", "02340000") == 150
+    register_shop_profile("scrolls", "卷轴", [("02043001", 50000)])
+    assert buy_price("scrolls", "02043001") == 50000
     # 脚本未定价、且无 WZ/兜底表的物品 → 回 None
     assert buy_price("scrolls", "02000004") is None
 
 
 def test_item_price_fallback_for_scrolls():
-    """自制卷轴无 WZ price → 回退兜底表。"""
-    assert item_price("02340000", assets=None) == settings.FALLBACK_PRICES["02340000"]
+    """官方卷轴 WZ price 缺失时 → 回退兜底表。"""
+    assert item_price("02043001", assets=None) == settings.FALLBACK_PRICES["02043001"]
 
 
 def test_item_price_etc_by_tier():

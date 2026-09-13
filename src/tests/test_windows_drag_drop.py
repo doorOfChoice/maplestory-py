@@ -245,10 +245,10 @@ def test_toggle_inventory_pair_opens_both_and_closing_cancels_drag():
 # ── 卷轴双击：_apply_scroll 全量流程（combat.meso 结算）─────────────
 def test_double_click_scroll_charges_meso_and_burns_tuc():
     player = make_player()
-    weapon = Item(id="1302000", name="短弓", kind="equip",
+    weapon = Item(id="1302000", name="木剑", kind="equip",
                   info={"islot": "WpSi"}, tuc=3)
     player.inventory.equipped["weapon"] = weapon
-    player.inventory.add(Item(id="02340000", name="武器攻击力卷轴 60%",
+    player.inventory.add(Item(id="02043001", name="单手剑攻击卷轴 60%",
                               count=2, kind="consume", info={"spec": {}}))
     mgr, inv, equip = build(player)
     open_pair(mgr, inv, equip)
@@ -256,7 +256,7 @@ def test_double_click_scroll_charges_meso_and_burns_tuc():
     for _ in range(2):
         press(mgr, cell.center)
         release(mgr, cell.center)
-    assert player.inventory.consumes["02340000"].count == 1
+    assert player.inventory.consumes["02043001"].count == 1
     assert weapon.tuc == 2                      # 成功/失败都扣一次次数
     assert mgr.last_toast() is not None and "强化" in mgr.last_toast()
     combat = mgr.svc.combat
@@ -311,18 +311,67 @@ def test_double_click_return_scroll_warps_and_consumes():
     assert "02030000" not in player.inventory.consumes
 
 
-# ── 卷轴图标：WZ 无 234 段素材时自绘兜底 ───────────────────────────
+# ── 拖拽卷轴到目标装备强化（纸娃娃槽 / 背包装备页）─────────────────
+def test_drag_scroll_onto_equipped_slot_upgrades():
+    """从消耗页拖卷轴放到纸娃娃武器槽：扣次数、扣卷轴、刷新属性。"""
+    player = make_player()
+    weapon = Item(id="01302000", name="木剑", kind="equip",
+                  info={"islot": "WpSi"}, tuc=3)
+    player.inventory.equipped["weapon"] = weapon
+    player.inventory.add(Item(id="02043001", name="单手剑攻击卷轴 60%",
+                              count=2, kind="consume", info={"spec": {}}))
+    for i in range(40):                       # fallback 装备窗高度随背包行数增长，
+        player.inventory.add(potion(item_id=str(2000001 + i), name=f"药{i}"))
+    mgr, inv, equip = build(player)
+    open_pair(mgr, inv, equip)
+    scroll_cell = inv._cell_rects[0][0]
+    slot_rect = next(r for r, s in equip._slot_rects if s == "weapon")
+    assert press(mgr, scroll_cell.center)
+    assert motion(mgr, slot_rect.center)
+    assert release(mgr, slot_rect.center)
+    assert weapon.tuc == 2
+    assert player.inventory.consumes["02043001"].count == 1
+    assert len(player.refresh_calls) == 1
+    assert mgr.last_toast() is not None and "强化" in mgr.last_toast()
+
+
+def test_drag_scroll_hover_tab_switches_then_upgrades_bag_item():
+    """悬停装备页签自动切页，再放到背包里的装备上也能强化。"""
+    player = make_player()
+    bag_weapon = Item(id="01302000", name="木剑", kind="equip",
+                      info={"islot": "WpSi"}, tuc=3)
+    player.inventory.add(bag_weapon)
+    player.inventory.add(Item(id="02043001", name="单手剑攻击卷轴 60%",
+                              count=2, kind="consume", info={"spec": {}}))
+    mgr, inv, equip = build(player)
+    open_pair(mgr, inv, equip)
+    scroll_cell = inv._cell_rects[0][0]
+    tab_rect = next(r for r, key in inv._tab_rects if key == "equip")
+    assert press(mgr, scroll_cell.center)
+    assert motion(mgr, tab_rect.center)          # 拖拽中悬停装备页签 → 切页
+    assert inv.tab == "equip"
+    draw_once(mgr)                              # 重建装备页格子热区
+    assert inv._cell_rects[0][1] == "equip"
+    cell = inv._cell_rects[0][0]
+    motion(mgr, cell.center)
+    assert release(mgr, cell.center)
+    assert bag_weapon.tuc == 2
+    assert player.inventory.consumes["02043001"].count == 1
+    assert len(player.refresh_calls) == 1
+
+
+# ── 卷轴图标：WZ 无图时自绘兜底 ────────────────────────────────────
 def test_scroll_cell_falls_back_to_drawn_icon():
-    """FakeAssets 无图标：234 段卷轴仍拿到自绘 Surface，其余物品保持 None。"""
+    """FakeAssets 无图标：登记卷轴仍拿到自绘 Surface，其余物品保持 None。"""
     from game.render.windows.inventory import _icon_of
     player = make_player()
-    player.inventory.add(Item(id="02340000", name="武器攻击力卷轴 60%",
+    player.inventory.add(Item(id="02043001", name="单手剑攻击卷轴 60%",
                               count=1, kind="consume", info={"spec": {}}))
     player.inventory.add(potion())
     mgr, inv, equip = build(player)
     open_pair(mgr, inv, equip)
     svc = inv.svc
-    scroll = player.inventory.consumes["02340000"]
+    scroll = player.inventory.consumes["02043001"]
     potion_item = player.inventory.consumes["2000000"]
     assert _icon_of(svc, scroll) is not None
     assert _icon_of(svc, potion_item) is None

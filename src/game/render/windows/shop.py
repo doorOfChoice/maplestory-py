@@ -26,7 +26,8 @@ from game.render.windows.core.widgets import (ellipsize, draw_menu_bg,
 from game.render.windows.core.window import DOUBLE_CLICK_TIME, DragPickup, Window
 from game.systems import shop as shop_mod
 from game.systems.inventory import Item, item_kind, make_item
-from game.systems.scrolls import SCROLLS, is_scroll_id
+from game.systems.scrolls import is_scroll_id, scroll_info_of, scroll_stats, \
+    scroll_name
 
 # ── 原版 Shop/backgrnd 几何（由 UI.wz 底图逐像素实测）────────────────
 BG_PANEL_W, BG_PANEL_H = 463, 339
@@ -154,18 +155,21 @@ class ShopWindow(Window):
         return max(1, (PANEL_H - TITLE_H - TAB_H - 22 - BOTTOM_H) // ROW_H)
 
     def _item_name(self, item_id: str) -> str:
+        name = self.svc.assets.item_name(item_id)
+        if name:
+            return name
         if is_scroll_id(item_id):
-            sc = SCROLLS.get(item_id)
-            if sc:
-                return sc["name"]
-        return self.svc.assets.item_name(item_id) or f"物品 {item_id}"
+            return scroll_name(item_id) or f"物品 {item_id}"
+        return f"物品 {item_id}"
 
     def _icon(self, item_id: str) -> Optional[pygame.Surface]:
-        if is_scroll_id(item_id):
-            return scroll_icon()
         if item_kind(item_id) == "equip":
-            return self.svc.assets.equip_icon(item_id)
-        return self.svc.assets.item_icon(item_id)
+            icon = self.svc.assets.equip_icon(item_id)
+        else:
+            icon = self.svc.assets.item_icon(item_id)
+        if icon is None and is_scroll_id(item_id):    # WZ 无图兜底
+            icon = scroll_icon()
+        return icon
 
     # ── 交互 ───────────────────────────────────────────────────────
     def _rows(self) -> int:
@@ -465,8 +469,7 @@ class ShopWindow(Window):
 
     def _buy_n(self, player, combat, item_id: str, price: int, count: int) -> None:
         def make_fn(iid: str, n: int) -> Item:
-            name = SCROLLS.get(iid, {}).get("name") if is_scroll_id(iid) else None
-            return make_item(iid, self.svc.assets, n, name=name)
+            return make_item(iid, self.svc.assets, n)
 
         cost = price * count
         if combat.meso < cost:        # 失败原因拆分：赚钱 vs 清包，处置完全不同
@@ -551,9 +554,8 @@ class ShopWindow(Window):
         title = name or self._item_name(item_id)
         lines = [title + (f" ×{count}" if count > 1 else "")]
         if is_scroll_id(item_id):
-            sc = SCROLLS.get(item_id)
-            if sc:
-                lines.append(f"成功率 {sc['rate']}% · 双击对当前武器强化")
+            rate, _ = scroll_stats(scroll_info_of(self.svc.assets, item_id))
+            lines.append(f"成功率 {rate}% · 双击强化已穿装备 / 拖到目标装备上")
         desc = _asset_desc(self.svc, item_id)
         if desc:
             lines.append(desc)

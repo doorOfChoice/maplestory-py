@@ -443,6 +443,7 @@ class Monster:
                 "magic": magic,
                 "x": self.x, "y": self.cy - 30,
                 "id": self.mob_id,
+                "source": self,          # 魔法反击需要回到攻击来源
                 "status_attacks": self._cast_status_attacks(),
             })
             self.attack_cooldown = 0.8

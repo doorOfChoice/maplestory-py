@@ -26,10 +26,9 @@ def test_item_price_and_equip_tuc_readable():
         assert assets.item_price("02000000") == 25
         assert assets.item_price("02000003") == 100
         assert assets.item_price("01452000") == 10000
-        # 自制卷轴无 WZ price → assets 返回 None，shop 兜底表生效
-        assert assets.item_price("02340000") is None
-        assert shop_mod.item_price("02340000", assets) == \
-            settings.FALLBACK_PRICES["02340000"]
+        # 官方卷轴 WZ info.price 恒为 1（真实价格由商店脚本定）
+        assert assets.item_price("02043001") == 1
+        assert shop_mod.item_price("02043001", assets) == 1
         # 装备 tuc（可强化次数）字段可读
         ei = assets.equip_info("01452000") or {}
         assert int(ei.get("tuc") or 0) > 0

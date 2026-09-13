@@ -29,7 +29,8 @@ from game.render.windows.core.manager import WindowManager
 from game.render.windows.core.services import WindowServices
 from game.render.windows.core.window import DragPickup, Window
 from game.systems.inventory import Inventory, Item, SLOT_ORDER
-from game.systems.scrolls import SCROLLS, apply_scroll, is_scroll_id
+from game.systems.scrolls import SCROLLS, apply_scroll, is_scroll_id, \
+    scroll_info_of, scroll_stats
 
 CELL = 38          # 旧自绘面板用（fallback）
 PAD = 10
@@ -84,11 +85,13 @@ def _tab_items(inv: Inventory, tab: str) -> List[Item]:
 
 
 def _icon_of(svc: WindowServices, item: Item) -> Optional[pygame.Surface]:
-    if is_scroll_id(item.id):    # 234 段自制卷轴：WZ 同段是「祝福卷轴」，用自绘图标
-        return widgets.scroll_icon()
     if item.kind == "equip":
-        return svc.assets.equip_icon(item.id)
-    return svc.assets.item_icon(item.id)
+        icon = svc.assets.equip_icon(item.id)
+    else:
+        icon = svc.assets.item_icon(item.id)
+    if icon is None and is_scroll_id(item.id):    # WZ 无图兜底：自绘卷轴
+        icon = widgets.scroll_icon()
+    return icon
 
 
 def _blit_icon(surface, icon: pygame.Surface, cell: pygame.Rect,
@@ -124,7 +127,8 @@ def _elixir_tip(spec: dict) -> str:
     return " ".join(parts) + span
 
 
-def _item_tip(item: Item, desc: str = "") -> str:
+def _item_tip(item: Item, desc: str = "",
+              scroll_rate: Optional[int] = None) -> str:
     """消耗品 / 其他物品悬停提示文本；desc 为 String.wz 介绍。"""
     lines = [item.name]
     if item.kind == "consume":
@@ -138,10 +142,9 @@ def _item_tip(item: Item, desc: str = "") -> str:
         elif spec.get("mpR"):
             lines.append(f"恢复 MP {spec['mpR']}%")
         if is_scroll_id(item.id):
-            sc = SCROLLS.get(item.id)
-            if sc:
-                lines.append(f"{sc['name']} 成功率 {sc['rate']}%")
-            lines.append("双击对当前武器强化")
+            if scroll_rate is not None:
+                lines.append(f"成功率 {scroll_rate}%")
+            lines.append("双击强化已穿装备 / 拖到目标装备上")
         elif consumables.is_return_scroll(spec):
             lines.append("双击返回城镇")
         elif consumables.is_elixir(spec):
@@ -191,7 +194,10 @@ def _tip_payload(svc: WindowServices, item: Item):
         if diff:
             lines.append(diff)
         return tip_with_note(tip, "\n".join(lines))
-    return _item_tip(item, desc)
+    scroll_rate = None
+    if is_scroll_id(item.id):
+        scroll_rate, _ = scroll_stats(scroll_info_of(svc.assets, item.id))
+    return _item_tip(item, desc, scroll_rate=scroll_rate)
 
 
 def _meso_of(svc: WindowServices) -> int:
@@ -200,6 +206,38 @@ def _meso_of(svc: WindowServices) -> int:
     if combat is None or combat.meso is None:
         return 0
     return int(combat.meso)
+
+
+def _cast_scroll(svc: WindowServices, player, scroll_item: Item,
+                 target: Optional[Item]) -> None:
+    """对目标装备施放一张卷轴：校验 → 扣费 → roll → 扣卷轴 → 刷新属性。
+
+    双击（目标 = 当前已穿对应栏位）与拖拽（目标 = 落点装备）共用；
+    target 为 None 时只提示、不扣任何东西。
+    """
+    scroll = SCROLLS.get(scroll_item.id)
+    if scroll is None:
+        svc.flash("无法使用的卷轴")
+        return
+    if target is None:
+        svc.flash("请把卷轴拖到要强化的装备上")
+        return
+    combat = svc.combat
+    meso = combat.meso if combat is not None and combat.meso is not None else 0
+    info = scroll_info_of(svc.assets, scroll_item.id)
+    result = apply_scroll(scroll, target, random.Random(),
+                          level=player.level, meso=meso, info=info)
+    if result is None:
+        svc.flash("无法强化：栏位/武器不符或强化次数已用完")
+        return
+    if not result["charged"]:
+        svc.flash(result["msg"])
+        return
+    if combat is not None:
+        combat.meso = result["meso"]
+    player.inventory.use_consume(scroll_item.id)
+    player.refresh_equips()
+    svc.flash(result["msg"])
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -287,6 +325,9 @@ class InventoryWindow(Window):
         """从纸娃娃拖装备到背包 = 脱下回包（免双击，扔错窗口的安全出口）。"""
         if pk.kind != "item" or not self.rect.collidepoint(pos):
             return False
+        if is_scroll_id(pk.item.id):        # 卷轴落到背包：强化落点上的背包装备
+            self._drop_scroll(pk.item, pos)
+            return True
         src = pk.source
         if src and src[0] == "slot":
             player = self.svc.player()
@@ -299,6 +340,27 @@ class InventoryWindow(Window):
         if self._sort_rect is not None and self._sort_rect.collidepoint(pos):
             return True
         return False
+
+    def handle_drag_motion(self, pk: DragPickup, pos) -> bool:
+        """拖拽卷轴悬停页签自动切页：可从消耗页拖到装备页强化背包装备。"""
+        if pk.kind != "item" or not is_scroll_id(pk.item.id):
+            return False
+        for rect, key in self._tab_rects:
+            if rect.collidepoint(pos) and key != self.tab:
+                self.tab = key
+                return True
+        return False
+
+    def _drop_scroll(self, scroll_item: Item, pos) -> None:
+        """落点上的背包装备（仅装备页格）作为卷轴目标。"""
+        inv = self.svc.player().inventory
+        target: Optional[Item] = None
+        for cell, tab, idx in self._cell_rects:
+            if cell.collidepoint(pos):
+                if tab == "equip" and 0 <= idx < len(inv.equips):
+                    target = inv.equips[idx]
+                break
+        _cast_scroll(self.svc, self.svc.player(), scroll_item, target)
 
     # ── 双击：使用消耗品 / 穿戴装备（含门控与卷轴流程）─────────────
     def _click_cell(self, tab: str, idx: int) -> None:
@@ -329,7 +391,7 @@ class InventoryWindow(Window):
                     self.svc.flash("装备栏已满")
 
     def _apply_scroll(self, scroll_item: Item, player) -> None:
-        """双击卷轴：对当前武器使用（扣强化费，成功/失败各耗一次次数）。"""
+        """双击卷轴：对当前已穿的对应栏位装备施放（拖拽路径见 handle_drop）。"""
         scroll = SCROLLS.get(scroll_item.id)
         if scroll is None:
             self.svc.flash("无法使用的卷轴")
@@ -338,21 +400,7 @@ class InventoryWindow(Window):
         if target is None:
             self.svc.flash("请先装备目标装备")
             return
-        combat = self.svc.combat
-        meso = combat.meso if combat is not None else 0
-        result = apply_scroll(scroll, target, random.Random(),
-                              level=player.level, meso=meso)
-        if result is None:
-            self.svc.flash("无法强化：栏位不符或强化次数已用完")
-            return
-        if not result["charged"]:
-            self.svc.flash(result["msg"])
-            return
-        if combat is not None:
-            combat.meso = result["meso"]
-        player.inventory.use_consume(scroll_item.id)
-        player.refresh_equips()
-        self.svc.flash(result["msg"])
+        _cast_scroll(self.svc, player, scroll_item, target)
 
     # ── 绘制 ───────────────────────────────────────────────────────
     def draw(self, surface) -> None:
@@ -559,6 +607,14 @@ class EquipWindow(Window):
         if pk.kind != "item" or not self.rect.collidepoint(pos):
             return False
         item = pk.item
+        if is_scroll_id(item.id):          # 卷轴落到纸娃娃：强化落点槽位的已穿装备
+            target: Optional[Item] = None
+            for cell, slot in self._slot_rects:
+                if cell.collidepoint(pos):
+                    target = self.svc.player().inventory.equipped.get(slot)
+                    break
+            _cast_scroll(self.svc, self.svc.player(), item, target)
+            return True
         if getattr(item, "kind", "") != "equip":
             self.svc.flash("只有装备能拖到装备栏")
             return True
