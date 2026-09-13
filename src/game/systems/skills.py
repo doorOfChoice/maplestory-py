@@ -10,8 +10,10 @@
   快捷键永不自动分配：只有玩家把技能拖到键格上（assign_skill_to_key）才上键。
   技能数据全部来自官方 Skill.wz，伤害倍率 = level.damage / 100，
   冷却取 level.cooltime（秒），多段技取 level.attackCount。
-  施放形态（弹道/瞬发/AOE/buff/怪状态）由 WZ 顶层节点结构推导（见 cast_form），
-  只有字段语义（x/y 含义、状态种类）留给 core.skill_effects 的逐技能表。
+· 施放形态（交付方式）与效果载荷由分面模型统一表达：core.skill_semantics 按
+  WZ 顶层节点 + level 字段推导交付方式（kind），并产出效果子句列表
+  （core.skill_spec：Damage/Buff/Debuff/Heal/Summon/Field/Move/Proc/Cleanse…）。
+  新增技能默认零改动；只有 x/y/prop/damage 等同名字段不同义时才进声明式例外表。
   被动/buff 的 WZ 字段语义差异由 core.skill_effects 统一翻译（见该模块）。
 """
 
@@ -20,7 +22,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from game import settings
-from game.core import skill_effects
+from game.core import skill_effects, skill_semantics, skill_spec
 from game.core.jobs import (job_chain, job_sp_group, resolve_skill_img,
                             skill_ids_for_chain, sp_group_of_skill)
 from game.core.keybindings import SKILL_SLOT_COUNT
@@ -67,7 +69,10 @@ class SkillDef:
                  repeat: bool = False, has_ball: bool = False,
                  has_hit: bool = False, has_mob_icon: bool = False,
                  action: str = "", helps: Optional[Dict[int, str]] = None,
-                 element: str = ""):
+                 element: str = "", has_summon: bool = False,
+                 has_keydown: bool = False, has_tile: bool = False,
+                 has_affected: bool = False, has_state: bool = False,
+                 skill_type: int = 0, master_level: int = 0):
         self.id = skill_id
         self.name = name
         self.desc = desc
@@ -83,6 +88,19 @@ class SkillDef:
         self.action = action                # WZ action 节点：官方施法动作名
         self.element = element              # WZ elemAttr：技能元素字母（f/i/l/s/h/d）
         self.helps = dict(helps) if helps else {}   # 级别 → WZ 逐级说明（hs→String.wz hN）
+        # ── 分面模型的 WZ 结构标记（交付方式推导用）──────────────────
+        self.has_summon = has_summon        # WZ 带 summon 节点：召唤物
+        self.has_keydown = has_keydown      # WZ 带 keydown 节点：引导通道技
+        self.has_tile = has_tile            # WZ 带 tile 节点：地面/持续区域
+        self.has_affected = has_affected    # WZ 带 affected 节点：团队/范围增益
+        self.has_state = has_state          # WZ 带 state 节点：斗气等状态
+        self.skill_type = skill_type        # WZ skillType：1 熟练 2 攻速 3 终极
+        self.master_level = master_level    # WZ masterLevel：原版满级上限
+
+    @property
+    def spec(self) -> "skill_spec.SkillSpec":
+        """该技能的分面描述（交付/代价/效果子句）。惰性构造，不缓存等级表。"""
+        return skill_semantics.build_spec(self)
 
     def lv(self, level: int) -> dict:
         """第 level 级数值表（越界取最高级）。"""
@@ -105,72 +123,17 @@ class SkillDef:
 
 
 def skill_buff_seconds(d: "SkillDef", level: int) -> float:
-    """技能若为纯 buff（非攻击）则返回其持续秒数，否则 0.0。
-
-    关键区分：多个攻击技能的 level 表也带 time（冰冻术冻结时长、烈火箭燃烧 DoT、
-    引信），若仅凭 time 判定会被误当 buff 吞掉、不触发攻击。故再看 WZ 是否带
-    hit 节点（攻击技），或 damage/mobCount/range/bulletCount/attackCount 任一
-    > 0，任一成立即视为攻击技能。
-    """
-    seconds = d.stat(level, "time", 0) if level > 0 else 0
-    if seconds <= 0:
-        return 0.0
-    if getattr(d, "has_hit", False):
-        return 0.0
-    if any(d.stat(level, key, 0) > 0
-           for key in ("damage", "mobCount", "range", "bulletCount",
-                       "attackCount")):
-        return 0.0
-    return float(seconds)
-
-
-def _offensive(d: "SkillDef", level: int) -> bool:
-    """该级数值表是否含伤害标记（魔法 mad 或物理 damage）。"""
-    return d.stat(level, "mad", 0) > 0 or d.stat(level, "damage", 0) > 0
-
-
-def _has_area(d: "SkillDef", level: int) -> bool:
-    """该级数值表是否带 WZ lt/rb 攻击矩形。"""
-    table = d.lv(level)
-    return table.get("lt") is not None and table.get("rb") is not None
+    """纯 buff 持续秒数（非攻击才 >0）；实现见 core.skill_semantics。"""
+    return skill_semantics.skill_buff_seconds(d, level)
 
 
 def cast_form(d: "SkillDef", level: int) -> str:
-    """按 WZ 结构推导技能的施放形态（不再散落技能 id 硬编码）。
+    """技能交付方式（分面模型 kind）；实现见 core.skill_semantics.delivery。
 
-    判定优先级由「WZ 顶层节点 + level 字段」共同决定：
-    · passive    —— 已登记被动（skill_effects 语义表，结构无法判定），不可落键
-    · heal       —— 已登记治愈技（群体治愈），回血 + 对不死系伤害，非普通攻击
-    · teleport   —— 已登记瞬移技（快速移动），按方向键位移，非攻击
-    · buff       —— 有 time 且无攻击属性（魔法盾/精神力/无形箭…），扣消耗直接上 buff
-    · projectile —— 有 ball 节点（魔法弹/火焰箭/圣箭术…），生成弹道
-    · instant    —— 有 hit 或带伤害标记（魔法双击/冰冻术/武器攻击），瞬发命中
-    · aoe        —— instant 且带 lt/rb（雷电术/箭雨），按自身矩形结算
-    · mob_status —— 有 mob 节点且无伤害（缓速术/击退箭），对怪上状态无伤害
-    · unsupported—— 无任何施放标记（仅有 range/time 等无法独立成形的字段），暂不可施放
+    返回 skill_spec.DELIVERY_KINDS 之一：passive/heal/teleport/buff/projectile/
+    instant/aoe/mob_status/summon/field/channel/aura/move/unsupported。
     """
-    if level <= 0:
-        level = 1
-    sid = d.id
-    if sid == settings.SNAIL_THROW_SKILL_ID:
-        return "projectile"                     # 蜗牛投掷：借怪物贴图发射弹道
-    if skill_effects.is_passive(sid):
-        return "passive"
-    if sid in skill_effects.HEAL_SKILLS:
-        return "heal"
-    if sid in skill_effects.TELEPORT_SKILLS:
-        return "teleport"
-    if skill_buff_seconds(d, level) > 0:
-        return "buff"
-    if d.has_ball:
-        return "projectile"
-    if d.has_hit:
-        return "aoe" if _has_area(d, level) else "instant"
-    if d.has_mob_icon and not _offensive(d, level):
-        return "mob_status"
-    if _offensive(d, level):
-        return "instant"
-    return "unsupported"
+    return skill_semantics.delivery(d, level)
 
 
 def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
@@ -238,6 +201,26 @@ def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
                 has_ball = node.get("ball") is not None
                 has_hit = node.get("hit") is not None
                 has_mob_icon = node.get("mob") is not None
+                # 分面模型结构标记：召唤 / 引导 / 地面 / 团体增益 / 状态
+                has_summon = node.get("summon") is not None
+                has_keydown = node.get("keydown") is not None
+                has_tile = node.get("tile") is not None
+                has_affected = node.get("affected") is not None
+                has_state = node.get("state") is not None
+                skill_type = 0
+                st_node = node.get("skillType")
+                if st_node is not None:
+                    try:
+                        skill_type = int(getattr(st_node, "value", 0))
+                    except (TypeError, ValueError):
+                        skill_type = 0
+                master_level = 0
+                ml_node = node.get("masterLevel")
+                if ml_node is not None:
+                    try:
+                        master_level = int(getattr(ml_node, "value", 0))
+                    except (TypeError, ValueError):
+                        master_level = 0
                 action = ""
                 act_node = node.get("action/0")
                 if act_node is not None:
@@ -261,6 +244,10 @@ def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
                             if hc.name[:1] == "h" and hc.name[1:].isdigit():
                                 help_by_key[hc.name] = to_simplified(str(hc.value))
                 max_lv = min(len(levels), settings.SKILL_MAX_LEVEL)
+                # masterLevel 为原版该技能的真实满级上限（四转技常为 10/20），
+                # 有值时优先取较小者；缺省（None/0）时沿用 level 表长度。
+                if master_level > 0:
+                    max_lv = min(max_lv, master_level)
                 helps: Dict[int, str] = {}
                 for i, lvtab in enumerate(levels[:max_lv]):
                     hs_key = lvtab.get("hs")
@@ -271,7 +258,14 @@ def load_skill_defs(assets, skill_ids: List[str]) -> Dict[str, SkillDef]:
                                      invisible=invisible, repeat=repeat,
                                      has_ball=has_ball, has_hit=has_hit,
                                      has_mob_icon=has_mob_icon, action=action,
-                                     helps=helps, element=element)
+                                     helps=helps, element=element,
+                                     has_summon=has_summon,
+                                     has_keydown=has_keydown,
+                                     has_tile=has_tile,
+                                     has_affected=has_affected,
+                                     has_state=has_state,
+                                     skill_type=skill_type,
+                                     master_level=master_level)
     except Exception:
         pass
     return defs
@@ -396,26 +390,41 @@ class SkillBook:
     def passive_mods(self) -> Dict[str, int]:
         """已学被动技能的聚合属性修正（跨转累加、确定性）。
 
-        收集两类：转职附赠被动（_passive_ids）与花 SP 学会的被动类型技能
-        （skill_effects.is_passive）。逐技能语义映射见 core/skill_effects。
+        收集两类：转职附赠被动（_passive_ids）与花 SP 学会的被动类型技能。
+        被动识别走 core.skill_semantics.is_passive（登记 + skillType + 结构默认），
+        逐技能语义映射走 skill_semantics.passive_mods（含 skillType=1 熟练度默认）。
         多数词条各来源求和；crit_mult（暴伤 %）取最强来源（避免多被动互相覆盖）。
         player.total_stats / attack_value / defense_value / crit_rate 等读取本表。
         """
         ids = set(self._passive_ids)
-        ids.update(sid for sid in self.levels if skill_effects.is_passive(sid))
+        for sid, lv in self.levels.items():
+            d = self.defs.get(sid)
+            if lv > 0 and d is not None and skill_semantics.is_passive(d):
+                ids.add(sid)
         mods: Dict[str, int] = {}
         for pid in sorted(ids):
             d = self.defs.get(pid)
             lv = self.levels.get(pid, 0)
             if d is None or lv <= 0:
                 continue
-            stat = lambda key, d=d, lv=lv: d.stat(lv, key, 0)
-            for key, value in skill_effects.passive_mods(pid, stat).items():
+            for key, value in skill_semantics.passive_mods(d, lv).items():
                 if key == "crit_mult":
                     mods[key] = max(mods.get(key, 0), value)
                 else:
                     mods[key] = mods.get(key, 0) + value
         return mods
+
+    def combat_procs(self) -> List["skill_spec.Proc"]:
+        """已学被动产出的触发式 Proc 子句（终极追击/暴击/必杀），供战斗触发。"""
+        out: List["skill_spec.Proc"] = []
+        for sid, lv in self.levels.items():
+            d = self.defs.get(sid)
+            if d is None or lv <= 0 or not skill_semantics.is_passive(d):
+                continue
+            for e in skill_semantics.effects(d, lv):
+                if isinstance(e, skill_spec.Proc):
+                    out.append(e)
+        return out
 
     def on_advance(self, jobdef) -> None:
         """转职：附赠 SP 进本职业组池、附赠被动满级（累加进 passive）。不自动上键。"""
@@ -437,8 +446,10 @@ class SkillBook:
 
     # ── 施放 ───────────────────────────────────────────────────────
     def cast(self, skill_id: str, player_level: int) -> Optional[dict]:
-        """校验并返回施放数据（消耗 + 倍率 + 弹道参数），失败返回 None。
+        """校验并返回施放数据（消耗 + 倍率 + 弹道参数 + 效果子句），失败返回 None。
 
+        数据由 SkillSpec 的效果子句驱动（core.skill_semantics 解析），
+        同时保留旧字段键以兼容既有战斗/世界/UI 消费方。
         无副作用：不写冷却。确认出手成功后由调用方 start_cooldown。
         """
         d = self.defs.get(skill_id)
@@ -449,74 +460,122 @@ class SkillBook:
             return None
         if self.cooldowns.get(skill_id, 0.0) > 0.0:
             return None
-        form = cast_form(d, lv)
+        spec = d.spec
+        form = spec.kind
         if form in ("passive", "unsupported"):
             return None
-        # 魔法攻击技：该级有 mad 加成且形态为攻击/弹道（buff 的 time 是持续、
-        # mob_status 的 time 是状态时长，均不参与魔法区间）。
-        # 这类技能 WZ 无 damage 倍率，伤害由玩家魔法区间（含 skill_mad/mastery）决定。
-        magic = (form in ("projectile", "instant", "aoe")
-                 and d.stat(lv, "mad", 0) > 0)
+        effects = spec.effects_at(lv)
+        dmg = next((e for e in effects if isinstance(e, skill_spec.Damage)),
+                   None)
+        buff = next((e for e in effects if isinstance(e, skill_spec.Buff)), None)
+        debuff = next((e for e in effects if isinstance(e, skill_spec.Debuff)),
+                      None)
+        heal = next((e for e in effects if isinstance(e, skill_spec.Heal)), None)
+        summon = next((e for e in effects if isinstance(e, skill_spec.Summon)),
+                      None)
+        field = next((e for e in effects if isinstance(e, skill_spec.Field)),
+                     None)
+        cleanse = next((e for e in effects if isinstance(e, skill_spec.Cleanse)),
+                       None)
+        morph = next((e for e in effects if isinstance(e, skill_spec.Morph)),
+                     None)
+        move = next((e for e in effects if isinstance(e, skill_spec.Move)), None)
+        magic = dmg.magic if dmg is not None else False
         data = {
             "id": skill_id,
             "def": d,
+            "spec": spec,                        # 分面描述（交付/效果子句）
+            "effects": effects,                  # 效果子句列表（新消费方直接读）
             "level": lv,
-            # 施放形态：由 WZ 顶层节点推导（见 cast_form），供战斗/世界分派
-            "form": form,                        # buff/projectile/instant/aoe/mob_status
+            # 交付方式（见 skill_spec.DELIVERY_KINDS）
+            "form": form,
             "mp_con": d.stat(lv, "mpCon", 0),
             "hp_con": d.stat(lv, "hpCon", 0),
-            "damage": d.stat(lv, "damage", 100) / 100.0,
+            "damage": dmg.mult if dmg is not None
+            else d.stat(lv, "damage", 100) / 100.0,
             "range": d.stat(lv, "range", 0),          # 0 = 默认普攻范围
-            "mob_count": d.stat(lv, "mobCount", 1),
-            "bullet_count": max(1, d.stat(lv, "bulletCount", 1)),
-            "attack_count": max(1, d.stat(lv, "attackCount", 1)),
+            "mob_count": dmg.max_targets if dmg is not None
+            else d.stat(lv, "mobCount", 1),
+            "bullet_count": dmg.shots if dmg is not None
+            else max(1, d.stat(lv, "bulletCount", 1)),
+            "attack_count": dmg.hits if dmg is not None
+            else max(1, d.stat(lv, "attackCount", 1)),
             # WZ 官方冷却字段为 cooltime（秒）；换算成毫秒供 start_cooldown 统一处理
             "cooldown_ms": d.stat(lv, "cooltime", 0) * 1000,
             "repeat": d.repeat,                  # 通道技：按住可连发
             "action": d.action,                  # WZ action：官方施法动作名
             "magic": magic,                      # 魔法伤害走 mdd 与魔法区间
-            "element": d.element,                # WZ elemAttr：属性克制元素字母
-            "skill_mad": d.stat(lv, "mad", 0),
-            "skill_mastery": d.stat(lv, "mastery", 0),
-            # WZ lt/rb 矩形（相对 navel）：AOE 自身范围 / mob_status debuff 范围
-            "area": None,
-            "status": None,                      # mob_status 的状态键（slow/freeze…）
+            "element": dmg.element if dmg is not None else d.element,
+            "skill_mad": dmg.skill_mad if dmg is not None
+            else d.stat(lv, "mad", 0),
+            "skill_mastery": dmg.mastery if dmg is not None
+            else d.stat(lv, "mastery", 0),
+            "drain_pct": dmg.drain_pct if dmg is not None else 0,
+            "area": None,                        # WZ lt/rb 矩形（相对 navel）
+            "status": None,                      # 对怪状态键（slow/freeze…）
             "freeze": 0.0,                       # 命中冻结秒数（冰冻术）
             "poison_prop": 0,                    # 中毒概率 %（毒雾术）
             "poison_time": 0.0,                  # 中毒持续秒数（毒雾术）
             "slow_x": 0,                          # 减速幅度（% 负值，缓速术）
-            "duration": 0.0,                      # debuff 持续秒数
+            "duration": 0.0,                      # debuff / buff 持续秒数
             "heal_pct": 0,                        # 治愈恢复率 %（群体治愈）
         }
-        if form in ("aoe", "mob_status", "heal") and _has_area(d, lv):
-            data["area"] = (tuple(d.lv(lv)["lt"]), tuple(d.lv(lv)["rb"]))
-        if form == "mob_status":
-            data["status"] = skill_effects.DEBUFF_SKILLS.get(skill_id)
-            data["slow_x"] = d.stat(lv, "x", 0)
-            data["duration"] = float(d.stat(lv, "time", 0))
-        elif form == "heal":
-            data["heal_pct"] = d.stat(lv, "hp", 0)     # 恢复率（%），对不死系同作伤害倍率
-        elif form == "teleport":
-            pass                                        # range 已在通用字段（瞬移距离）
-        elif form == "projectile":
+        for candidate in (dmg, heal, debuff, field):
+            area = getattr(candidate, "area", None)
+            if area is not None:
+                data["area"] = (tuple(area[0]), tuple(area[1]))
+                break
+        if debuff is not None and form == "mob_status":
+            data["status"] = debuff.status
+            data["slow_x"] = debuff.potency           # 兼容旧字段（减速幅度 %）
+            data["status_potency"] = debuff.potency   # 状态强度（随状态释义）
+            data["status_chance"] = debuff.chance
+            data["duration"] = debuff.duration
+        if heal is not None:
+            data["heal_pct"] = heal.pct     # 恢复率（%），对不死系同作伤害倍率
+        if form == "projectile":
             data["projectile"] = True                  # 弹道技：不进近战命中框
-            if skill_id == settings.SNAIL_THROW_SKILL_ID:
+            if skill_id in ("10001000", "0001000", "20001000"):
                 data["speed"] = settings.SNAIL_THROW_SPEED
                 data["life"] = settings.SNAIL_THROW_LIFETIME
             elif magic:
                 data["speed"] = settings.MAGIC_BALL_SPEED
                 data["life"] = settings.MAGIC_BALL_LIFETIME
-        elif magic:
+        elif magic and form in ("instant", "aoe", "channel"):
             # 无 ball 的魔法攻击（魔法双击/冰冻术/雷电术）：瞬发、无弹道。
-            # WZ 带 lt/rb 的按角色周围矩形结算（雷电术自身 AOE），否则命中瞄准扇形。
             data["cone_attack"] = True
-        if form in ("instant", "aoe", "projectile"):
-            status = skill_effects.ATTACK_STATUS.get(skill_id)
-            if status == "freeze":
-                data["freeze"] = float(d.stat(lv, "time", 0))
-            elif status == "poison":
-                data["poison_prop"] = d.stat(lv, "prop", 0)
-                data["poison_time"] = float(d.stat(lv, "time", 0))
+        if dmg is not None and dmg.status is not None:
+            status = dmg.status
+            # 通用字段：命中附带状态的种类/概率/时长/强度（消费方统一读）
+            data["attack_status"] = status.status
+            data["attack_status_chance"] = status.chance
+            data["attack_status_duration"] = status.duration
+            data["attack_status_potency"] = status.potency
+            if status.status == "freeze":
+                data["freeze"] = status.duration
+            elif status.status == "poison":
+                data["poison_prop"] = status.chance
+                data["poison_time"] = status.duration
+        if buff is not None:
+            data["buff"] = {"mods": dict(buff.mods), "duration": buff.duration,
+                            "party": buff.party}
+            data["duration"] = buff.duration
+        if summon is not None:
+            data["summon"] = {"template": summon.template,
+                              "duration": summon.duration,
+                              "attack": summon.attack,
+                              "interval": summon.interval}
+            data["duration"] = summon.duration
+        if field is not None:
+            data["field"] = {"area": data["area"], "duration": field.duration,
+                             "interval": field.interval}
+        if cleanse is not None:
+            data["cleanse"] = list(cleanse.kinds)
+        if morph is not None:
+            data["morph"] = {"form": morph.form, "duration": morph.duration}
+        if move is not None:
+            data["move_mode"] = move.mode
+            data["range"] = move.distance
         return data
 
     def start_cooldown(self, skill_id: str, cooldown_ms: int = 0) -> None:
@@ -579,8 +638,9 @@ def assign_skill_to_key(book: SkillBook, bindings, skill_id: str,
     被占键的让位由 KeyBindings.set 的顶替语义完成（占用者解绑）；未学 / 被动 /
     槽满 / Esc 一律拒绝且不留脏状态。
     """
+    d = book.defs.get(skill_id)
     if (skill_id not in book.levels or skill_id not in book.learnable()
-            or skill_effects.is_passive(skill_id)):
+            or (d is not None and skill_semantics.is_passive(d))):
         return False
     slot = next((k for k, v in book.hotkeys.items() if v == skill_id), None)
     if slot is None:

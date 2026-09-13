@@ -280,8 +280,8 @@ class UI:
         self._draw_key_buttons(surface, mouse, left_down, bx, by,
                                bar.get_width(), bar.get_height())
 
-        # 血条上方：生效中的 buff / 状态异常图标（灰蒙层表示剩余时间）
-        self._draw_effect_icons(surface, player, bx, by)
+        # 血条上方：生效中的 buff / 状态异常 / 召唤图标（灰蒙层表示剩余时间）
+        self._draw_effect_icons(surface, player, combat, bx, by)
 
         # 状态栏右上：技能 / 药水快捷栏（图标 + 键位 + 冷却遮罩 + 余量）
         self._draw_hotbar(surface, player, bindings, bx, by, bar.get_width())
@@ -358,11 +358,12 @@ class UI:
                                     rect.centery - secs.get_height() // 2))
             x0 += cell[0]
 
-    # ── buff / 状态异常图标条（血条上方）──────────────────────────
-    def _draw_effect_icons(self, surface, player, bx: int, by: int) -> None:
-        """绘制生效中的 buff/状态异常图标：剩余时间越少，灰蒙层从顶部渐涨。"""
+    # ── buff / 状态异常 / 召唤图标条（血条上方）────────────────────
+    def _draw_effect_icons(self, surface, player, combat, bx: int, by: int) -> None:
+        """绘制生效中的 buff/状态异常/召唤图标：剩余越少，灰蒙层从顶部渐涨。"""
         buffs = getattr(player, "buffs", None)
         statuses = getattr(player, "statuses", None)
+        summons = getattr(combat, "summons", None)
         rows: List[Tuple[object, Optional[pygame.Surface], Tuple[int, int, int]]] = []
         if buffs is not None:
             for b in buffs.active():
@@ -377,6 +378,11 @@ class UI:
                 color = colors.get(s.kind, (200, 200, 200))
                 s.name = labels.get(s.kind, "?")
                 rows.append((s, None, color))
+        if summons:
+            for s in summons:
+                icon = self.assets.skill_icon(s.skill_id) \
+                    or self.assets.item_icon(s.skill_id)
+                rows.append((s, icon, (255, 200, 120)))
         if not rows:
             return
         x = bx

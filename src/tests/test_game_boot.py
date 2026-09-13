@@ -155,6 +155,19 @@ def test_respawn_recovers_player(game):
     assert game.ctx.world.npcs is not None
 
 
+def test_respawn_clears_summons(game):
+    """重生清空召唤物，避免死亡后旧召唤残留继续攻击。"""
+    from game.systems.combat import Summon
+    _boot(game)
+    combat = game.ctx.world.combat
+    combat.summons.append(Summon("3111005", 0.0, 0.0, attack=1, duration=5.0,
+                                 interval=1.0, frames={}, facing_right=True))
+    game.dead = True
+    game.respawn()
+    assert combat.summons == []
+
+
+
 def _fake_npc(npc_id: str = "1012100") -> SimpleNamespace:
     return SimpleNamespace(
         npc_id=npc_id, name="赫丽娜",

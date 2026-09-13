@@ -189,6 +189,10 @@ SKILL_KEYDOWN_INTERVAL = 0.15    # 按住通道技（如暴風神射）两次补
 ATTACK_CANCEL_DELAY = 0.25       # 攻击起手后允许被下一击取消后摇的最短秒数
 SKILL_INPUT_BUFFER = 0.4         # 技能键在攻击锁定期内按下时的输入缓冲时长（秒）
 ATTACK_INPUT_BUFFER = 0.2        # 普攻键在后摇期间单点时的输入缓冲时长（秒）
+SUMMON_ATTACK_INTERVAL = 1.0     # 召唤物两次出手的默认间隔（秒，素材缺省时）
+SUMMON_ATTACK_RANGE = 260.0      # 召唤物选取攻击目标的半径（px）
+FIELD_TICK_INTERVAL = 1.0        # 地面区域效果的默认结算间隔（秒）
+ATTACK_STATUS_DEFAULT_DURATION = 1.0  # 控制状态（眩晕等）无 WZ time 时的默认时长（秒）
 
 # ── Buff / 状态异常（game/buffs.py）──────────────────────────────────
 CRIT_MULT = 1.5                  # 暴击伤害倍率

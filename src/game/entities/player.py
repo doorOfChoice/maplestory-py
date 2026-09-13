@@ -236,9 +236,16 @@ class Player:
     def _pure_buff_seconds(self, skill_data: dict) -> float:
         """技能若为纯 buff（非攻击）则返回其持续秒数，否则 0.0。
 
-        判定统一走 skills.skill_buff_seconds（单一事实来源），再用于区分
-        「扣消耗上 buff」与「进入攻击流程」。
+        分面模型下由交付方式（form=buff/aura）与 buff 子句决定；合成/旧式
+        skill_data 无 form 键时回退 skills.skill_buff_seconds（单一事实来源）。
         """
+        form = skill_data.get("form")
+        if form is not None:
+            if form not in ("buff", "aura"):
+                return 0.0
+            buff = skill_data.get("buff")
+            if buff is not None:
+                return float(buff.get("duration", 0.0))
         d = skill_data.get("def")
         if d is None:
             return 0.0
@@ -247,17 +254,24 @@ class Player:
     def _apply_buff_skill(self, skill_data: dict) -> bool:
         """纯 buff 技能接线：命中判定则上 buff 返回 True，否则 False。
 
-        mods 由 core.skill_effects 按 WZ 字段语义翻译（通用字段 + 逐技能覆盖），
-        平坦加值；未实装效果（如召唤/替身）会得到空 mods 但仍算施放成功。
+        mods 优先取 cast 的 buff 子句；旧式/合成数据回退 core.skill_effects
+        的逐技能语义（通用字段 + 覆盖表）。
         """
         seconds = self._pure_buff_seconds(skill_data)
         if seconds <= 0:
             return False
-        d = skill_data["def"]
-        lv = int(skill_data["level"])
-        mods = skill_effects.buff_mods(
-            str(skill_data["id"]), lambda key: d.stat(lv, key, 0))
-        self.buffs.apply(str(skill_data["id"]), d.name, seconds, mods)
+        d = skill_data.get("def")
+        buff = skill_data.get("buff")
+        if buff is not None:
+            mods = dict(buff.get("mods", {}))
+        elif d is not None:
+            lv = int(skill_data.get("level", 0))
+            mods = skill_effects.buff_mods(
+                str(skill_data["id"]), lambda key: d.stat(lv, key, 0))
+        else:
+            return False
+        name = d.name if d is not None else str(skill_data.get("id", ""))
+        self.buffs.apply(str(skill_data["id"]), name, seconds, mods)
         return True
 
     def defense_value(self, with_buffs: bool = True) -> int:

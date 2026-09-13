@@ -283,7 +283,18 @@ class World:
         # 攻击判定：远程/弹道技能起手一次性生成弹道（近战仍在首帧结算）
         if self.player.attacking:
             skill = self.player.pending_skill
-            if self.player.is_ranged() or (skill and skill.get("projectile")):
+            form = (skill or {}).get("form")
+            if form in ("summon", "field"):
+                if not self.player.attack_projectile_spawned:
+                    self.player.attack_projectile_spawned = True
+                    if form == "summon":
+                        self.combat.cast_summon(self.player, skill)
+                    else:
+                        self.combat.cast_field(self.player, skill)
+            elif form in ("mob_status", "heal"):
+                # 对怪状态/治愈无弹道：即使持弓也走本体命中判定
+                self.combat.player_attack(self.player, self.monsters)
+            elif self.player.is_ranged() or (skill and skill.get("projectile")):
                 if not self.player.attack_projectile_spawned:
                     self.player.attack_projectile_spawned = True
                     self.combat.spawn_arrows(self.player, self.player.pending_skill,
@@ -328,7 +339,7 @@ class World:
         for npc in self.npcs:
             npc.update(dt)
 
-        self.combat.update(dt, self.player)
+        self.combat.update(dt, self.player, self.monsters)
         self.camera.center_on(self.player.x, self.player.y)
         return None
 
@@ -345,12 +356,14 @@ class World:
             self.camera.x, self.camera.y,
             settings.VIEW_W, settings.VIEW_H, t_ms, front=False)
         self.assets_map_surface_blit(surface)
+        self.combat.draw_fields(surface, self.camera)
         self.draw_portals(surface)
         self.combat.draw(surface, self.camera)
         for npc in self.npcs:
             npc.draw(surface, self.camera, npc_marker(npc))
         for mob in self.monsters:
             mob.draw(surface, self.camera)
+        self.combat.draw_summons(surface, self.camera)
         if player_visible:
             self.player.draw(surface, self.camera)
         self.combat.draw_attracting(surface, self.camera)

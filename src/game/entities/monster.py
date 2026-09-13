@@ -135,6 +135,14 @@ class Monster:
         self.poison_timer = 0.0
         self.poison_pending = 0.0    # 本帧累积待结算的中毒伤害（世界层取走）
         self._poison_acc = 0.0
+        # 其余异常：眩晕/封印/诅咒/攻降/防降（按 WZ 技能族映射，见 apply_status）
+        self.stun_timer = 0.0
+        self.seal_timer = 0.0
+        self.curse_timer = 0.0
+        self.attack_down_timer = 0.0
+        self.attack_reduce = 0.0     # 出伤减免 %
+        self.def_down_timer = 0.0
+        self._base_pd = self.pd       # 原始物防（防降到期还原）
         self.dead = False
         self.remove_after = 0.0
         self._death_sound_played = False
@@ -249,6 +257,34 @@ class Monster:
             self.poison_dps = max(self.poison_dps, dps)
             self.poison_timer = max(self.poison_timer, seconds)
 
+    def apply_status(self, kind: str, duration: float,
+                     potency: float = 0.0) -> None:
+        """按状态键统一施加异常（技能 debuff 语义表的执行端）。
+
+        支持 slow/freeze/poison/stun/seal/curse/attack_down/def_down；
+        potency 含义随状态而异（减速幅度 %、防降 %、毒伤 dps…）。
+        """
+        if duration <= 0:
+            return
+        if kind == "slow":
+            self.apply_slow(max(0.0, 1.0 + potency / 100.0), duration)
+        elif kind == "freeze":
+            self.apply_freeze(duration)
+        elif kind == "poison":
+            self.apply_poison(max(1.0, potency), duration)
+        elif kind == "stun":
+            self.stun_timer = max(self.stun_timer, duration)
+        elif kind == "seal":
+            self.seal_timer = max(self.seal_timer, duration)
+        elif kind == "curse":
+            self.curse_timer = max(self.curse_timer, duration)
+        elif kind == "attack_down":
+            self.attack_down_timer = max(self.attack_down_timer, duration)
+            self.attack_reduce = max(self.attack_reduce, potency)
+        elif kind == "def_down":
+            self.def_down_timer = max(self.def_down_timer, duration)
+            self.pd = int(self._base_pd * (100 - min(90.0, potency)) / 100.0)
+
     def element_multiplier(self, skill_element) -> float:
         """技能元素对自身的伤害倍率（弱点 1.5 / 抵抗 0.5 / 免疫 0）。"""
         return elements.element_multiplier(self.elem, skill_element)
@@ -266,8 +302,8 @@ class Monster:
         return False
 
     def speed_now(self) -> float:
-        """当前有效移速：冻结为 0，减速按倍率缩放（含飞行怪）。"""
-        if self.frozen_timer > 0:
+        """当前有效移速：冻结/眩晕为 0，减速按倍率缩放（含飞行怪）。"""
+        if self.frozen_timer > 0 or self.stun_timer > 0:
             return 0.0
         return self.move_speed * self.slow_mult
 
@@ -306,6 +342,21 @@ class Monster:
                 self.slow_mult = 1.0
         if self.frozen_timer > 0:
             self.frozen_timer -= dt
+        # 眩晕/封印/攻降/防降倒计时（到期还原）
+        if self.stun_timer > 0:
+            self.stun_timer -= dt
+        if self.seal_timer > 0:
+            self.seal_timer -= dt
+        if self.curse_timer > 0:
+            self.curse_timer -= dt
+        if self.attack_down_timer > 0:
+            self.attack_down_timer -= dt
+            if self.attack_down_timer <= 0:
+                self.attack_reduce = 0.0
+        if self.def_down_timer > 0:
+            self.def_down_timer -= dt
+            if self.def_down_timer <= 0:
+                self.pd = self._base_pd
         # 中毒：按 POISON_TICK 结算，伤害累积到 poison_pending 交世界层入账
         if self.poison_timer > 0:
             self.poison_timer -= dt
@@ -373,16 +424,20 @@ class Monster:
         # 接触伤害（近身且冷却完毕；出生保护期内不攻击；不同层不攻击；
         # bodyAttack=0 的怪只挡路不造成伤害）
         if (self.body_attack and (not no_aggro)
-                and self.frozen_timer <= 0
+                and self.frozen_timer <= 0 and self.stun_timer <= 0
                 and dist <= settings.MOB_ATTACK_RANGE
                 and dy <= settings.MOB_CONTACT_Y_RANGE
                 and self.attack_cooldown <= 0):
             if audio:
                 audio.play("GameIn", 0.3)
             magic = self.mad > self.attack_power
+            amount = roll_damage(self.mad if magic else self.attack_power)
+            if self.attack_reduce > 0:      # 攻击下降：出伤按 % 衰减
+                amount = max(1, int(amount * (100 - min(90.0, self.attack_reduce))
+                                    / 100.0))
             mobs.append({
                 "type": "contact",
-                "amount": roll_damage(self.mad if magic else self.attack_power),
+                "amount": amount,
                 "acc": self.acc,
                 "level": self.level,
                 "magic": magic,
@@ -551,8 +606,8 @@ class Monster:
         return attacks
 
     def _cast_status_attacks(self) -> List[dict]:
-        """按当前 MP 过滤可释放的异常技能并扣蓝；无蓝条怪不受限。"""
-        if not self.status_attacks:
+        """按当前 MP 过滤可释放的异常技能并扣蓝；无蓝条怪不受限。封印期间禁用。"""
+        if not self.status_attacks or self.seal_timer > 0:
             return []
         if self.max_mp <= 0:
             return list(self.status_attacks)

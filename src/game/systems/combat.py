@@ -291,7 +291,11 @@ class Arrow:
                  crit_mult: float = settings.CRIT_MULT, player_level: int = 0,
                  attack_count: int = 1, magic: bool = False,
                  element: str = "", poison_prop: int = 0,
-                 poison_time: float = 0.0, poison_level: int = 0):
+                 poison_time: float = 0.0, poison_level: int = 0,
+                 basic: bool = False, drain_pct: int = 0,
+                 status_kind: str = "", status_chance: int = 0,
+                 status_duration: float = 0.0, status_potency: float = 0.0,
+                 field_payload: Optional[dict] = None):
         self.x = x
         self.y = y
         self.vx = vx
@@ -316,6 +320,16 @@ class Arrow:
         self.poison_prop = poison_prop    # 命中中毒概率（%）
         self.poison_time = poison_time    # 中毒持续秒数
         self.poison_level = poison_level  # 毒雾术技能等级（毒伤 = maxHP/(70-lv)）
+        self.basic = basic                # 普通攻击：允许触发终极追击
+        self.drain_pct = drain_pct        # 生命吸收 %
+        # 命中附带状态（非毒，毒走 poison_prop 专用公式）
+        self.status_kind = status_kind
+        self.status_chance = status_chance
+        self.status_duration = status_duration
+        self.status_potency = status_potency
+        # 命中/消失时在其落点生成地面区域（烈火箭燃烧等）
+        self.field_payload = field_payload
+        self._field_spawned = False
         self.age = 0.0
         self.hit_ids: set = set()
         self.dead = False
@@ -370,20 +384,33 @@ class Arrow:
                         and hasattr(mob, "apply_poison") \
                         and combat.rng.random() * 100 < self.poison_prop:
                     combat._apply_poison(mob, self.poison_time, self.poison_level)
+                if self.status_kind and self.status_kind != "poison":
+                    if (self.status_chance >= 100
+                            or combat.rng.random() * 100 < self.status_chance):
+                        combat.apply_status_to_mob(
+                            mob, self.status_kind, self.status_duration,
+                            self.status_potency)
+                combat._spawn_arrow_field(self)
                 for _ in range(self.attack_count):
                     dmg, crit = self._roll(mob, combat.rng)
                     combat.numbers.append(DamageNumber(
                         mob.x, mob.cy - mob.sprite_h, dmg,
                         "violet" if crit else "red", big=crit))
+                    if player is not None and self.drain_pct:
+                        combat._apply_drain(player, dmg, self.drain_pct)
                     died = mob.take_hit(dmg, from_x=self.x)
                     if died:
                         if player is not None:
                             combat._on_kill(player, mob)
                         break
+                if player is not None and not getattr(mob, "dead", False):
+                    combat._roll_procs(player, mob, is_basic=self.basic)
             if len(self.hit_ids) >= self.mob_count:
+                combat._spawn_arrow_field(self)
                 self.dead = True
                 return
         if self.life <= 0:
+            combat._spawn_arrow_field(self)
             self.dead = True
 
     def draw(self, surface: pygame.Surface, camera) -> None:
@@ -418,6 +445,158 @@ class Arrow:
         surface.blit(img, (int(sx - origin[0]), int(sy - origin[1])))
 
 
+class Summon:
+    """召唤物（银鹰/凤凰/替身术…）：跟随玩家，按间隔用自身攻击力打最近目标。
+
+    交付方式由 WZ summon 节点推导（skill_semantics.delivery=summon），
+    攻击力取 level.pad；出场/移动/攻击贴图取 Skill.wz summon/<action>。
+    """
+
+    def __init__(self, skill_id: str, x: float, y: float, attack: int,
+                 duration: float, interval: float, frames, facing_right: bool,
+                 name: str = ""):
+        self.skill_id = skill_id
+        self.name = name
+        self.x = x
+        self.y = y
+        self.attack = max(1, int(attack))
+        self.total = duration
+        self.remaining = duration
+        self.interval = max(0.2, interval)
+        self.frames = frames or {}
+        self.facing_right = facing_right
+        self.range = settings.SUMMON_ATTACK_RANGE
+        self._timer = interval
+        self._age = 0.0
+        self._attacking = 0.0
+        self._dying = 0.0
+        self.dead = False
+
+    def update(self, dt: float, player, combat, monsters) -> None:
+        self._age += dt
+        if self._dying > 0:                  # 消失动画播完才移除
+            self._dying -= dt
+            if self._dying <= 0:
+                self.dead = True
+            return
+        if self.remaining > 0:
+            self.remaining -= dt
+            if self.remaining <= 0:
+                self._dying = self._death_seconds()
+                return
+        # 跟随玩家：保持在身侧 40px、脚下
+        target_x = player.x - (40.0 if self.facing_right else -40.0)
+        dx = target_x - self.x
+        self.x += dx * min(1.0, 4.0 * dt)
+        self.y += (player.y - self.y) * min(1.0, 4.0 * dt)
+        if self._attacking > 0:
+            self._attacking -= dt
+        self._timer -= dt
+        if self._timer > 0:
+            return
+        self._timer = self.interval
+        mob = combat.nearest_target(self.x, self.y, monsters, self.range)
+        if mob is None:
+            return
+        self.facing_right = mob.x >= self.x
+        self._attacking = self._attack_seconds()
+        # 原版召唤物伤害：以自身 pad 为攻击区间、走统一伤害公式（含等级差/怪防）
+        dmg, crit = stats_mod.roll_damage(
+            self.attack, self.attack, 1.0, mob.pd, player.level, mob.level,
+            combat.rng, 0.0, settings.CRIT_MULT)
+        combat.numbers.append(DamageNumber(
+            mob.x, mob.cy - mob.sprite_h, dmg,
+            "violet" if crit else "red", big=crit))
+        if mob.take_hit(dmg, from_x=self.x):
+            combat._on_kill(player, mob)
+
+    def _frame_seconds(self, action: str) -> float:
+        frames = self.frames.get(action) or []
+        return sum(f[2] for f in frames) / 1000.0
+
+    def _attack_seconds(self) -> float:
+        return max(0.3, self._frame_seconds("attack1") or 0.4)
+
+    def _death_seconds(self) -> float:
+        return max(0.2, self._frame_seconds("die") or 0.3)
+
+    def _action(self) -> str:
+        if self._dying > 0:
+            return "die"
+        if self._attacking > 0:
+            return "attack1"
+        return "stand"
+
+    def draw(self, surface, camera) -> None:
+        frames = self.frames.get(self._action()) or self.frames.get("stand") or []
+        if not frames:
+            return
+        idx = Animation.frame_at(frames, self._age * 1000.0)
+        img, origin, _ = frames[idx]
+        if not self.facing_right:
+            img = pygame.transform.flip(img, True, False)
+            origin = (img.get_width() - 1 - origin[0], origin[1])
+        sx, sy = camera.to_screen(self.x, self.y)
+        surface.blit(img, (int(sx - origin[0]), int(sy - origin[1])))
+
+
+class FieldEffect:
+    """地面/持续区域（致命毒雾、火牢…）：按间隔对区域内目标结算。
+
+    交付方式由 WZ tile 节点推导（delivery=field）；区域用 level.lt/rb，
+    周期取 settings.FIELD_TICK_INTERVAL，效果取技能子句（伤害/状态）。
+    """
+
+    def __init__(self, x: float, y: float, area, duration: float,
+                 interval: float, layers, payload: dict):
+        self.x = x
+        self.y = y
+        self.area = area                     # ((lt_x,lt_y),(rb_x,rb_y)) 或 None
+        self.remaining = duration
+        self.interval = max(0.2, interval)
+        self.layers = layers or []           # [[(Surface, origin, delay)], ...]
+        self.payload = payload               # {"damage":..., "mult":..., ...}
+        self._timer = 0.0
+        self._age = 0.0
+        self.dead = False
+
+    def _box(self) -> Optional[pygame.Rect]:
+        if not self.area:
+            return None
+        (lx, ly), (rx, ry) = self.area
+        return pygame.Rect(int(self.x + lx), int(self.y + ly),
+                           int(rx - lx), int(ry - ly))
+
+    def update(self, dt: float, player, combat, monsters) -> None:
+        self.remaining -= dt
+        self._age += dt
+        if self.remaining <= 0:
+            self.dead = True
+            return
+        self._timer -= dt
+        if self._timer > 0:
+            return
+        self._timer = self.interval
+        box = self._box()
+        if box is None:
+            return
+        for mob in monsters:
+            if getattr(mob, "dead", False):
+                continue
+            if not box.collidepoint(int(mob.x), int(mob.cy - mob.sprite_h / 2.0)):
+                continue
+            combat.apply_field_tick(player, mob, self.payload)
+
+    def draw(self, surface, camera) -> None:
+        if not self.layers:
+            return
+        sx, sy = camera.to_screen(self.x, self.y)
+        for frames in self.layers:
+            idx = Animation.frame_at(frames, self._age * 1000.0)
+            img, origin, _ = frames[idx]
+            surface.blit(img, (int(sx - origin[0]), int(sy - origin[1])))
+
+
 class Combat:
     def __init__(self, assets: Assets,
                  drop_table: Optional[OfficialDropTable] = None,
@@ -430,6 +609,8 @@ class Combat:
         self.drops: List[DropItem] = []
         self.effects: List[object] = []      # 命中火花 / 升级特效等
         self.arrows: List[Arrow] = []        # 飞行中的远程弹道
+        self.summons: List[Summon] = []      # 召唤物（银鹰/凤凰/替身术…）
+        self.fields: List[FieldEffect] = []  # 地面/持续区域（毒雾/火牢…）
         self.meso = 0                        # 拾取的金币
         self.total_kills = 0
         self.pending_exp: List[int] = []
@@ -521,6 +702,7 @@ class Combat:
         player_level = player.level
         crit_rate = player.crit_rate()
         crit_mult = player.crit_mult()
+        drain = int(skill.get("drain_pct", 0)) if skill else 0
 
         for mob in targets:
             if self.rng.random() >= stats_mod.hit_chance(
@@ -536,11 +718,21 @@ class Combat:
                     hit_frames, mob.x, mob.cy - mob.sprite_h * 0.45,
                     use_origin=True,
                     flip=getattr(player, "facing_right", True)))
-            # 命中附带：魔力吸收回蓝（魔法）、冰冻术冻结
+            # 命中附带：魔力吸收回蓝（魔法）、命中状态（冰冻/眩晕…）
             if magic:
                 self._absorb_mp(player, mob)
-            if skill and skill.get("freeze", 0) > 0 and hasattr(mob, "apply_freeze"):
-                mob.apply_freeze(skill["freeze"])
+            if skill:
+                st = skill.get("attack_status")
+                if st:
+                    chance = int(skill.get("attack_status_chance", 100) or 100)
+                    if chance >= 100 or self.rng.random() * 100 < chance:
+                        self.apply_status_to_mob(
+                            mob, st,
+                            float(skill.get("attack_status_duration", 0)),
+                            float(skill.get("attack_status_potency", 0)))
+                elif skill.get("freeze", 0) > 0:
+                    self.apply_status_to_mob(mob, "freeze",
+                                             float(skill["freeze"]), 0)
             self.preferred_mob = mob
             for _ in range(attack_count):
                 mob_pd = mob.mdd if magic else mob.pd
@@ -552,26 +744,46 @@ class Combat:
                 self.numbers.append(DamageNumber(
                     mob.x, mob.cy - mob.sprite_h, dmg,
                     "violet" if crit else "red", big=crit))
+                if drain:
+                    self._apply_drain(player, dmg, drain)
                 died = mob.take_hit(dmg, from_x=player.x)
                 if died:
                     self._on_kill(player, mob)
                     break
+            if not getattr(mob, "dead", False):
+                self._roll_procs(player, mob, is_basic=skill is None)
 
     def _cast_mob_status(self, player, skill: dict,
                          monsters: List[CombatTarget]) -> None:
-        """怪物 debuff（缓速术等）：按 lt/rb 范围（无框则扇形）选最多 mobCount 只，无伤害。
+        """怪物 debuff（缓速/封印/诅咒/攻降/防降…）：按 lt/rb 范围选最多 mobCount 只。
 
-        施放形态由 WZ mob 节点推导；状态种类由 skill["status"]（skill_effects 语义表）给出。
+        状态键取 skill["status"]（skill_effects/skill_semantics 语义表），强度取
+        status_potency，概率取 status_chance；执行端统一走 Monster.apply_status。
         """
-        targets = self._instant_magic_targets(player, skill, monsters)
-        if skill.get("status") != "slow":
+        status = skill.get("status")
+        if not status:
             return
-        mult = max(0.0, 1.0 + skill.get("slow_x", 0) / 100.0)
-        for mob in targets:
+        chance = int(skill.get("status_chance", 100) or 100)
+        potency = float(skill.get("status_potency", skill.get("slow_x", 0)))
+        duration = float(skill.get("duration", 0.0))
+        for mob in self._instant_magic_targets(player, skill, monsters):
             if getattr(mob, "dead", False):
                 continue
-            if hasattr(mob, "apply_slow"):
-                mob.apply_slow(mult, skill.get("duration", 0.0))
+            if chance < 100 and self.rng.random() * 100 >= chance:
+                continue
+            self.apply_status_to_mob(mob, status, duration, potency)
+
+    def apply_status_to_mob(self, mob, status: str, duration: float,
+                            potency: float) -> None:
+        """把技能状态施加到怪：优先 apply_status；旧怪对象回退到 slow/freeze。"""
+        fn = getattr(mob, "apply_status", None)
+        if callable(fn):
+            fn(status, duration, potency)
+            return
+        if status == "slow" and hasattr(mob, "apply_slow"):
+            mob.apply_slow(max(0.0, 1.0 + potency / 100.0), duration)
+        elif status == "freeze" and hasattr(mob, "apply_freeze"):
+            mob.apply_freeze(duration)
 
     def _cast_heal(self, player, skill: dict,
                    monsters: List[CombatTarget]) -> None:
@@ -808,12 +1020,179 @@ class Combat:
                 element=skill_data.get("element", "") if skill_data else "",
                 poison_prop=skill_data.get("poison_prop", 0) if skill_data else 0,
                 poison_time=skill_data.get("poison_time", 0.0) if skill_data else 0.0,
-                poison_level=int(skill_data.get("level", 0)) if skill_data else 0))
+                poison_level=int(skill_data.get("level", 0)) if skill_data else 0,
+                basic=skill_data is None,
+                drain_pct=skill_data.get("drain_pct", 0) if skill_data else 0,
+                status_kind=skill_data.get("attack_status", "") if skill_data else "",
+                status_chance=skill_data.get("attack_status_chance", 0) if skill_data else 0,
+                status_duration=skill_data.get("attack_status_duration", 0.0) if skill_data else 0.0,
+                status_potency=skill_data.get("attack_status_potency", 0) if skill_data else 0,
+                field_payload=skill_data if (skill_data and skill_data.get("field")) else None))
 
     def update_arrows(self, dt: float, monsters, player=None) -> None:
         for a in self.arrows:
             a.update(dt, monsters, self, player)
         self.arrows = [a for a in self.arrows if not a.dead]
+
+    # ── 召唤 / 地面区域 ─────────────────────────────────────────────
+    def cast_summon(self, player, skill_data: dict) -> None:
+        """召唤交付：生成一个跟随玩家的召唤物（贴图/攻击力取自 WZ）。"""
+        if self.assets is None:
+            return
+        info = skill_data.get("summon", {})
+        sid = skill_data["id"]
+        # 召唤共用一个槽位：同时只允许一只，重复施放/换技施放都替换旧召唤物
+        self.summons.clear()
+        facing = getattr(player, "facing_right", True)
+        frames = {a: self.assets.skill_summon_frames(sid, a)
+                  for a in ("stand", "move", "attack1", "die")}
+        interval = info.get("interval", settings.SUMMON_ATTACK_INTERVAL)
+        attack_frames = frames.get("attack1") or []
+        if attack_frames:                     # 出手间隔不短于攻击动画时长
+            anim = sum(f[2] for f in attack_frames) / 1000.0
+            interval = max(interval, anim)
+        d = skill_data.get("def")
+        self.summons.append(Summon(
+            skill_id=sid,
+            x=player.x + (40.0 if facing else -40.0), y=player.y,
+            attack=info.get("attack", 0),
+            duration=info.get("duration", 0.0) or settings.SUMMON_ATTACK_INTERVAL,
+            interval=interval,
+            frames=frames, facing_right=facing,
+            name=getattr(d, "name", None) or sid))
+
+    def cast_field(self, player, skill_data: dict) -> None:
+        """地面交付：在施放点生成持续区域，按间隔结算区域内目标。"""
+        sid = skill_data["id"]
+        field = skill_data.get("field", {})
+        frames = self.assets.skill_tile_layers(sid) if self.assets else []
+        self.fields.append(FieldEffect(
+            x=player.x, y=player.y,
+            area=field.get("area") or skill_data.get("area"),
+            duration=field.get("duration", 0.0),
+            interval=field.get("interval", settings.FIELD_TICK_INTERVAL),
+            layers=frames,
+            payload=skill_data))
+
+    def _spawn_arrow_field(self, arrow) -> None:
+        """弹道命中/消失时，在其落点生成地面区域（烈火箭燃烧等，原版对齐落点）。"""
+        payload = arrow.field_payload
+        if not payload or arrow._field_spawned:
+            return
+        arrow._field_spawned = True
+        sid = payload.get("id", "")
+        layers = self.assets.skill_tile_layers(sid) if self.assets else []
+        field = payload.get("field", {})
+        self.fields.append(FieldEffect(
+            x=arrow.x, y=arrow.y,
+            area=field.get("area") or payload.get("area"),
+            duration=field.get("duration", 0.0),
+            interval=field.get("interval", settings.FIELD_TICK_INTERVAL),
+            layers=layers, payload=payload))
+
+    def cast_pull(self, player, distance: int, monsters=()) -> None:
+        """磁石：把 distance 半径内的怪拉向玩家附近（原版吸怪）。"""
+        if distance <= 0:
+            return
+        limit = float(distance) * distance
+        for m in monsters:
+            if getattr(m, "dead", False) or getattr(m, "boss", False):
+                continue
+            dx = m.x - player.x
+            if dx * dx > limit:
+                continue
+            target = player.x - (20.0 if dx >= 0 else -20.0)
+            step = max(-120.0, min(120.0, target - m.x))
+            adv = getattr(m, "_advance_x", None)
+            if callable(adv):
+                adv(m.x + step)
+            else:
+                m.x += step
+
+    def nearest_target(self, x: float, y: float, monsters, max_dist: float = 0.0):
+        """离 (x, y) 最近的活怪（召唤物出手目标）；max_dist>0 时限制半径。"""
+        best, best_d = None, float("inf")
+        limit = max_dist * max_dist if max_dist > 0 else float("inf")
+        for m in monsters:
+            if getattr(m, "dead", False):
+                continue
+            d = (m.x - x) ** 2 + (m.cy - y) ** 2
+            if d <= limit and d < best_d:
+                best, best_d = m, d
+        return best
+
+    def apply_field_tick(self, player, mob, payload: dict) -> None:
+        """地面区域对单只怪的周期结算：伤害子句 + 命中附带状态。"""
+        magic = bool(payload.get("magic"))
+        mult = float(payload.get("damage", 1.0))
+        if magic:
+            atk_lo, atk_hi = player.magic_attack_range(
+                payload.get("skill_mad", 0), payload.get("skill_mastery", 0))
+        else:
+            atk_lo, atk_hi = player.attack_range()
+        mob_pd = mob.mdd if magic else mob.pd
+        dmg, crit = stats_mod.roll_damage(
+            atk_lo, atk_hi, mult, mob_pd, player.level, mob.level, self.rng,
+            player.crit_rate(), player.crit_mult(),
+            elem_mult=elem_multiplier_of(mob, payload.get("element", "")))
+        self.numbers.append(DamageNumber(
+            mob.x, mob.cy - mob.sprite_h, dmg,
+            "violet" if crit else "red", big=crit))
+        self.preferred_mob = mob
+        status = payload.get("status") or payload.get("attack_status")
+        if status:
+            self.apply_status_to_mob(
+                mob, status, float(payload.get("duration", 0.0)),
+                float(payload.get("status_potency", payload.get("slow_x", 0))))
+        if payload.get("freeze") and hasattr(mob, "apply_freeze"):
+            mob.apply_freeze(payload["freeze"])
+        if payload.get("drain_pct"):
+            self._apply_drain(player, dmg, payload["drain_pct"])
+        # 地面持续伤害不击退：优先 take_dot（无硬直/无击退），退回 take_hit
+        dot = getattr(mob, "take_dot", None)
+        died = dot(dmg) if callable(dot) else mob.take_hit(dmg, from_x=player.x)
+        if died:
+            self._on_kill(player, mob)
+
+    def _apply_drain(self, player, damage: int, pct: int) -> None:
+        """生命吸收：造成伤害的 pct% 回复自身 HP。"""
+        if pct <= 0 or damage <= 0:
+            return
+        heal = max(1, int(damage * pct / 100.0))
+        player.hp = min(player.max_hp, player.hp + heal)
+
+    def _roll_procs(self, player, mob, is_basic: bool) -> None:
+        """触发式被动（终极追击/暴击/必杀）在命中后按概率结算。
+
+        final_attack 只由普通攻击触发（原版终极不跟技能起手）；critical/deadly
+        对任意攻击生效。deadly 在目标 HP% 低于阈值时按概率直接击杀。
+        """
+        skills = getattr(player, "skills", None)
+        getter = getattr(skills, "combat_procs", None)
+        if not callable(getter):
+            return
+        for proc in getter():
+            if proc.kind == "final_attack" and not is_basic:
+                continue
+            if proc.chance <= 0 or self.rng.random() * 100 >= proc.chance:
+                continue
+            if proc.kind == "deadly":
+                hp = getattr(mob, "hp", 0)
+                max_hp = max(1, getattr(mob, "max_hp", 1))
+                if hp * 100.0 / max_hp > proc.threshold:
+                    continue
+                dmg = int(hp) + 1
+            else:
+                atk_lo, atk_hi = player.attack_range()
+                dmg, crit = stats_mod.roll_damage(
+                    atk_lo, atk_hi, proc.mult, mob.pd, player.level, mob.level,
+                    self.rng, player.crit_rate(), player.crit_mult())
+            self.numbers.append(DamageNumber(
+                mob.x, mob.cy - mob.sprite_h, dmg, "violet", big=True))
+            if mob.take_hit(dmg, from_x=player.x):
+                self._on_kill(player, mob)
+            if proc.kind == "final_attack":
+                break
 
     def _on_kill(self, player, mob) -> None:
         """击杀结算：经验 + 掉落（官方 drop_data 优先，缺数据回退启发式）。"""
@@ -998,13 +1377,20 @@ class Combat:
         self.drops.append(d)
         return d
 
-    def update(self, dt: float, player=None) -> None:
-        """推进战斗实体（伤害飘字 / 特效 / 掉落物物理 / 吸附动画）。"""
+    def update(self, dt: float, player=None, monsters=None) -> None:
+        """推进战斗实体（伤害飘字 / 特效 / 掉落物物理 / 召唤物 / 地面区域）。"""
         self.numbers = [n for n in self.numbers if n.update(dt)]
         self.combat_log.update()
         for e in self.effects:
             e.update(dt)
         self.effects = [e for e in self.effects if not e.done]
+        targets = monsters or ()
+        for s in self.summons:
+            s.update(dt, player, self, targets)
+        self.summons = [s for s in self.summons if not s.dead]
+        for f in self.fields:
+            f.update(dt, player, self, targets)
+        self.fields = [f for f in self.fields if not f.dead]
         px = player.x if player is not None else 0.0
         py = player.y if player is not None else 0.0
         for d in self.drops:
@@ -1037,6 +1423,16 @@ class Combat:
         """飞行中的箭矢（实体之上、特效之下）。"""
         for a in self.arrows:
             a.draw(surface, camera)
+
+    def draw_summons(self, surface: pygame.Surface, camera) -> None:
+        """召唤物（玩家之下、地面区域之上）。"""
+        for s in self.summons:
+            s.draw(surface, camera)
+
+    def draw_fields(self, surface: pygame.Surface, camera) -> None:
+        """地面/持续区域（最底层，压在实体之下）。"""
+        for f in self.fields:
+            f.draw(surface, camera)
 
     def draw_effects(self, surface: pygame.Surface, camera) -> None:
         """命中火花 / 升级特效（叠在实体之上）。"""

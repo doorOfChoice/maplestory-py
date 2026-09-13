@@ -456,6 +456,10 @@ class Assets:
     def character_navel_px(self, equips: List[str], pose: str, flip: bool) -> Tuple[int, int]:
         """compose_animation 输出帧内 navel 的像素坐标（navel 世界 (0,0) 所在像素）。"""
         renderer = self.char_renderer
+        # 与实际渲染同源：compose_animation 会先用 detect_pose 回退不支持的姿态
+        #（如弓的召唤技 action=alert2 → stand1）；此处不归一，锚点会按错误姿态
+        # 计算，让角色在施法动作期间整体错位。
+        pose = renderer.detect_pose(list(equips), pose)
         hide_full, hide_set, cap_vslot = renderer._cap_hair_filter(list(equips))
         n_frames = len(renderer.pose_frame_delays(pose, "00002000")) or 3
         min_x = min_y = max_x = max_y = None
@@ -1214,10 +1218,56 @@ class Assets:
 
     def skill_ball_frames(self, skill_id: str) -> List:
         """技能弹道贴图（如箭矢 ball/*），[(Surface, origin, delay_ms)]。"""
-        if skill_id == settings.SNAIL_THROW_SKILL_ID:
+        if skill_id in ("10001000", "0001000", "20001000"):
             return self.snail_frames()      # WZ 无 ball 节点：借蜗牛怪贴图
         return self.effect_frames("Skill", resolve_skill_img(skill_id),
                                   f"skill/{skill_id}/ball")
+
+    def skill_summon_frames(self, skill_id: str, action: str = "stand") -> List:
+        """召唤物动作帧（Skill.wz summon/<action>，如 stand/move/attack1/die）。"""
+        return self.effect_frames("Skill", resolve_skill_img(skill_id),
+                                  f"skill/{skill_id}/summon/{action}")
+
+    def skill_tile_frames(self, skill_id: str) -> List:
+        """地面/持续区域贴图（Skill.wz tile，取第一层）——兼容旧接口。"""
+        layers = self.skill_tile_layers(skill_id)
+        return layers[0] if layers else []
+
+    def skill_tile_layers(self, skill_id: str) -> List[List]:
+        """地面/持续区域贴图分层：tile/<layer>/<canvas>，每层为帧序列。
+
+        tile 节点是「多层动画」结构（layer 0/1/2… 各自带若干 canvas），
+        不是单层 canvas 列表；按层返回以便绘制端逐层叠加。缓存。
+        """
+        key = ("Skill", resolve_skill_img(skill_id), f"skill/{skill_id}/tile#L")
+        hit = self._effect_cache.get(key)
+        if hit is not None:
+            return hit
+        layers: List[List] = []
+        image = self.wz["Skill"].root.images.get(resolve_skill_img(skill_id))
+        if image is not None:
+            node = image.parse().get(f"skill/{skill_id}/tile")
+            if node is not None:
+                for child in node.children():
+                    if isinstance(child, WzCanvasProperty):
+                        candidates = [child]
+                    else:
+                        candidates = child.children() if hasattr(
+                            child, "children") else []
+                    frames = []
+                    for c in candidates:
+                        real = _resolve_uol(c)
+                        if isinstance(real, WzCanvasProperty):
+                            pil = _decode_canvas_prop(
+                                real, self.region, self.wz["Skill"])
+                            if pil is not None:
+                                frames.append((pil_to_surface(pil),
+                                               _canvas_origin(real),
+                                               _canvas_delay(real)))
+                    if frames:
+                        layers.append(frames)
+        self._effect_cache[key] = layers
+        return layers
 
     def snail_frames(self) -> List:
         """新手普攻「蜗牛投掷」的弹道贴图：借藍寶（蜗牛怪）的 stand 帧。"""

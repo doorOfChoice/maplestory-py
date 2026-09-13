@@ -214,6 +214,8 @@ class Game:
         self._dialogue.warp = lambda map_id: self._enter_map(map_id, None)
         # 回程卷轴：moveTo → 同一套切图（哨兵解析为当前图 returnMap）
         self.ctx.world.player.on_warp = self._warp_from_scroll
+        # 技能窗双击技能行 → 按技能 id 施放（与快捷键共用 _try_cast_sid）
+        self.ctx.windows.svc.cast_skill = self._cast_skill_by_id
         self._banner: Optional[Tuple[str, str]] = None
         self._banner_timer = 0.0
         self._pickup_timer = 0.0
@@ -526,10 +528,13 @@ class Game:
 
     def _try_cast(self, hotkey: int) -> None:
         """尝试施放技能槽 hotkey 对应的技能；失败（CD/MP）给出明确提示。"""
+        sid = self.ctx.world.player.skills.hotkeys.get(hotkey)
+        if sid is not None:
+            self._try_cast_sid(sid)
+
+    def _try_cast_sid(self, sid: str) -> None:
+        """尝试按技能 id 施放一次；失败（CD/MP）给出明确提示。"""
         player = self.ctx.world.player
-        sid = player.skills.hotkeys.get(hotkey)
-        if sid is None:
-            return
         cd = player.skills.cooldowns.get(sid, 0.0)
         d = player.skills.defs.get(sid)
         name = d.name if d is not None else f"技能{hotkey}"
@@ -542,15 +547,45 @@ class Game:
         if player.mp < data["mp_con"]:
             self.ctx.windows.flash(f"{name}：MP 不足（需 {data['mp_con']}）")
             return
-        if data.get("form") == "teleport":
-            # 快速移动：必须按住方向键才触发。←/→ 为水平方向（以按键为准，非朝向），
-            # ↑/↓ 优先于水平；三者皆无则视为无效施放。位移失败（无可落平台/
-            # 落点无底深渊/悬空无相邻平台）则原地不动、不扣 MP、不写冷却。
+        if data.get("form") in ("teleport", "move"):
+            mode = data.get("move_mode")
+            if mode == "pull":
+                # 磁石：吸怪，无需方向键
+                self.ctx.world.combat.cast_pull(
+                    player, data.get("range", 0), self.ctx.world.monsters)
+                player.mp -= data["mp_con"]
+                player.skills.start_cooldown(sid, data.get("cooldown_ms", 0))
+                self.ctx.audio.play_skill_cast(sid, player.equips)
+                return
+            if mode == "jump":
+                # 二段跳：直接给一次向上冲量（空中亦可）
+                player.vy = player.jump_velocity()
+                player.on_ground = False
+                player.mp -= data["mp_con"]
+                player.skills.start_cooldown(sid, data.get("cooldown_ms", 0))
+                self.ctx.audio.play_skill_cast(sid, player.equips)
+                return
+            if mode == "dash":
+                # 冲刺：朝朝向（或方向键）短距突进，复用瞬移落地吸附
+                d = (1 if self.keys.right and not self.keys.left
+                     else -1 if self.keys.left and not self.keys.right
+                     else (1 if player.facing_right else -1))
+                if player.teleport(data.get("range", 120), self.ctx.world.physics,
+                                   direction=d):
+                    player.mp -= data["mp_con"]
+                    player.skills.start_cooldown(sid, data.get("cooldown_ms", 0))
+                    self.ctx.audio.play_skill_cast(sid, player.equips)
+                return
+            # 快速移动/位移：必须按住方向键才触发。←/→ 为水平方向（以按键为准，
+            # 非朝向），↑/↓ 优先于水平；三者皆无则视为无效施放。位移失败（无可落
+            # 平台/落点无底深渊/悬空无相邻平台）则原地不动、不扣 MP、不写冷却。
             h_dir = (1 if self.keys.right and not self.keys.left
                      else -1 if self.keys.left and not self.keys.right else 0)
             up = self.keys.up and not self.keys.down
             down = self.keys.down and not self.keys.up
             if not (h_dir or up or down):
+                return
+            if not data.get("range"):
                 return
             if player.teleport(data.get("range", 0), self.ctx.world.physics,
                                up=up, down=down, direction=h_dir):
@@ -565,6 +600,9 @@ class Game:
             return
         if not player.start_attack(data):
             return
+        for kind in data.get("cleanse", ()):     # 勇士的意志：解除异常
+            if kind in ("seduce", "stun"):
+                player.statuses.clear()
         if not data.get("repeat"):
             player.skills.start_cooldown(sid, data.get("cooldown_ms", 0))
         self.ctx.audio.play_skill_cast(sid, player.equips)
@@ -572,6 +610,10 @@ class Game:
         if eff:
             self.ctx.world.combat.effects.append(Effect(
                 eff, player.x, player.y, flip=player.facing_right))
+
+    def _cast_skill_by_id(self, sid: str) -> None:
+        """技能窗双击：按技能 id 一次性施放（不走按住连发与输入缓冲）。"""
+        self._try_cast_sid(sid)
 
     def _tick_skill_hold(self, dt: float) -> None:
         """通道技按住补放：绑键仍是 repeat 技能且物理按住时，按间隔调 _try_cast。
@@ -614,6 +656,12 @@ class Game:
         if self._channel_fx is not None and self._channel_fx_sid == sid:
             return
         self._end_channel_fx()
+        # 起手（prepare）：一次性的蓄力/拉弓动画，叠在角色身位
+        prep = self.assets.skill_prepare_frames(sid)
+        if prep:
+            self.ctx.world.combat.effects.append(Effect(
+                prep, player.x, player.y, use_origin=True, follow=player,
+                face_follow=True))
         frames = self.assets.skill_keydown_frames(sid)
         if not frames:
             return
@@ -717,6 +765,7 @@ class Game:
         p.feather.consume()
         p.buffs.clear()
         p.statuses.clear()
+        self.ctx.world.combat.summons.clear()   # 死亡后召唤物不残留
         self.fade = 1.0        # 重生黑场淡入
         self.ctx.world.respawn_scene()
 

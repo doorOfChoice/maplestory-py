@@ -31,6 +31,8 @@ class WindowServices:
     bindings: Optional["KeyBindings"] = None
     combat: Optional["Combat"] = None
     quest_goal_lines: Optional[Callable[[str], List[str]]] = None
+    # 按技能 id 施放一次（技能窗双击）；由 Game 接线，未接线时空操作
+    cast_skill: Callable[[str], None] = _noop
     flash: Callable[..., None] = _noop
     tooltip: Callable[..., None] = _noop
     # 弹出全局模态框（core.dialogs.Modal），由 WindowManager 接线

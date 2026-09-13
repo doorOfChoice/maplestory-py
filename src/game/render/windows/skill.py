@@ -299,6 +299,11 @@ class SkillWindow(Window):
                                   label=d.name if d else sid)
         return None
 
+    def activate(self, pk: DragPickup) -> None:
+        """双击已学主动技能行 → 交出技能 id 施放一次（世界逻辑留在 Game）。"""
+        if pk.source and pk.source[0] == "skill":
+            self.svc.cast_skill(pk.source[1])
+
     def handle_mouse_down(self, pos: Tuple[int, int]) -> bool:
         for rect, grp in self._tab_rects:
             if rect.collidepoint(pos):

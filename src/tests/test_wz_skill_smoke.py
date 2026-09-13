@@ -442,3 +442,32 @@ def test_map_mobs_have_no_status_skill_refs():
             assert parse_mob_status_skills(node) == []
     finally:
         assets.close()
+
+
+@needs_wz
+def test_channel_skill_exposes_prepare_keydown_end_frames():
+    """通道技（暴风箭雨）三级动画：prepare 起手 / keydown 持续 / keydownend 收招。"""
+    pygame.init()
+    pygame.display.set_mode((8, 8))
+    from game.render.assets import Assets
+    assets = Assets(settings.TRAINER_SPAWN_MAP)
+    try:
+        assert assets.skill_prepare_frames("3121004")
+        assert assets.skill_keydown_frames("3121004")
+        assert assets.skill_keydown_end_frames("3121004")
+    finally:
+        assets.close()
+
+
+@needs_wz
+def test_tile_skill_layers_resolved():
+    """地面技多层贴图：烈火箭 tile 分层解析（含多层动画）。"""
+    pygame.init()
+    pygame.display.set_mode((8, 8))
+    from game.render.assets import Assets
+    assets = Assets(settings.TRAINER_SPAWN_MAP)
+    try:
+        layers = assets.skill_tile_layers("3111003")
+        assert layers and all(frames for frames in layers)
+    finally:
+        assets.close()
