@@ -182,7 +182,7 @@ def test_sp_learned_passive_survives_load_and_applies():
     book = SkillBook(None, 2000, defs={"2000001": make_def("2000001", x=20)})
     book.from_dict({"sp": 0, "levels": {"2000001": 5}, "passives": [],
                     "hotkeys": {}})
-    assert book.passive_mods().get("mp") == 20
+    assert book.passive_mods().get("mp_per_level") == 20
     assert "2000001" in book.learnable()
 
 

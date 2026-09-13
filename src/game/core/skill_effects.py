@@ -94,6 +94,9 @@ TELEPORT_SKILLS = {"2101002", "2201002", "2301001"}
 
 
 # ── 被动逐技能声明（mod 键 → WZ 字段）────────────────────────────────
+_MP_BOOST_SKILL = "2000001"     # 魔力强化（法师一转）：升级/AP 逐级加 MaxMP
+_MP_BOOST_BASE_LEVEL = 10       # 转职可学等级；(等级−10) 即学后升级次数（不追溯）
+
 _PASSIVE_FIELDS: Dict[str, Dict[str, str]] = {
     "3000000": {"acc": "x"},                      # 精準強化：x=命中
     "3000001": {"crit": "prop", "crit_mult": "damage"},   # 霸王箭
@@ -103,7 +106,7 @@ _PASSIVE_FIELDS: Dict[str, Dict[str, str]] = {
     "3110000": {"speed": "speed"},                # 疾風步
     "3110001": {"crit": "prop", "crit_mult": "damage"},   # 致命箭
     "3120005": {"mastery": "mastery", "acc": "x"},        # 弓術精通
-    "2000001": {"mp": "x"},                       # 魔力强化：x=MaxMP 提升
+    "2000001": {},                                # 魔力强化：升级/投AP 逐级加成，见 passive_mods 特判
     "2000000": {"mp_regen": "mp_regen"},          # 魔力恢复：合成表（WZ 无数值），提升自然回蓝
     "2100000": {},                                # 魔力吸收（火毒）：命中吸怪 MP，combat._absorb_mp
     "2200000": {},                                # 魔力吸收（冰雷）：同上
@@ -146,8 +149,19 @@ def buff_mods(skill_id: str, stat: StatFn) -> Dict[str, int]:
 
 
 def passive_mods(skill_id: str, stat: StatFn) -> Dict[str, int]:
-    """被动技能 → mod 词条（已登记走逐技能声明，未知走通用回退）。"""
-    fields = _PASSIVE_FIELDS.get(str(skill_id), _PASSIVE_FALLBACK)
+    """被动技能 → mod 词条（已登记走逐技能声明，未知走通用回退）。
+
+    魔力强化(2000001) 特判：WZ 的 x=每次升级 MaxMP 额外增量、y=每点投入 MP 的 AP
+    额外增量；原版本应「学会后逐级累计、不追溯」。本项目按「直接算总账」近似，
+    产出 mp_per_level / mp_base / mp_per_ap 三词条，由 Player.recalc_vitals 组合成
+    (人物等级 − mp_base) × mp_per_level + mp_ap × mp_per_ap，无需维护增量。
+    """
+    sid = str(skill_id)
+    if sid == _MP_BOOST_SKILL:
+        return {"mp_per_level": stat("x"),
+                "mp_base": _MP_BOOST_BASE_LEVEL,
+                "mp_per_ap": stat("y")}
+    fields = _PASSIVE_FIELDS.get(sid, _PASSIVE_FALLBACK)
     return _collect(fields, stat)
 
 

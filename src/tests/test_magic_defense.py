@@ -5,6 +5,7 @@ import random
 
 import pygame
 
+from game.core import stats as stats_mod
 from game.systems.combat import Arrow, Combat
 
 
@@ -123,3 +124,35 @@ def test_arrow_without_magic_flag_uses_physical_defense():
               dmg=10, atk_lo=100, atk_hi=100, mult=1.0, player_level=10)
     a.update(1 / 60.0, [mob], c, player=_Player())
     assert c.numbers[-1].amount == 1
+
+
+# ── 官方法师减伤公式（AyumiLove）：基伤不衰减、减伤项随等级差放大 ──────────
+class _UpperRng:
+    """uniform(a, b) 恒返回上界，便于断言上界伤害。"""
+
+    def uniform(self, a: float, b: float) -> float:
+        return b
+
+
+def test_magic_defense_reduces_flat_with_level_scaled_mdef():
+    """法师减伤 = MDEF×0.5×(1+0.01D)，基伤不乘 (1−0.01D)。
+
+    D=10（怪高 10 级）、MDEF=40、上界 100：
+      魔法上界 = 100 − 40×0.5×1.1 = 78；物理公式会得 100×0.9 − 20 = 70。
+    """
+    dmg, _ = stats_mod.roll_damage(
+        100, 100, 1.0, 40, 40, 50, _UpperRng(), magic=True)
+    assert dmg == 78
+
+
+def test_magic_base_not_reduced_by_level_difference():
+    """零魔防时法师伤害不受等级差衰减：D=10 仍打满 100。"""
+    dmg, _ = stats_mod.roll_damage(
+        100, 100, 1.0, 0, 40, 50, _UpperRng(), magic=True)
+    assert dmg == 100
+
+
+def test_physical_formula_unchanged_without_magic_flag():
+    """未标 magic：维持物理减免 100×0.9 − 40×0.5 = 70。"""
+    dmg, _ = stats_mod.roll_damage(100, 100, 1.0, 40, 40, 50, _UpperRng())
+    assert dmg == 70

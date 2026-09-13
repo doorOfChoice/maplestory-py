@@ -320,7 +320,7 @@ class SkillWindow(Window):
             if rect.collidepoint(pos):
                 book = player.skills
                 d = book.defs.get(sid)
-                if not book.learn(sid, player.level) and d is not None:
+                if not player.learn_skill(sid) and d is not None:
                     self.svc.flash(f"无法学习 {d.name}：SP 不足或条件未达成")
                 return True
         return self.rect.collidepoint(pos)

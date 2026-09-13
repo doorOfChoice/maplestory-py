@@ -73,9 +73,10 @@ def test_passive_final_attack_has_no_effect():
     assert passive_mods("3100001", stat_of({"prop": 60, "damage": 250})) == {}
 
 
-def test_passive_magic_mp_boost_maps_x_to_mp():
-    """魔力强化(2000001)：x=20（MaxMP 提升）→ mp。"""
-    assert passive_mods("2000001", stat_of({"x": 20, "y": 10})) == {"mp": 20}
+def test_passive_magic_mp_boost_maps_x_and_y():
+    """魔力强化(2000001)：x=升级增量、y=每AP增量、基准=10，交 recalc 组合成总账。"""
+    assert passive_mods("2000001", stat_of({"x": 20, "y": 10})) == \
+        {"mp_per_level": 20, "mp_base": 10, "mp_per_ap": 10}
 
 
 def test_passive_mp_recovery_maps_mp_regen():

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import math
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pygame
 
@@ -56,6 +56,7 @@ class Player:
         self.navel_px = (0, 0)
 
         self.job = 0
+        self.mp_ap = 0                # 投到 MP 的 AP 点数（魔力强化每点加成用）
         self.attacking = False
         self.attack_pose = ""
         self.attack_hit_applied = False
@@ -125,6 +126,7 @@ class Player:
         self.job = pd.get("job") or 0
         self.stats = dict(pd.get("stats") or base_stats())
         self.ap = int(pd.get("ap") or 0)
+        self.mp_ap = int(pd.get("mp_ap") or 0)
         self.facing_right = pd.get("facing_right", True)
         self.anim_flip = self.facing_right
 
@@ -419,7 +421,18 @@ class Player:
         return self.total_stats()["luk"]
 
     def allocate_ap(self, stat: str, n: int = 1) -> bool:
-        """手动加点：成功返回 True 并刷新 HP/MP 上限。"""
+        """手动加点：成功返回 True 并刷新 HP/MP 上限。
+
+        stat="mp" 为投 MP 的特殊路径：只累计 mp_ap（供魔力强化每 AP 加成），
+        不入四维、不改 attack 公式；AP 不足或非法四维名回 False。
+        """
+        if stat == "mp":
+            if n < 1 or self.ap < n:
+                return False
+            self.ap -= n
+            self.mp_ap += n
+            self.recalc_vitals()
+            return True
         new_stats, new_ap = stats_mod.allocate(self.stats, self.ap, stat, n)
         if new_ap == self.ap and new_stats == self.stats:
             return False
@@ -435,6 +448,13 @@ class Player:
         if new_ap == self.ap and new_stats == self.stats:
             return False
         self.stats, self.ap = new_stats, new_ap
+        self.recalc_vitals()
+        return True
+
+    def learn_skill(self, skill_id: str) -> bool:
+        """学习/升级技能：消耗本转 1 SP，成功即刷新 HP/MP 上限（被动当场生效）。"""
+        if not self.skills.learn(skill_id, self.level):
+            return False
         self.recalc_vitals()
         return True
 
@@ -462,6 +482,19 @@ class Player:
         bonus = self.skills.passive_mods().get("mp_regen", 0)
         return settings.SKILL_MP_REGEN + bonus * settings.MP_REGEN_MOD_SCALE
 
+    def _passive_mp_bonus(self, passive: Dict[str, int]) -> int:
+        """被动「魔力强化」折算的额外 MaxMP：(等级−基准)×升级增量 + 投MP的AP×每AP增量。
+
+        不维护增量，每次由当前等级/ mp_ap 直接算总账（基准 = 可学等级，故不追溯
+        学之前的升级）；无该被动时各系数为 0。
+        """
+        per_level = passive.get("mp_per_level", 0)
+        per_ap = passive.get("mp_per_ap", 0)
+        if not per_level and not per_ap:
+            return 0
+        base = passive.get("mp_base", 0)
+        return max(0, self.level - base) * per_level + self.mp_ap * per_ap
+
     def recalc_vitals(self) -> None:
         """按 等级/职业/装备 + 被动/buff 平坦 hp/mp 词条 重算上限，并将当前值钳入。"""
         jobdef = JOBS.get(self.job) or JOBS[0]
@@ -471,6 +504,7 @@ class Player:
         hp_bonus = inv.bonus("hp") + passive.get("hp", 0) \
             + (buffs.mod_sum("hp") if buffs is not None else 0)
         mp_bonus = inv.bonus("mp") + passive.get("mp", 0) \
+            + self._passive_mp_bonus(passive) \
             + (buffs.mod_sum("mp") if buffs is not None else 0)
         self.max_hp = stats_mod.max_hp(self.level, jobdef.hp_gain, hp_bonus)
         self.max_mp = stats_mod.max_mp(self.level, jobdef.mp_gain, mp_bonus)

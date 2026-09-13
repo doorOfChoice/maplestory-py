@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 from game import settings
-from game.core.jobs import JobDef
+from game.core.jobs import JobDef, sp_group_of_skill
 from game.core.stats import base_stats
 from game.entities.player import Player
 from game.systems.inventory import Inventory, Item
@@ -96,15 +96,75 @@ def test_hp_passive_raises_max_hp(monkeypatch):
     assert boosted.max_hp == plain.max_hp + 50
 
 
-def test_mp_passive_raises_max_mp(monkeypatch):
-    """魔力强化 x=20 → mp 词条 +20，重算上限后 max_mp 增加 20。"""
+def _mp_boost(level: int, x: int, y: int = 10) -> SkillDef:
+    return SkillDef("2000001", "魔力强化", "", [{"x": x, "y": y}], 10)
+
+
+def test_mp_boost_scales_with_levels_since_10(monkeypatch):
+    """魔力强化满级 x=20：Lv12 额外 MaxMP = (12−10)×20 = 40。"""
     plain = make_player(monkeypatch, {}, [])
+    plain.level = 12
     plain.recalc_vitals()
-    boosted = make_player(monkeypatch, {
-        "2000001": passive("2000001", "魔力强化", {"x": 20}),
-    }, [2000001])
+    boosted = make_player(monkeypatch, {"2000001": _mp_boost(20, 20)}, [])
+    boosted.level = 12
+    boosted.skills.levels["2000001"] = 10
     boosted.recalc_vitals()
-    assert boosted.max_mp == plain.max_mp + 20
+    assert boosted.max_mp == plain.max_mp + 40
+
+
+def test_mp_boost_is_zero_at_or_below_level_10(monkeypatch):
+    """人物等级 ≤10：不追溯，魔力强化额外 MaxMP 为 0。"""
+    plain = make_player(monkeypatch, {}, [])
+    plain.level = 10
+    plain.recalc_vitals()
+    boosted = make_player(monkeypatch, {"2000001": _mp_boost(10, 20)}, [])
+    boosted.level = 10
+    boosted.skills.levels["2000001"] = 10
+    boosted.recalc_vitals()
+    assert boosted.max_mp == plain.max_mp
+
+
+def test_ap_into_mp_uses_skill_per_ap_bonus(monkeypatch):
+    """y=10：每投 1 AP 到 MP 额外 +10 MaxMP；allocate_ap("mp") 扣 AP 记 mp_ap。"""
+    player = make_player(monkeypatch, {"2000001": _mp_boost(20, 20)}, [])
+    player.level = 12
+    player.skills.levels["2000001"] = 10
+    player.ap = 3
+    player.recalc_vitals()
+    before = player.max_mp
+    assert player.allocate_ap("mp", 3) is True
+    assert player.ap == 0 and player.mp_ap == 3
+    assert player.max_mp == before + 30
+
+
+def test_ap_into_mp_without_skill_adds_nothing(monkeypatch):
+    """没有魔力强化时 AP 投 MP 基础为 0（魔法师专属技能才给每 AP 加成）。"""
+    player = make_player(monkeypatch, {}, [])
+    player.level = 12
+    player.ap = 2
+    player.recalc_vitals()
+    before = player.max_mp
+    assert player.allocate_ap("mp", 2) is True
+    assert player.max_mp == before
+
+
+def test_ap_into_mp_insufficient_ap_rejected(monkeypatch):
+    """AP 不足时不扣点、不加 mp_ap。"""
+    player = make_player(monkeypatch, {"2000001": _mp_boost(20, 20)}, [])
+    player.ap = 1
+    assert player.allocate_ap("mp", 2) is False
+    assert player.ap == 1 and player.mp_ap == 0
+
+
+def test_learn_skill_refreshes_max_mp_immediately(monkeypatch):
+    """学完魔力强化立刻重算：无需等下次升级/加点，max_mp 当场变大。"""
+    player = make_player(monkeypatch, {"2000001": _mp_boost(20, 20)}, [])
+    player.level = 12
+    player.recalc_vitals()
+    before = player.max_mp
+    player.skills.add_sp(sp_group_of_skill("2000001"), 1)
+    assert player.learn_skill("2000001") is True
+    assert player.max_mp == before + 40
 
 
 def test_mp_recovery_passive_learned_with_sp_raises_regen(monkeypatch):

@@ -57,8 +57,9 @@ class FakeSkills:
 
 def make_player(n_skills: int = 0, job: int = 3000, sp: int = 0,
                 level: int = 10) -> SimpleNamespace:
-    return SimpleNamespace(skills=FakeSkills(n_skills, job=job, sp=sp),
-                           level=level)
+    skills = FakeSkills(n_skills, job=job, sp=sp)
+    return SimpleNamespace(skills=skills, level=level,
+                           learn_skill=lambda sid: skills.learn(sid, level))
 
 
 def open_window(player) -> tuple:

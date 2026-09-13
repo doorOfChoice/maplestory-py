@@ -443,7 +443,8 @@ def test_magician_passive_mods_reads_real_fields():
         for _ in range(book.defs["2000001"].max_level):
             book.learn("2000001", 200)
         assert book.levels["2000000"] == 16
-        assert book.passive_mods() == {"mp_regen": 32, "mp": 20}
+        assert book.passive_mods() == {
+            "mp_regen": 32, "mp_per_level": 20, "mp_base": 10, "mp_per_ap": 10}
     finally:
         assets.close()
 

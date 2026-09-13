@@ -29,8 +29,8 @@ from game.render.windows.core.manager import WindowManager
 from game.render.windows.core.services import WindowServices
 from game.render.windows.core.window import DragPickup, Window
 from game.systems.inventory import Inventory, Item, SLOT_ORDER
-from game.systems.scrolls import SCROLLS, apply_scroll, is_scroll_id, \
-    scroll_info_of, scroll_stats
+from game.systems.scrolls import apply_scroll, is_scroll_id, scroll_info_of, \
+    scroll_of, scroll_stats
 
 CELL = 38          # 旧自绘面板用（fallback）
 PAD = 10
@@ -215,7 +215,7 @@ def _cast_scroll(svc: WindowServices, player, scroll_item: Item,
     双击（目标 = 当前已穿对应栏位）与拖拽（目标 = 落点装备）共用；
     target 为 None 时只提示、不扣任何东西。
     """
-    scroll = SCROLLS.get(scroll_item.id)
+    scroll = scroll_of(scroll_item.id)
     if scroll is None:
         svc.flash("无法使用的卷轴")
         return
@@ -370,7 +370,7 @@ class InventoryWindow(Window):
             items = list(inv.consumes.values())
             if idx < len(items):
                 item = items[idx]
-                if is_scroll_id(item.id):    # 234 段自制强化卷轴：走强化流程
+                if is_scroll_id(item.id):    # 官方 204 段强化卷轴：走强化流程
                     self._apply_scroll(item, player)
                     return
                 err = consumables.use(player, item.id)
@@ -392,7 +392,7 @@ class InventoryWindow(Window):
 
     def _apply_scroll(self, scroll_item: Item, player) -> None:
         """双击卷轴：对当前已穿的对应栏位装备施放（拖拽路径见 handle_drop）。"""
-        scroll = SCROLLS.get(scroll_item.id)
+        scroll = scroll_of(scroll_item.id)
         if scroll is None:
             self.svc.flash("无法使用的卷轴")
             return

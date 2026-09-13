@@ -16,6 +16,7 @@
     Basic = 技能 WZ mad（旧版「基本攻击力」，是乘数而非加值）
     Max = ((Magic²/1000 + Magic)/30 + INT/200) × Basic
     Min = ((Magic²/1000 + Magic)×mastery/30 + INT/200) × Basic
+    法师减免另有公式：基伤不随等级差衰减，减伤项 = mobMDD×0.5/0.6×(1+0.01D)
 
 经验需求：非指数曲线，改用官方 v113 的逐级经验表（见 EXP_TO_NEXT）。
 """
@@ -126,23 +127,35 @@ def roll_damage(atk_lo: int, atk_hi: int, mult: float, mob_pd: int,
                 player_level: int, mob_level: int,
                 rng: random.Random, crit_rate: float = 0.0,
                 crit_mult: float = settings.CRIT_MULT,
-                elem_mult: float = 1.0) -> Tuple[int, bool]:
-    """单次命中伤害（AyumiLove 经典物理公式）。
+                elem_mult: float = 1.0, magic: bool = False) -> Tuple[int, bool]:
+    """单次命中伤害（AyumiLove 公式，物理/法师两套减免）。
 
-    :param atk_lo / atk_hi: 面板攻击区间（attack_range 的返回值）。
+    物理（magic=False）：
+        MAX×(1−0.01D) − WDEF×0.5；MIN×(1−0.01D) − WDEF×0.6
+    法师（magic=True）：
+        基伤不随等级差衰减，减伤项按 MDEF×0.5/0.6×(1+0.01D)
+    其中 D = max(0, mob_level − player_level)。
+
+    :param atk_lo / atk_hi: 面板攻击区间（attack_range / magic_attack_range）。
     :param mult: 技能伤害倍率（普攻 1.0）。
-    :param mob_pd: 怪物物理防御（weaponDefense）。
+    :param mob_pd: 怪物防御（物理 weaponDefense / 法师 magicDefense）。
     :param player_level / mob_level: 用于等级差减免 D=max(0, mob-player)。
     :param rng: 注入的随机数发生器（可复现）。
     :param crit_rate: 暴击率（%）。
     :param crit_mult: 暴击伤害倍率（默认 settings.CRIT_MULT，被霸王箭等覆盖）。
     :param elem_mult: 属性克制倍率（弱点 1.5 / 抵抗 0.5 / 免疫 0，默认 1.0）。
+    :param magic: True 走法师减免公式（mob_pd 语义为魔防）。
     :return: (实际伤害, 是否暴击)；伤害下限 1。
     """
     d = max(0, mob_level - player_level)
-    mult_fall = max(0.0, 1.0 - 0.01 * d)
-    hi = atk_hi * mult * mult_fall * elem_mult - mob_pd * 0.5
-    lo = atk_lo * mult * mult_fall * elem_mult - mob_pd * 0.6
+    if magic:
+        def_scale = 1.0 + 0.01 * d
+        hi = atk_hi * mult * elem_mult - mob_pd * 0.5 * def_scale
+        lo = atk_lo * mult * elem_mult - mob_pd * 0.6 * def_scale
+    else:
+        mult_fall = max(0.0, 1.0 - 0.01 * d)
+        hi = atk_hi * mult * mult_fall * elem_mult - mob_pd * 0.5
+        lo = atk_lo * mult * mult_fall * elem_mult - mob_pd * 0.6
     raw = rng.uniform(min(lo, hi), max(lo, hi))
     dmg = max(1, int(raw))
     crit = crit_rate > 0 and rng.random() * 100.0 < crit_rate

@@ -348,7 +348,8 @@ class Arrow:
             self.atk_lo, self.atk_hi, self.mult, mob_pd,
             self.player_level, mob.level, rng,
             self.crit_rate, self.crit_mult,
-            elem_mult=elem_multiplier_of(mob, self.element))
+            elem_mult=elem_multiplier_of(mob, self.element),
+            magic=self.magic)
 
     def update(self, dt: float, monsters, combat, player=None) -> None:
         if self.dead:
@@ -506,7 +507,7 @@ class Summon:
         mob_pd = mob.mdd if self.magic else mob.pd
         dmg, crit = stats_mod.roll_damage(
             self.attack, self.attack, 1.0, mob_pd, player.level, mob.level,
-            combat.rng, 0.0, settings.CRIT_MULT)
+            combat.rng, 0.0, settings.CRIT_MULT, magic=self.magic)
         combat.numbers.append(DamageNumber(
             mob.x, mob.cy - mob.sprite_h, dmg,
             "violet" if crit else "red", big=crit))
@@ -744,7 +745,7 @@ class Combat:
                     atk_lo, atk_hi, mult, mob_pd,
                     player_level, mob.level, random,
                     crit_rate, crit_mult,
-                    elem_mult=elem_multiplier_of(mob, element))
+                    elem_mult=elem_multiplier_of(mob, element), magic=magic)
                 self.numbers.append(DamageNumber(
                     mob.x, mob.cy - mob.sprite_h, dmg,
                     "violet" if crit else "red", big=crit))
@@ -817,7 +818,8 @@ class Combat:
             self.preferred_mob = mob
             dmg, crit = stats_mod.roll_damage(
                 lo, hi, 1.0, mob.mdd, player.level, mob.level, random,
-                player.crit_rate(), player.crit_mult(), elem_mult=1.0)
+                player.crit_rate(), player.crit_mult(), elem_mult=1.0,
+                magic=True)
             self.numbers.append(DamageNumber(
                 mob.x, mob.cy - mob.sprite_h, dmg, "violet" if crit else "red",
                 big=crit))
@@ -1145,7 +1147,8 @@ class Combat:
         dmg, crit = stats_mod.roll_damage(
             atk_lo, atk_hi, mult, mob_pd, player.level, mob.level, self.rng,
             player.crit_rate(), player.crit_mult(),
-            elem_mult=elem_multiplier_of(mob, payload.get("element", "")))
+            elem_mult=elem_multiplier_of(mob, payload.get("element", "")),
+            magic=magic)
         self.numbers.append(DamageNumber(
             mob.x, mob.cy - mob.sprite_h, dmg,
             "violet" if crit else "red", big=crit))
@@ -1248,7 +1251,7 @@ class Combat:
             if not self._has_item_icon(it["id"]):
                 continue
             if is_scroll_id(it["id"]):
-                name = scroll_name(it["id"])     # 234 段自制卷轴：名字取配置
+                name = scroll_name(it["id"])     # 卷轴：名字兜底取类别表
             else:
                 name = self.assets.item_name(it["id"]) if self.assets else None
             self.drops.append(DropItem(
@@ -1258,7 +1261,7 @@ class Combat:
 
     def _has_item_icon(self, item_id: str) -> bool:
         """物品图标可解析才生成掉落：解析不出（如 8 位商城道具）宁可不出。"""
-        if is_scroll_id(item_id):        # 234 段自制卷轴：无 WZ 素材但可自绘
+        if is_scroll_id(item_id):        # 卷轴：WZ 无图时自绘兜底
             return True
         if self.assets is None:
             return True

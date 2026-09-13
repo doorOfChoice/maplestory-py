@@ -201,6 +201,7 @@ class SaveManager:
                 "job": player.job,
                 "stats": dict(player.stats),
                 "ap": player.ap,
+                "mp_ap": getattr(player, "mp_ap", 0),
                 "map_id": map_id,
                 "x": player.x,
                 "y": player.y,

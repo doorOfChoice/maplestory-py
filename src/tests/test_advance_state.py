@@ -88,3 +88,12 @@ def test_migrate_null_job_normalized():
         sm.flush(data)
         loaded = sm.load()
     assert loaded["player"]["job"] == 0
+
+
+def test_collect_data_records_mp_ap():
+    """投到 MP 的 AP 数（mp_ap）入档，供重登还原 MaxMP 加成。"""
+    player = fake_player()
+    player.mp_ap = 7
+    data = SaveManager.collect_data(player, SimpleNamespace(meso=0, total_kills=0),
+                                    "100000000")
+    assert data["player"]["mp_ap"] == 7

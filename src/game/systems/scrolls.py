@@ -1,12 +1,17 @@
-"""强化卷轴：采用官方 204xxxx 物品，成功率与加成以 WZ info 为准。
+"""强化卷轴：官方 204xxxx 物品统一登记，目标栏位由卷轴 id 类别推导。
 
-官方武器攻击/魔力卷轴按武器族分家（见 WEAPON_SCROLL_FAMILIES），每族提供
-60% / 30%（诅咒）/ 100%（必成）三档。SCROLLS 只登记「哪些 id 是强化卷轴、
-目标栏位与武器前缀」；实际 success/inc* 在施放时由调用方从 Item.wz 的
-info 取出传入 apply_scroll。apply_scroll 是纯函数（可单测）：校验栏位与
-武器类型、扣强化费（随等级上涨）后 roll 成功/失败——成功把 info 里的
+官方 204 整段都是强化卷轴。目标装备栏位并不写在 WZ info 里（info 只含
+success / inc* / cursed / price / icon 等），只能由卷轴 id 的类别段
+（id // 100）判断：20400 头盔、20401/20402 脸眼部、20403 耳环、20404 上衣、
+20405 全身、20406 裤裙、20407 鞋、20408 手套、20409 盾、20410 披风，
+20430~20449 各武器族。SCROLL_CATEGORIES 是唯一的类别表：is_scroll_id 只做
+204 段范围判定，scroll_of 依类别产出 {slot, weapon, name} 描述。
+
+实际 success/inc* 由调用方从 Item.wz 的 info 取出传入 apply_scroll（纯函数）：
+校验栏位与武器类型、扣强化费（随等级上涨）后 roll 成功/失败——成功把 info 的
 inc* 词条并入 extra、tuc−1；失败仅 tuc−1（装备不销毁，暂不实现诅咒）。
-卷轴本体由调用方从背包扣除。
+卷轴本体由调用方从背包扣除。名称优先取 String.wz；无 WZ 时武器卷轴回退
+「单手剑攻击卷轴 60%」这类，防具回退「披风强化卷轴」这类通用名。
 """
 
 from __future__ import annotations
@@ -17,44 +22,47 @@ from typing import Dict, Optional, Tuple
 from game import settings
 from game.systems.inventory import Item
 
-# ── 武器族：武器 id 前 3 位 → (Item.wz 卷轴 base, 中文名, 是否魔力卷) ──
-WEAPON_SCROLL_FAMILIES: Dict[str, Tuple[int, str, bool]] = {
-    "130": (20430, "单手剑", False),
-    "131": (20431, "单手斧", False),
-    "132": (20432, "单手钝器", False),
-    "133": (20433, "短剑", False),
-    "137": (20437, "短杖", True),
-    "138": (20438, "长杖", True),
-    "140": (20440, "双手剑", False),
-    "141": (20441, "双手斧", False),
-    "142": (20442, "双手钝器", False),
-    "143": (20443, "枪", False),
-    "144": (20444, "矛", False),
-    "145": (20445, "弓", False),
-    "146": (20446, "弩", False),
-    "147": (20447, "拳套", False),
-    "148": (20448, "拳甲", False),
-    "149": (20449, "短枪", False),
+# ── 卷轴类别表：id // 100 →（目标栏位, 武器族前缀, 中文标签, 是否魔力卷）──
+# 武器族前缀为武器 id 前 3 位（01302000 → "130"）；非武器为 None。
+# 仅登记本项目已实现栏位的类别（项链/腰带/宠物/特殊卷轴不在表内，
+# 仍由 is_scroll_id 识别，但 scroll_of 无目标栏位）。
+SCROLL_CATEGORIES: Dict[int, Tuple[str, Optional[str], str, bool]] = {
+    20400: ("cap", None, "头盔", False),
+    20401: ("face", None, "脸部装饰", False),
+    20402: ("face", None, "眼部装饰", False),
+    20403: ("earr", None, "耳环", False),
+    20404: ("top", None, "上衣", False),
+    20405: ("overall", None, "全身铠甲", False),
+    20406: ("pants", None, "裤/裙", False),
+    20407: ("shoes", None, "鞋子", False),
+    20408: ("glove", None, "手套", False),
+    20409: ("shield", None, "盾牌", False),
+    20410: ("cape", None, "披风", False),
+    20430: ("weapon", "130", "单手剑", False),
+    20431: ("weapon", "131", "单手斧", False),
+    20432: ("weapon", "132", "单手钝器", False),
+    20433: ("weapon", "133", "短剑", False),
+    20437: ("weapon", "137", "短杖", True),
+    20438: ("weapon", "138", "长杖", True),
+    20440: ("weapon", "140", "双手剑", False),
+    20441: ("weapon", "141", "双手斧", False),
+    20442: ("weapon", "142", "双手钝器", False),
+    20443: ("weapon", "143", "枪", False),
+    20444: ("weapon", "144", "矛", False),
+    20445: ("weapon", "145", "弓", False),
+    20446: ("weapon", "146", "弩", False),
+    20447: ("weapon", "147", "拳套", False),
+    20448: ("weapon", "148", "拳甲", False),
+    20449: ("weapon", "149", "短枪", False),
 }
 
-# 档位：(item id 后缀, 显示百分比)；对应官方 base+1/5/3
-_TIERS: Tuple[Tuple[int, str], ...] = ((1, "60%"), (5, "30%"), (3, "100%"))
+# 武器卷轴档位：item id 末 3 位 → 显示百分比（对应官方 base+1/5/3）
+_TIER_PCT: Dict[int, str] = {1: "60%", 5: "30%", 3: "100%"}
 
+_SCROLL_MIN = 2040000
+_SCROLL_MAX = 2049999
 
-def _build_scrolls() -> Dict[str, Dict]:
-    out: Dict[str, Dict] = {}
-    for prefix, (base, label, magic) in WEAPON_SCROLL_FAMILIES.items():
-        kind = "魔力" if magic else "攻击"
-        for suffix, pct in _TIERS:
-            key = f"{base * 100 + suffix:08d}"
-            out[key] = {"slot": "weapon", "weapon": prefix,
-                        "name": f"{label}{kind}卷轴 {pct}"}
-    return out
-
-
-SCROLLS: Dict[str, Dict] = _build_scrolls()
-
-# 旧存档里 234 段自制卷轴 → 官方 id（60% / 30% / 100% 映射单手剑档）
+# 旧存档里 234 段自制卷轴 → 官方 id（映射单手剑档）
 LEGACY_SCROLL_IDS: Dict[str, str] = {
     "02340000": "02043001",
     "02340001": "02043005",
@@ -63,11 +71,47 @@ LEGACY_SCROLL_IDS: Dict[str, str] = {
 
 
 def normalize_scroll_id(item_id: str) -> str:
-    """卷轴 id 归一为 8 位补零字符串（SCROLLS 的键形式）。"""
+    """卷轴 id 归一为 8 位补零字符串（SCROLL 类别表的键形式）。"""
     try:
         return f"{int(item_id):08d}"
     except (TypeError, ValueError):
         return str(item_id)
+
+
+def _scroll_int(item_id: str) -> Optional[int]:
+    try:
+        return int(normalize_scroll_id(item_id))
+    except (TypeError, ValueError):
+        return None
+
+
+def is_scroll_id(item_id: str) -> bool:
+    """是否官方 204 段强化卷轴（整段识别，含未实现栏位的类别）。"""
+    iid = _scroll_int(item_id)
+    return iid is not None and _SCROLL_MIN <= iid <= _SCROLL_MAX
+
+
+def scroll_of(item_id: str) -> Optional[Dict]:
+    """卷轴描述 {slot, weapon, name}；非卷轴或游戏未实现该栏位返回 None。"""
+    iid = _scroll_int(item_id)
+    if iid is None or not (_SCROLL_MIN <= iid <= _SCROLL_MAX):
+        return None
+    entry = SCROLL_CATEGORIES.get(iid // 100)
+    if entry is None:
+        return None
+    slot, weapon, label, magic = entry
+    return {"slot": slot, "weapon": weapon,
+            "name": _fallback_name(iid, weapon, label, magic)}
+
+
+def _fallback_name(iid: int, weapon: Optional[str], label: str,
+                   magic: bool) -> str:
+    """无 WZ 时的兜底显示名；武器含攻击/魔力与档位，防具用通用名。"""
+    if weapon is None:
+        return f"{label}强化卷轴"
+    kind = "魔力" if magic else "攻击"
+    pct = _TIER_PCT.get(iid % 1000)
+    return f"{label}{kind}卷轴 {pct}" if pct else f"{label}{kind}卷轴"
 
 
 def migrate_scroll_id(item_id: str) -> str:
@@ -75,19 +119,14 @@ def migrate_scroll_id(item_id: str) -> str:
     norm = normalize_scroll_id(item_id)
     if norm in LEGACY_SCROLL_IDS:
         return LEGACY_SCROLL_IDS[norm]
-    if norm in SCROLLS:
+    if is_scroll_id(norm):
         return norm
     return item_id
 
 
-def is_scroll_id(item_id: str) -> bool:
-    """是否为本项目登记的强化卷轴（官方 204xxxx 子集）。"""
-    return normalize_scroll_id(item_id) in SCROLLS
-
-
 def scroll_name(item_id: str) -> Optional[str]:
-    """卷轴兜底显示名（无 WZ String 时用）；非登记卷轴返回 None。"""
-    sc = SCROLLS.get(normalize_scroll_id(item_id))
+    """卷轴兜底显示名（无 WZ String 时用）；非卷轴/未实现栏位返回 None。"""
+    sc = scroll_of(item_id)
     return sc["name"] if sc else None
 
 

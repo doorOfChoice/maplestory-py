@@ -264,6 +264,27 @@ def test_double_click_scroll_charges_meso_and_burns_tuc():
     assert len(player.refresh_calls) == 1
 
 
+# ── 防具卷轴双击：披风体力卷轴作用在披风槽 ──────────────────────────
+def test_double_click_cape_hp_scroll_upgrades_cape():
+    """披风体力卷轴（02041007）双击：命中已穿披风、扣次数、扣卷轴、刷新。"""
+    player = make_player()
+    cape = Item(id="01102000", name="披风", kind="equip",
+                info={"islot": "Sr"}, tuc=5)
+    player.inventory.equipped["cape"] = cape
+    player.inventory.add(Item(id="02041007", name="披风体力卷轴 60%",
+                              count=2, kind="consume", info={"spec": {}}))
+    mgr, inv, equip = build(player)
+    open_pair(mgr, inv, equip)
+    cell = inv._cell_rects[0][0]
+    for _ in range(2):
+        press(mgr, cell.center)
+        release(mgr, cell.center)
+    assert cape.tuc == 4
+    assert player.inventory.consumes["02041007"].count == 1
+    assert len(player.refresh_calls) == 1
+    assert mgr.last_toast() is not None and "强化" in mgr.last_toast()
+
+
 # ── 不可用消耗品：双击不吞物品 ──────────────────────────────────────
 def test_double_click_unusable_consume_not_consumed():
     """双击弹药 / 宠物食品等无恢复效果的消耗品：提示无法使用且不扣数量。"""
