@@ -30,8 +30,9 @@ from game.core.localize import to_simplified
 
 
 # 蜗牛投掷术：v113 TW 的 1000.img 该节点只有图标与名字、数值表为空，
-# 按同系新手技能的量级合成 3 级数值（100%→120%，MP 消耗固定 4）。
-_SNAIL_LEVELS = [{"mpCon": 4, "damage": 100 + 10 * i} for i in range(3)]
+# 按原版合成 3 级固定伤害表（1级10、2级25、3级40，MP 消耗固定 4）；
+# damage 为固定伤害值而非百分比，由 skill_semantics.fixed_damage 识别。
+_SNAIL_LEVELS = [{"mpCon": 4, "damage": v} for v in (10, 25, 40)]
 
 # 魔力恢復(2000000)：v113 的 200.img level 表只有 hs 字符串、无数值字段，
 # 按原版「自然回蓝随等级提升」合成 mp_regen（0.1/s 点数，每级 +2 → 满级 16 级 +3.2/s）。
@@ -125,6 +126,11 @@ class SkillDef:
 def skill_buff_seconds(d: "SkillDef", level: int) -> float:
     """纯 buff 持续秒数（非攻击才 >0）；实现见 core.skill_semantics。"""
     return skill_semantics.skill_buff_seconds(d, level)
+
+
+def fixed_damage(d: "SkillDef", level: int) -> int:
+    """攻击技的固定伤害值（>0 时无视攻击力/怪防/等级差）；实现见 skill_semantics。"""
+    return skill_semantics.fixed_damage(d, level)
 
 
 def cast_form(d: "SkillDef", level: int) -> str:
@@ -493,6 +499,7 @@ class SkillBook:
             "hp_con": d.stat(lv, "hpCon", 0),
             "damage": dmg.mult if dmg is not None
             else d.stat(lv, "damage", 100) / 100.0,
+            "fixed_damage": dmg.fixed if dmg is not None else 0,  # 固定伤害值
             "range": d.stat(lv, "range", 0),          # 0 = 默认普攻范围
             "mob_count": dmg.max_targets if dmg is not None
             else d.stat(lv, "mobCount", 1),

@@ -13,7 +13,7 @@ from typing import List, Optional, Tuple
 import pygame
 
 from game.core.jobs import job_chain, job_sp_group
-from game.systems.skills import skill_buff_seconds
+from game.systems.skills import fixed_damage, skill_buff_seconds
 from game.render.windows.core import widgets
 from game.render.windows.core.services import WindowServices
 from game.render.windows.core.window import DragPickup, Window
@@ -86,6 +86,9 @@ class SkillWindow(Window):
         mad = d.stat(lv, "mad", 0)
         if mad > 0:
             return f"攻击力 {mad}  MP{mp}"
+        fixed = fixed_damage(d, lv)
+        if fixed > 0:
+            return f"固定伤害 {fixed}  MP{mp}"
         return f"{d.stat(lv, 'damage', 100)}%  MP{mp}"
 
     def _skill_tip(self, book, d, lv: int, mouse, row: pygame.Rect) -> None:
@@ -105,6 +108,8 @@ class SkillWindow(Window):
                 lines.append(f"增益持续 {seconds:.0f}s · 消耗 MP{mp}")
             elif d.stat(lv, "mad", 0) > 0:
                 lines.append(f"攻击力 {d.stat(lv, 'mad', 0)} · 消耗 MP{mp}")
+            elif fixed_damage(d, lv) > 0:
+                lines.append(f"固定伤害 {fixed_damage(d, lv)} · 消耗 MP{mp}")
             else:
                 lines.append(f"伤害 {d.stat(lv, 'damage', 100)}% · 消耗 MP{mp}")
             key = self._hotkey_of(book, d.id)

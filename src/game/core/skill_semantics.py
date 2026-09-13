@@ -136,6 +136,15 @@ _PULL_SKILLS = {"1121001", "1221001", "1321001"}
 # 二段跳（空中再跳一次）与冲刺位移（无 range 字段，需专用执行）
 _JUMP_SKILLS = {"4111006", "14101004"}
 _DASH_SKILLS = {"11101005", "21001001"}
+# 固定伤害技能：level.damage 是固定伤害值（非百分比），无视攻击力/怪防/等级差。
+_FIXED_DAMAGE_SKILLS = _SNAIL_IDS
+
+
+def fixed_damage(d, level: int) -> int:
+    """攻击技的固定伤害值（>0 时无视攻击力/怪防/等级差）；非固定伤害技能回 0。"""
+    if d.id not in _FIXED_DAMAGE_SKILLS:
+        return 0
+    return _stat(d, level, "damage", 0)
 
 
 def delivery(d, level: int) -> str:
@@ -383,8 +392,10 @@ def effects(d, level: int) -> Tuple[Effect, ...]:
         drain = 0
         if sid in _DRAIN_SKILLS:
             drain = _stat(d, level, _DRAIN_SKILLS[sid], 0)
+        fixed = fixed_damage(d, level)
         out.append(Damage(
-            mult=1.0 if magic else _stat(d, level, "damage", 100) / 100.0,
+            mult=1.0 if (magic or fixed) else _stat(d, level, "damage", 100) / 100.0,
+            fixed=fixed,
             hits=max(1, _stat(d, level, "attackCount", 1)),
             shots=max(1, _stat(d, level, "bulletCount", 1)),
             max_targets=mob_count,

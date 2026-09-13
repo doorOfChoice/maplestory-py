@@ -79,6 +79,18 @@ def test_melee_hits_when_no_evasion():
     assert all(n.amount > 0 for n in c.numbers)
 
 
+def test_normal_attack_hits_only_nearest_mob():
+    """普攻命中框内有多只怪：只结算最近的一只，不溅射到其余怪。"""
+    c = Combat(_Assets(), rng=random.Random(1))
+    near = _Mob()
+    near.x = 10.0
+    far = _Mob()
+    far.x = 45.0
+    c.player_attack(_Player(), [far, near])
+    assert near.hp_lost > 0
+    assert getattr(far, "hp_lost", 0) == 0
+
+
 def test_arrow_miss_shows_miss_and_deals_no_damage():
     """箭矢接触判定：掷骰超过命中概率 → 怪不掉血、飘 Miss、箭仍被消耗。"""
     from game.systems.combat import Arrow

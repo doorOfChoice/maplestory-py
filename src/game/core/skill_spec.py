@@ -87,6 +87,7 @@ class Debuff:
 class Damage:
     """伤害载荷。"""
     mult: float = 1.0          # damage/100；魔法技为 1.0，实际倍率走 skill_mad
+    fixed: int = 0             # 固定伤害值：>0 时无视攻击力/怪防/等级差，直接造成该值
     hits: int = 1              # attackCount（多段）
     shots: int = 1             # bulletCount（多发）
     max_targets: int = 1       # mobCount

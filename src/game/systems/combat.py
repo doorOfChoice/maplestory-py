@@ -689,9 +689,10 @@ class Combat:
         else:
             targets = [m for m in monsters
                        if not m.dead and rect.colliderect(m.rect())]
-            if skill:
-                targets.sort(key=lambda m: (m.x - cx) ** 2 + (m.cy - cy) ** 2)
-                targets = targets[:max(1, skill["mob_count"])]
+            # 普攻只打最近一只；技能按 WZ mobCount 上限（同为最近优先）。
+            limit = max(1, skill["mob_count"]) if skill else 1
+            targets.sort(key=lambda m: (m.x - cx) ** 2 + (m.cy - cy) ** 2)
+            targets = targets[:limit]
         magic = bool(skill.get("magic")) if skill else False
         element = skill.get("element", "") if skill else ""
         if magic:
@@ -974,6 +975,7 @@ class Combat:
             mult, attack_count = 1.0, 1
             n, mob_count = 1, 1
             magic = False
+            fixed = 0
             atk_lo, atk_hi = player.attack_range()
             frames = self.assets.normal_arrow_frames() if self.assets else []
             hit_frames: List = []
@@ -982,7 +984,10 @@ class Combat:
             mult = skill_data["damage"]
             attack_count = max(1, int(skill_data.get("attack_count", 1)))
             magic = bool(skill_data.get("magic"))
-            if magic:
+            fixed = int(skill_data.get("fixed_damage", 0) or 0)
+            if fixed > 0:
+                atk_lo = atk_hi = None      # 固定伤害：弹道直接造成定值
+            elif magic:
                 atk_lo, atk_hi = player.magic_attack_range(
                     skill_data.get("skill_mad", 0),
                     skill_data.get("skill_mastery", 0))
@@ -1012,7 +1017,8 @@ class Combat:
             self.arrows.append(Arrow(
                 x=ax, y=ay, vx=vx, vy=vy,
                 frames=frames, hit_frames=hit_frames,
-                dmg=atk_hi, mob_count=mob_count, life=life,
+                dmg=fixed if fixed > 0 else atk_hi,
+                mob_count=mob_count, life=life,
                 atk_lo=atk_lo, atk_hi=atk_hi, mult=mult,
                 crit_rate=crit_rate, crit_mult=crit_mult,
                 player_level=player_level, attack_count=attack_count,

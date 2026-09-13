@@ -64,6 +64,16 @@ def test_learn_and_cast_snail_throw():
     assert data["damage"] > 0 and data["mp_con"] > 0
 
 
+def test_snail_throw_levels_are_fixed_damage():
+    """蜗牛投掷术逐级为固定伤害：1级10、2级25、3级40。"""
+    book = SkillBook(None, 0)
+    book.add_sp(100, 3)
+    for expected in (10, 25, 40):
+        assert book.learn(SNAIL, 1) is True
+        data = book.cast(SNAIL, 1)
+        assert data["fixed_damage"] == expected
+
+
 # ── 玩家施放接线 ─────────────────────────────────────────────────────
 def test_player_cast_snail_throw_sets_projectile_pending(monkeypatch):
     p = make_player(monkeypatch)
@@ -143,3 +153,29 @@ def test_plain_skill_projectile_keeps_arrow_speed():
     assert math.isclose(math.hypot(a.vx, a.vy), settings.ARROW_SPEED,
                         rel_tol=1e-6)
     assert a.life == settings.ARROW_LIFETIME
+
+
+class ArmoredMob:
+    """高防高等级的靶怪：固定伤害应无视其 pd / 等级差。"""
+
+    x, cy, sprite_h, level = 120.0, 100.0, 30, 80
+    pd = 500
+    dead = False
+
+    def rect(self) -> pygame.Rect:
+        return pygame.Rect(int(self.x - 15), int(self.cy - 30), 30, 30)
+
+    def take_hit(self, damage: int, from_x=None) -> bool:
+        self.taken = getattr(self, "taken", [])
+        self.taken.append(damage)
+        return False
+
+
+def test_snail_fixed_damage_ignores_defense_and_level():
+    """固定伤害：怪高防高等级时，蜗牛仍造成恰好 10 点。"""
+    combat = Combat(SnailAssets())
+    mob = ArmoredMob()
+    combat.spawn_arrows(ProjectilePlayer(), cast_data(fixed_damage=10))
+    for _ in range(60):
+        combat.update_arrows(1 / 60.0, [mob], player=None)
+    assert mob.taken == [10]
