@@ -76,7 +76,7 @@ def test_arrow_despawns_after_lifetime():
 def test_spawn_arrows_bullet_count():
     """bulletCount=2 → 一次生成 2 支箭。"""
     class FakeAssets:
-        def skill_ball_frames(self, sid):
+        def skill_ball_frames(self, sid, level=1):
             return []
         def skill_hit_frames(self, sid):
             return []
@@ -106,7 +106,7 @@ def test_spawn_arrows_normal_attack():
     sentinel = object()
 
     class FakeAssets:
-        def skill_ball_frames(self, sid):
+        def skill_ball_frames(self, sid, level=1):
             raise AssertionError("普攻不应取技能 ball 贴图")
         def skill_hit_frames(self, sid):
             return []
@@ -159,7 +159,7 @@ class AimP:
 
 def combat_with_balls() -> Combat:
     class FakeAssets:
-        def skill_ball_frames(self, sid):
+        def skill_ball_frames(self, sid, level=1):
             return []
         def skill_hit_frames(self, sid):
             return []

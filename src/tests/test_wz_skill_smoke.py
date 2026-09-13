@@ -15,6 +15,28 @@ needs_wz = pytest.mark.skipif(
 
 
 @needs_wz
+def test_snail_throw_uses_level_colored_shells():
+    """真实 Item.wz：蜗牛投掷术弹道按技能等级取不同颜色的蜗牛壳（1绿/2蓝/3红）。"""
+    pygame.init()
+    pygame.display.set_mode((8, 8))
+    from game.render.assets import Assets
+    assets = Assets(settings.TRAINER_SPAWN_MAP)
+    try:
+        raw = []
+        for level in (1, 2, 3):
+            frames = assets.skill_ball_frames(
+                settings.SNAIL_THROW_SKILL_ID, level)
+            assert frames
+            img = frames[0][0]
+            origin = frames[0][1]
+            assert origin == (img.get_width() // 2, img.get_height() // 2)
+            raw.append(pygame.image.tostring(img, "RGBA"))
+        assert len(set(raw)) == 3          # 三个等级三张不同的壳
+    finally:
+        assets.close()
+
+
+@needs_wz
 def test_bowman_tree_contains_bowman_skills():
     pygame.init()
     pygame.display.set_mode((8, 8))

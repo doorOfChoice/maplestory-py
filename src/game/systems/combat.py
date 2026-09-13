@@ -995,7 +995,8 @@ class Combat:
                 atk_lo, atk_hi = player.attack_range()
             n = max(1, int(skill_data.get("bullet_count", 1)))
             mob_count = max(1, skill_data["mob_count"])
-            frames = self.assets.skill_ball_frames(sid) if self.assets else []
+            frames = (self.assets.skill_ball_frames(
+                sid, int(skill_data.get("level", 1))) if self.assets else [])
             hit_frames = self.assets.skill_hit_frames(sid) if self.assets else []
             speed = skill_data.get("speed", speed)
             life = skill_data.get("life", life)

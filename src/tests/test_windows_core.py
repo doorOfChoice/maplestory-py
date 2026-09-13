@@ -75,6 +75,34 @@ def test_click_brings_window_to_top():
     assert mgr.windows[-1] is low
 
 
+def test_front_button_not_stolen_by_lower_title_bar():
+    """顶层窗口的按钮落在下层窗口标题条上时，仍应由顶层按钮消费。"""
+    low = BoxWindow(make_services(), key="low", at=(10, 10), size=(300, 200))
+    high = BoxWindow(make_services(), key="high", at=(40, 5), size=(120, 80),
+                     chrome=False)
+    low.visible = high.visible = True
+    high.buttons = [(pygame.Rect(40, 10, 60, 40), "high_btn")]
+    mgr = make_manager(low, high)
+    draw_once(mgr)
+    assert press(mgr, (60, 20))
+    assert high.clicked == ["high_btn"]
+
+
+def test_front_button_not_stolen_by_lower_item_pickup():
+    """顶层窗口的按钮压住下层物品格时，不应误触下层拖拽。"""
+    low = BoxWindow(make_services(), key="low", at=(10, 10), size=(300, 200),
+                    chrome=False)
+    high = BoxWindow(make_services(), key="high", at=(40, 5), size=(120, 80),
+                     chrome=False)
+    low.visible = high.visible = True
+    low.drag = (("cell", "consume", 0), _item())
+    high.buttons = [(pygame.Rect(40, 10, 60, 40), "high_btn")]
+    mgr = make_manager(low, high)
+    draw_once(mgr)
+    assert press(mgr, (60, 20))
+    assert high.clicked == ["high_btn"] and mgr.dragging() is False
+
+
 def test_wheel_only_reaches_hit_window():
     a = BoxWindow(make_services(), key="a", at=(10, 10))
     b = BoxWindow(make_services(), key="b", at=(300, 10))

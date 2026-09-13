@@ -238,32 +238,27 @@ class WindowManager:
                 or self._drag_win is not None)
 
     def _left_down(self, pos: Tuple[int, int]) -> bool:
-        # 关闭钮只认「该点最顶窗口自己的」：被遮挡时下层窗 × 不穿透误触
-        top = self._topmost_at(pos)
-        if (top is not None and top.close_rect is not None
-                and top.close_rect.collidepoint(pos)):
+        # 命中点最顶的可交互窗口独占本次点击：关闭钮 / 拖标题 / 拾取 / 普通
+        # 按钮一律只问它。若扫描全部窗口，顶层面板按钮会被下层窗口的标题热区
+        # 或物品格抢占，导致「最前面的面板按钮点不动」。
+        hit = self._topmost_at(pos, interactive_only=True)
+        if hit is None:
+            return False
+        if hit.close_rect is not None and hit.close_rect.collidepoint(pos):
             self.cancel_interactions()
-            self._close_window(top)
+            self._close_window(hit)
             return True
         if self._drag_win is not None or self._pick is not None:
             return True
-        hit = self._topmost_at(pos, interactive_only=True)
-        if hit is not None:
-            self._raise_to_top(hit)
-        for win in reversed(self._stack):
-            if not win.visible:
-                continue
-            if win.title_rect is not None and win.title_rect.collidepoint(pos):
-                self._drag_win = (win, (pos[0] - win.rect.x, pos[1] - win.rect.y))
-                return True
-        for win in reversed(self._stack):
-            if not win.visible:
-                continue
-            pk = win.pickup(pos)
-            if pk is not None:
-                self._pick = _Pick(win=win, pk=pk, start=pos, pos=pos)
-                return True
-        if hit is not None and hit.handle_mouse_down(pos):
+        self._raise_to_top(hit)
+        if hit.title_rect is not None and hit.title_rect.collidepoint(pos):
+            self._drag_win = (hit, (pos[0] - hit.rect.x, pos[1] - hit.rect.y))
+            return True
+        pk = hit.pickup(pos)
+        if pk is not None:
+            self._pick = _Pick(win=hit, pk=pk, start=pos, pos=pos)
+            return True
+        if hit.handle_mouse_down(pos):
             return True
         return False
 

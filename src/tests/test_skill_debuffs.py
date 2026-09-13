@@ -52,7 +52,7 @@ class _Mob:
 
 
 class _Assets:
-    def skill_ball_frames(self, sid):
+    def skill_ball_frames(self, sid, level=1):
         return []
 
     def skill_hit_frames(self, sid):

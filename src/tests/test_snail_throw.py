@@ -95,13 +95,14 @@ def test_newbie_normal_attack_is_not_projectile(monkeypatch):
 # ── 弹道生成 ─────────────────────────────────────────────────────────
 class SnailAssets:
     def __init__(self):
-        marker = pygame.Surface((8, 8))
-        self.ball = [(marker, (4, 4), 100)]
+        self.ball = [(pygame.Surface((8, 8)), (4, 4), 100)]
+        self.requested_levels = []
 
     def snail_frames(self):
         return self.ball
 
-    def skill_ball_frames(self, sid):
+    def skill_ball_frames(self, sid, level=1):
+        self.requested_levels.append(level)
         return self.ball
 
     def skill_hit_frames(self, sid):
@@ -143,6 +144,13 @@ def test_snail_skill_spawns_snail_projectile():
     assert math.isclose(math.hypot(a.vx, a.vy), settings.SNAIL_THROW_SPEED,
                         rel_tol=1e-6)
     assert a.life == settings.SNAIL_THROW_LIFETIME
+
+
+def test_snail_projectile_frames_requested_at_skill_level():
+    """弹道贴图按技能等级取（不同等级 → 不同颜色的蜗牛壳）。"""
+    combat = Combat(SnailAssets())
+    combat.spawn_arrows(ProjectilePlayer(), cast_data(level=3))
+    assert combat.assets.requested_levels == [3]
 
 
 def test_plain_skill_projectile_keeps_arrow_speed():

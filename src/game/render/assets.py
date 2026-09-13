@@ -1216,12 +1216,35 @@ class Assets:
         return self.effect_frames("Skill", resolve_skill_img(skill_id),
                                   f"skill/{skill_id}/hit/0")
 
-    def skill_ball_frames(self, skill_id: str) -> List:
-        """技能弹道贴图（如箭矢 ball/*），[(Surface, origin, delay_ms)]。"""
+    def skill_ball_frames(self, skill_id: str, level: int = 1) -> List:
+        """技能弹道贴图（如箭矢 ball/*），[(Surface, origin, delay_ms)]。
+
+        蜗牛投掷术按技能等级取对应颜色的蜗牛壳图标（壳缺失时退回蜗牛怪贴图）。
+        """
         if skill_id in ("10001000", "0001000", "20001000"):
-            return self.snail_frames()      # WZ 无 ball 节点：借蜗牛怪贴图
+            return self.snail_shell_frames(level) or self.snail_frames()
         return self.effect_frames("Skill", resolve_skill_img(skill_id),
                                   f"skill/{skill_id}/ball")
+
+    def snail_shell_frames(self, level: int) -> List:
+        """蜗牛投掷术弹道：按等级取蜗牛壳图标（1级绿/2级蓝/3级红）。
+
+        WZ 该技能无 ball 节点，原版投掷的是背包里的蜗牛壳物品；物品图标为
+        单帧静态图，包成 [(Surface, 中心原点, 100ms)] 供弹道通用绘制/旋转。
+        """
+        items = settings.SNAIL_THROW_SHELL_ITEMS
+        item_id = items[min(max(level, 1), len(items)) - 1]
+        key = f"snailshell:{item_id}"
+        hit = self._effect_cache.get(key)
+        if hit is not None:
+            return hit
+        result: List = []
+        icon = self.item_icon(item_id)
+        if icon is not None:
+            result = [(icon, (icon.get_width() // 2, icon.get_height() // 2),
+                       100)]
+        self._effect_cache[key] = result
+        return result
 
     def skill_summon_frames(self, skill_id: str, action: str = "stand") -> List:
         """召唤物动作帧（Skill.wz summon/<action>，如 stand/move/attack1/die）。"""
@@ -1270,7 +1293,7 @@ class Assets:
         return layers
 
     def snail_frames(self) -> List:
-        """新手普攻「蜗牛投掷」的弹道贴图：借藍寶（蜗牛怪）的 stand 帧。"""
+        """蜗牛投掷弹道兜底贴图：借藍寶（蜗牛怪）的 stand 帧（壳图标缺失时用）。"""
         key = "snailball"
         hit = self._effect_cache.get(key)
         if hit is not None:

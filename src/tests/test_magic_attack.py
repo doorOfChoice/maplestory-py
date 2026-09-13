@@ -212,7 +212,7 @@ class _CombatAssets:
     def __init__(self):
         self.ball = [(pygame.Surface((8, 8)), (4, 4), 100)]
 
-    def skill_ball_frames(self, sid):
+    def skill_ball_frames(self, sid, level=1):
         return self.ball if sid == "2001004" else []
 
     def skill_hit_frames(self, sid):

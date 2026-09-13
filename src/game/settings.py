@@ -271,7 +271,10 @@ ARROW_AIM_HALF_ANGLE_DEG = 15.0  # 瞄准扇形半顶角：以朝向水平线为
 ARROW_LIFETIME = 0.4             # 箭矢存活秒数（超程消失）
 NORMAL_ARROW_ITEM_ID = "02060000"  # 普攻箭矢贴图来源：金币箭物品的 bullet 节点
 SNAIL_THROW_SKILL_ID = "10001000"  # 蜗牛投掷术（台版 1000.img「嫩寶丟擲術」）
-SNAIL_THROW_MOB_ID = "0100101"     # 弹道贴图来源：藍寶的 stand 帧（WZ 无 ball 节点）
+SNAIL_THROW_MOB_ID = "0100101"     # 弹道贴图兜底：藍寶的 stand 帧（壳图标缺失时用）
+# 弹道贴图：原版按技能等级投掷不同颜色的蜗牛壳（1级绿 / 2级蓝 / 3级红），
+# 取 Item.wz Etc 的物品图标；WZ 无 ball 节点。
+SNAIL_THROW_SHELL_ITEMS = ("4000019", "4000000", "4000016")
 SNAIL_THROW_SPEED = 420.0          # 蜗牛飞行速度（比箭慢得多，符合气质）
 SNAIL_THROW_LIFETIME = 0.55        # 蜗牛存活秒数（投程比箭远一点）
 
