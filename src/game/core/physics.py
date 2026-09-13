@@ -344,8 +344,9 @@ class Physics:
         """行走帧的"脚下是谁"：只认当前链，不做最近面吸附。
 
         1) cur 仍覆盖 x → 就是它（坡面 y_at 插值自然抬/降脚）；
-        2) 已越过端点 → 仅当存在链接续段、且高差在一级台阶内 → 续段
-           （方向 0 时两端链接都可作为落点，避免原地/垂直降落悬空）；
+        2) 已越过端点 → 沿链接续段前进到首个覆盖 x 的段、且高差在一级
+           台阶内 → 该段（中间可跳过比一帧步长还窄的短段；方向 0 时两端
+           链接都可作为落点，避免原地/垂直降落悬空）；
         3) 其余（开放边缘 / 无链接的高差 / 被下跳忽略的层）→ None=坠落。
         """
         if cur is None:
@@ -357,14 +358,20 @@ class Physics:
             return cur
         dirs = [direction] if direction else [1, -1]
         for d in dirs:
-            cont = self.linked_continuation(cur, d > 0)
-            if cont is None or cont.layer in ignore or not cont.covers(x):
-                continue
             edge_x = cur.xmax if d > 0 else cur.xmin
-            dy = cont.y_at(x) - cur.y_at(edge_x)
-            if abs(dy) > settings.PLAYER_STEP_UP:
-                continue  # 高落差不自动走下/上：交给重力+落地检测
-            return cont
+            cont = self.linked_continuation(cur, d > 0)
+            # 中间续段可能比一帧步长还窄（落点整个跳过它），沿链接继续
+            # 前进到首个真正覆盖 x 的段再判高差；否则原地返回 None 会
+            # 误判坠落（真实案例：101010000 底部 4px 窄桥）。
+            for _ in range(8):
+                if cont is None or cont.layer in ignore:
+                    break
+                if cont.covers(x):
+                    dy = cont.y_at(x) - cur.y_at(edge_x)
+                    if abs(dy) <= settings.PLAYER_STEP_UP:
+                        return cont
+                    break  # 高落差不自动走下/上：交给重力+落地检测
+                cont = self.linked_continuation(cont, d > 0)
         return None
 
     # ── 水平阻挡（竖直墙）──────────────────────────────────────────

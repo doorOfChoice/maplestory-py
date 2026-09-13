@@ -79,6 +79,21 @@ def test_open_edge_falls():
     assert p.walk_surface(p.by_id[1], 260.0, 1) is None
 
 
+# ── 窄桥接续段：一帧步长跨过比自身还窄的中间段 ─────────────────────
+# 真实 101010000 底部结构：宽段 #187 → 4px 窄桥 #188 → 略高的宽段 #172。
+# 步速 300px/s、60fps = 5px/帧 > 4px，落点会整个跳过 #188。
+BRIDGE = [fh(187, 0, -1485, 2150, -1461, 2150, prev=186, next=188),
+          fh(188, 0, -1461, 2150, -1457, 2147, prev=187, next=172),
+          fh(172, 0, -1457, 2147, -1404, 2148, prev=188, next=173)]
+
+
+def test_walk_across_narrow_bridge():
+    """落点越过 4px 窄桥时，应沿链接接到桥后的宽段，而非判定坠落。"""
+    p = make(BRIDGE)
+    surf = p.walk_surface(p.by_id[187], -1455.0, 1)
+    assert surf is not None and surf.fid == 172
+
+
 # ── 高落差不自动上步：>STEP_UP 的 riser 仍需跳 ──────────────────────
 def test_tall_riser_not_steppable():
     tall = [fh(1, 0, 0, 500, 100, 500, next=2),
