@@ -1,6 +1,6 @@
-# 枫之谷 v113 · 单机重制
+# 枫之谷 v079 · 单机重制
 
-用 Python + Pygame 复刻 MapleStory v113（台服）：直接读取官方 WZ 资产，重现地图、怪物、NPC、任务、技能与背包。
+用 Python + Pygame 复刻 MapleStory v079（国服）：直接读取官方 WZ 资产，重现地图、怪物、NPC、任务、技能与背包。
 
 > 只`读取` `resources/wz/` 下的官方资产，任何时候都`不写入`、不修改。
 
@@ -42,9 +42,9 @@ Lv10 转职后开启新技能页签，SP 加点、快捷键绑定、被动加成
 
 ## 运行
 
-需要 Python ≥ 3.12、`uv`，以及 v113（台服）WZ 文件（仓库不提供）：
+需要 Python ≥ 3.12、`uv`，以及 v079（国服）WZ 文件（仓库不提供）：
 
-1. 从 [MapleStoryUnity/wzData](https://github.com/MapleStoryUnity/wzData) 下载 TMS **113** 压缩包
+1. 从 [Internet Archive](https://archive.org/download/cms-maplestory) 下载 CMS **79** WZ 压缩包
 2. 把全部 `.wz` 文件放进 `resources/wz/`（`resources/wz/` 目录入库、里头的 WZ 已 gitignore）
 
 ```bash
@@ -72,6 +72,6 @@ uv run python -m game.main   # 启动游戏
 
 ## 声明
 
-个人学习用途的 MapleStory v113 重制示范，不附带任何 WZ 资产。MapleStory 及素材版权归 Nexon / Wizet 所有。
+个人学习用途的 MapleStory v079 重制示范，不附带任何 WZ 资产。MapleStory 及素材版权归 Nexon / Wizet 所有。
 
 架构与开发规范见 [AGENTS.md](AGENTS.md)。

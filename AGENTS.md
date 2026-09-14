@@ -4,7 +4,7 @@
 
 ## 项目概览
 
-MapleStory v113 的 pygame 单机重制。游戏直接读取 `resources/wz/` 下的官方 WZ 资产（只读），由自制的 `wzpy` 函数库解析、解密并渲染成 pygame 画面。
+MapleStory v079 的 pygame 单机重制。游戏直接读取 `resources/wz/` 下的官方 WZ 资产（只读），由自制的 `wzpy` 函数库解析、解密并渲染成 pygame 画面。
 
 - **Python ≥ 3.12**，包管理用 `uv`
 - **src 布局**：所有代码（`game`、`wzpy`、`tests`、`scripts`）都位于 `src/` 下，透过可编辑安装（editable）暴露为顶层包；`src/scripts/` 放独立脚本（如 `capture_screenshots.py`），按路径运行、不打包进发行版
@@ -74,4 +74,4 @@ WZ (.wz) → wzpy: WzFile.open → 解密 → 目录树 → 惰性属性解析
 
 ## 数据与资产 (resources/)
 
-`resources/wz/` 下为 MapleStory v113（台湾版）官方 WZ 封存（Map / Mob / Character / Npc / String / Sound ...），仅供本项目执行时读取，**WZ 文件不得提交 Git**（目录本身以 `.gitkeep` 入库）。资产获取方式见 README「获取 WZ 资产」。改动需新增 WZ 依赖的测试时，不可假设 CI 环境有 WZ 文件，请以合成资料取代。
+`resources/wz/` 下为 MapleStory v079（大陆版）官方 WZ 封存（Map / Mob / Character / Npc / String / Sound ...），仅供本项目执行时读取，**WZ 文件不得提交 Git**（目录本身以 `.gitkeep` 入库）。资产获取方式见 README「获取 WZ 资产」。改动需新增 WZ 依赖的测试时，不可假设 CI 环境有 WZ 文件，请以合成资料取代。

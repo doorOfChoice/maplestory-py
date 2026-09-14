@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""冒险岛 v113 · pygame 单机游戏入口。
+"""冒险岛 v079 · pygame 单机游戏入口。
 
 用法（在项目根目录）：
     uv run python -m game.main

@@ -243,7 +243,7 @@ class Game:
     def _show_welcome(self) -> None:
         """欢迎 / 帮助气泡（H 键可随时重开）。"""
         self.ctx.ui.show_dialog("帮助 (H 可重开)", [
-            "冒险岛 v113 · 弓箭手村东部小山",
+            "冒险岛 v079 · 弓箭手村东部小山",
             "←→ 移动  空格 跳跃(可按住连跳)  ↓+空格 下跳  ↑ 爬绳/梯",
             "A 攻击  Z 拾取  数字键 技能  W/V 快捷药水（红/蓝）",
             "I 道具栏  K 技能栏  B 状态  Q 任务日志  M 小地图  T 任务追踪",
@@ -820,7 +820,7 @@ class Game:
 
     def _set_caption(self, map_id: str) -> None:
         """窗口标题显示当前所在地图 code。"""
-        pygame.display.set_caption(f"Maplestory 113 · {map_id} · pygame")
+        pygame.display.set_caption(f"Maplestory 079 · {map_id} · pygame")
 
     def _show_banner(self) -> None:
         """切图横幅：主标题地图名 + 副标题街道名，随 fade 淡入淡出。"""
